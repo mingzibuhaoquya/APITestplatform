@@ -4,7 +4,7 @@ import time
 from sqlalchemy import select
 
 from ..config import get_settings
-from ..database import Base, SessionLocal, engine
+from ..database import SessionLocal
 from ..models import ExecutionTask
 from .executor import execute_task
 
@@ -33,7 +33,6 @@ def claim_next_task() -> int | None:
 
 def run_worker() -> None:
     settings = get_settings()
-    Base.metadata.create_all(bind=engine)
     logger.info("MySQL task queue worker started")
     while True:
         task_id = claim_next_task()
