@@ -1,6 +1,6 @@
 from datetime import datetime
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import DateTime, Integer, String, Text, func
+from sqlalchemy.orm import Mapped, mapped_column
 from .database import Base
 
 
@@ -28,14 +28,14 @@ class Project(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(128), index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(32), default="active")
-    creator_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"), nullable=True)
+    creator_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
 
 
 class Environment(Base, TimestampMixin):
     __tablename__ = "environment"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    project_id: Mapped[int] = mapped_column(ForeignKey("project.id"), index=True)
+    project_id: Mapped[int] = mapped_column(Integer, index=True)
     name: Mapped[str] = mapped_column(String(128))
     base_url: Mapped[str] = mapped_column(String(512))
     headers_json: Mapped[str] = mapped_column(Text, default="{}")
@@ -46,7 +46,7 @@ class ApiDefinition(Base, TimestampMixin):
     __tablename__ = "api_definition"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    project_id: Mapped[int] = mapped_column(ForeignKey("project.id"), index=True)
+    project_id: Mapped[int] = mapped_column(Integer, index=True)
     module: Mapped[str] = mapped_column(String(128), default="")
     name: Mapped[str] = mapped_column(String(128))
     method: Mapped[str] = mapped_column(String(16))
@@ -61,8 +61,8 @@ class TestCase(Base, TimestampMixin):
     __tablename__ = "test_case"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    project_id: Mapped[int] = mapped_column(ForeignKey("project.id"), index=True)
-    api_id: Mapped[int] = mapped_column(ForeignKey("api_definition.id"), index=True)
+    project_id: Mapped[int] = mapped_column(Integer, index=True)
+    api_id: Mapped[int] = mapped_column(Integer, index=True)
     name: Mapped[str] = mapped_column(String(128))
     request_headers_json: Mapped[str] = mapped_column(Text, default="{}")
     request_query_json: Mapped[str] = mapped_column(Text, default="{}")
@@ -72,14 +72,14 @@ class TestCase(Base, TimestampMixin):
     tags: Mapped[str] = mapped_column(String(255), default="")
     priority: Mapped[str] = mapped_column(String(32), default="P2")
     status: Mapped[str] = mapped_column(String(32), default="active")
-    maintainer_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"), nullable=True)
+    maintainer_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
 
 
 class ScenarioCase(Base, TimestampMixin):
     __tablename__ = "scenario_case"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    project_id: Mapped[int] = mapped_column(ForeignKey("project.id"), index=True)
+    project_id: Mapped[int] = mapped_column(Integer, index=True)
     name: Mapped[str] = mapped_column(String(128))
     steps_json: Mapped[str] = mapped_column(Text, default="[]")
     failure_strategy: Mapped[str] = mapped_column(String(32), default="stop")
@@ -90,7 +90,7 @@ class TestSuite(Base, TimestampMixin):
     __tablename__ = "test_suite"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    project_id: Mapped[int] = mapped_column(ForeignKey("project.id"), index=True)
+    project_id: Mapped[int] = mapped_column(Integer, index=True)
     name: Mapped[str] = mapped_column(String(128))
     items_json: Mapped[str] = mapped_column(Text, default="[]")
     status: Mapped[str] = mapped_column(String(32), default="active")
@@ -100,9 +100,9 @@ class ExecutionTask(Base, TimestampMixin):
     __tablename__ = "execution_task"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    executor_id: Mapped[int] = mapped_column(ForeignKey("user.id"), index=True)
-    project_id: Mapped[int] = mapped_column(ForeignKey("project.id"), index=True)
-    environment_id: Mapped[int] = mapped_column(ForeignKey("environment.id"), index=True)
+    executor_id: Mapped[int] = mapped_column(Integer, index=True)
+    project_id: Mapped[int] = mapped_column(Integer, index=True)
+    environment_id: Mapped[int] = mapped_column(Integer, index=True)
     target_type: Mapped[str] = mapped_column(String(32))
     target_id: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(32), default="queued")
@@ -116,8 +116,8 @@ class ExecutionResult(Base, TimestampMixin):
     __tablename__ = "execution_result"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    task_id: Mapped[int] = mapped_column(ForeignKey("execution_task.id"), index=True)
-    case_id: Mapped[int | None] = mapped_column(ForeignKey("test_case.id"), nullable=True)
+    task_id: Mapped[int] = mapped_column(Integer, index=True)
+    case_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(32))
     request_snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
     response_snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
@@ -130,10 +130,9 @@ class OperationLog(Base, TimestampMixin):
     __tablename__ = "operation_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    operator_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"), nullable=True)
+    operator_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     module: Mapped[str] = mapped_column(String(64))
     action: Mapped[str] = mapped_column(String(64))
     content: Mapped[str] = mapped_column(Text, default="")
     result: Mapped[str] = mapped_column(String(32), default="success")
     ip: Mapped[str] = mapped_column(String(64), default="")
-
