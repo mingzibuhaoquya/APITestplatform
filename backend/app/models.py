@@ -1,0 +1,139 @@
+from datetime import datetime
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from .database import Base
+
+
+class TimestampMixin:
+    create_date: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    update_date: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class User(Base, TimestampMixin):
+    __tablename__ = "user"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    real_name: Mapped[str] = mapped_column(String(64), default="")
+    role: Mapped[str] = mapped_column(String(32), default="tester")
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    last_login_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class Project(Base, TimestampMixin):
+    __tablename__ = "project"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    creator_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"), nullable=True)
+
+
+class Environment(Base, TimestampMixin):
+    __tablename__ = "environment"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id"), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    base_url: Mapped[str] = mapped_column(String(512))
+    headers_json: Mapped[str] = mapped_column(Text, default="{}")
+    variables_json: Mapped[str] = mapped_column(Text, default="{}")
+
+
+class ApiDefinition(Base, TimestampMixin):
+    __tablename__ = "api_definition"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id"), index=True)
+    module: Mapped[str] = mapped_column(String(128), default="")
+    name: Mapped[str] = mapped_column(String(128))
+    method: Mapped[str] = mapped_column(String(16))
+    path: Mapped[str] = mapped_column(String(512))
+    headers_json: Mapped[str] = mapped_column(Text, default="{}")
+    query_json: Mapped[str] = mapped_column(Text, default="{}")
+    body_json: Mapped[str] = mapped_column(Text, default="{}")
+    description: Mapped[str] = mapped_column(Text, default="")
+
+
+class TestCase(Base, TimestampMixin):
+    __tablename__ = "test_case"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id"), index=True)
+    api_id: Mapped[int] = mapped_column(ForeignKey("api_definition.id"), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    request_headers_json: Mapped[str] = mapped_column(Text, default="{}")
+    request_query_json: Mapped[str] = mapped_column(Text, default="{}")
+    request_body_json: Mapped[str] = mapped_column(Text, default="{}")
+    assertions_json: Mapped[str] = mapped_column(Text, default="[]")
+    extractors_json: Mapped[str] = mapped_column(Text, default="[]")
+    tags: Mapped[str] = mapped_column(String(255), default="")
+    priority: Mapped[str] = mapped_column(String(32), default="P2")
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    maintainer_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"), nullable=True)
+
+
+class ScenarioCase(Base, TimestampMixin):
+    __tablename__ = "scenario_case"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id"), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    steps_json: Mapped[str] = mapped_column(Text, default="[]")
+    failure_strategy: Mapped[str] = mapped_column(String(32), default="stop")
+    status: Mapped[str] = mapped_column(String(32), default="active")
+
+
+class TestSuite(Base, TimestampMixin):
+    __tablename__ = "test_suite"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id"), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    items_json: Mapped[str] = mapped_column(Text, default="[]")
+    status: Mapped[str] = mapped_column(String(32), default="active")
+
+
+class ExecutionTask(Base, TimestampMixin):
+    __tablename__ = "execution_task"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    executor_id: Mapped[int] = mapped_column(ForeignKey("user.id"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id"), index=True)
+    environment_id: Mapped[int] = mapped_column(ForeignKey("environment.id"), index=True)
+    target_type: Mapped[str] = mapped_column(String(32))
+    target_id: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(32), default="queued")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    summary_json: Mapped[str] = mapped_column(Text, default="{}")
+    report_html: Mapped[str] = mapped_column(Text, default="")
+
+
+class ExecutionResult(Base, TimestampMixin):
+    __tablename__ = "execution_result"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("execution_task.id"), index=True)
+    case_id: Mapped[int | None] = mapped_column(ForeignKey("test_case.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(32))
+    request_snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
+    response_snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
+    assertion_results_json: Mapped[str] = mapped_column(Text, default="[]")
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[str] = mapped_column(Text, default="")
+
+
+class OperationLog(Base, TimestampMixin):
+    __tablename__ = "operation_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    operator_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"), nullable=True)
+    module: Mapped[str] = mapped_column(String(64))
+    action: Mapped[str] = mapped_column(String(64))
+    content: Mapped[str] = mapped_column(Text, default="")
+    result: Mapped[str] = mapped_column(String(32), default="success")
+    ip: Mapped[str] = mapped_column(String(64), default="")
+

@@ -1,0 +1,160 @@
+import time
+from datetime import datetime
+from urllib.parse import urljoin
+import httpx
+from sqlalchemy.orm import Session
+from ..config import get_settings
+from ..models import ApiDefinition, Environment, ExecutionResult, ExecutionTask, ScenarioCase, TestCase
+from ..utils import dump_json, parse_json
+from .assertions import all_passed, run_assertions
+from .jsonpath import find_jsonpath
+from .report import build_html_report
+from .variables import render_variables, response_json_or_text
+
+
+class ResultView:
+    def __init__(self, row: ExecutionResult):
+        self.case_id = row.case_id
+        self.status = row.status
+        self.duration_ms = row.duration_ms
+        self.request_snapshot = parse_json(row.request_snapshot_json, {})
+        self.response_snapshot = parse_json(row.response_snapshot_json, {})
+        self.assertion_results = parse_json(row.assertion_results_json, [])
+
+
+def execute_task(task_id: int) -> None:
+    from ..database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        task = db.get(ExecutionTask, task_id)
+        if not task:
+            return
+        task.status = "running"
+        task.started_at = datetime.now()
+        db.commit()
+        rows = _execute(db, task)
+        passed = sum(1 for row in rows if row.status == "passed")
+        failed = len(rows) - passed
+        task.status = "passed" if failed == 0 else "failed"
+        task.ended_at = datetime.now()
+        task.summary_json = dump_json({"total": len(rows), "passed": passed, "failed": failed})
+        task.report_html = build_html_report(task, [ResultView(row) for row in rows])
+        db.commit()
+    except Exception as exc:
+        task = db.get(ExecutionTask, task_id)
+        if task:
+            task.status = "error"
+            task.ended_at = datetime.now()
+            task.summary_json = dump_json({"error": str(exc)})
+            db.commit()
+    finally:
+        db.close()
+
+
+def _execute(db: Session, task: ExecutionTask) -> list[ExecutionResult]:
+    if task.target_type == "case":
+        case_ids = [task.target_id]
+    else:
+        scenario = db.get(ScenarioCase, task.target_id)
+        case_ids = parse_json(scenario.steps_json if scenario else "[]", [])
+    variables = _initial_variables(db, task.environment_id)
+    rows: list[ExecutionResult] = []
+    for case_id in case_ids:
+        row = _execute_case(db, task, int(case_id), variables)
+        rows.append(row)
+        if row.status != "passed" and task.target_type == "scenario":
+            scenario = db.get(ScenarioCase, task.target_id)
+            if scenario and scenario.failure_strategy == "stop":
+                break
+    return rows
+
+
+def _initial_variables(db: Session, environment_id: int) -> dict:
+    env = db.get(Environment, environment_id)
+    return parse_json(env.variables_json if env else "{}", {})
+
+
+def _execute_case(db: Session, task: ExecutionTask, case_id: int, variables: dict) -> ExecutionResult:
+    case = db.get(TestCase, case_id)
+    env = db.get(Environment, task.environment_id)
+    api = db.get(ApiDefinition, case.api_id) if case else None
+    if not case or not api or not env:
+        return _save_result(db, task.id, case_id, "error", {}, {}, [], 0, "用例、接口或环境不存在")
+
+    env_headers = parse_json(env.headers_json, {})
+    headers = {**env_headers, **parse_json(api.headers_json, {}), **parse_json(case.request_headers_json, {})}
+    query = {**parse_json(api.query_json, {}), **parse_json(case.request_query_json, {})}
+    body = parse_json(case.request_body_json, {})
+    url = urljoin(env.base_url.rstrip("/") + "/", api.path.lstrip("/"))
+    request_snapshot = {
+        "method": api.method,
+        "url": render_variables(url, variables),
+        "headers": render_variables(headers, variables),
+        "query": render_variables(query, variables),
+        "body": render_variables(body, variables),
+    }
+
+    started = time.perf_counter()
+    try:
+        with httpx.Client(timeout=30) as client:
+            response = client.request(
+                request_snapshot["method"],
+                request_snapshot["url"],
+                headers=request_snapshot["headers"],
+                params=request_snapshot["query"],
+                json=request_snapshot["body"] if request_snapshot["body"] not in ({}, "", None) else None,
+            )
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        text = response.text[: get_settings().response_body_limit]
+        parsed = response_json_or_text(text)
+        response_snapshot = {
+            "status_code": response.status_code,
+            "headers": dict(response.headers),
+            "text": text,
+            "json": parsed if not isinstance(parsed, str) else None,
+            "duration_ms": duration_ms,
+        }
+        assertion_results = run_assertions(response_snapshot, parse_json(case.assertions_json, []))
+        _extract_variables(variables, response_snapshot, parse_json(case.extractors_json, []))
+        status = "passed" if all_passed(assertion_results) else "failed"
+        return _save_result(db, task.id, case_id, status, request_snapshot, response_snapshot, assertion_results, duration_ms, "")
+    except Exception as exc:
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        return _save_result(db, task.id, case_id, "error", request_snapshot, {}, [], duration_ms, str(exc))
+
+
+def _extract_variables(variables: dict, response_snapshot: dict, extractors: list[dict]) -> None:
+    body = response_snapshot.get("json") or response_snapshot.get("text")
+    for item in extractors:
+        values = find_jsonpath(body, item.get("path", ""))
+        if values:
+            variables[item["name"]] = values[0]
+
+
+def _save_result(
+    db: Session,
+    task_id: int,
+    case_id: int | None,
+    status: str,
+    request_snapshot: dict,
+    response_snapshot: dict,
+    assertion_results: list[dict],
+    duration_ms: int,
+    error_message: str,
+) -> ExecutionResult:
+    row = ExecutionResult(
+        task_id=task_id,
+        case_id=case_id,
+        status=status,
+        request_snapshot_json=dump_json(request_snapshot),
+        response_snapshot_json=dump_json(response_snapshot),
+        assertion_results_json=dump_json(assertion_results),
+        duration_ms=duration_ms,
+        error_message=error_message,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
