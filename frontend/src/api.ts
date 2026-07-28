@@ -16,6 +16,5 @@ export type User = {
   username: string
   real_name: string
   role: 'admin' | 'tester'
-  status: string
+  status: 'active' | 'disabled'
 }
-

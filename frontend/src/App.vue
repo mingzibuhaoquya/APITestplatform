@@ -13,21 +13,36 @@
   <el-container v-else class="shell">
     <el-aside width="220px">
       <div class="brand">接口测试平台</div>
-      <el-menu :default-active="active" @select="active = $event">
-        <el-menu-item index="dashboard">平台管理</el-menu-item>
-        <el-menu-item index="accounts" v-if="me.role === 'admin'">账号管理</el-menu-item>
+      <el-menu :default-active="active" @select="selectMenu">
+        <el-menu-item index="dashboard">数据概览</el-menu-item>
         <el-menu-item index="projects">项目环境</el-menu-item>
         <el-menu-item index="apis">接口管理</el-menu-item>
         <el-menu-item index="cases">用例管理</el-menu-item>
         <el-menu-item index="execute">执行中心</el-menu-item>
         <el-menu-item index="reports">报告中心</el-menu-item>
         <el-menu-item index="logs">日志中心</el-menu-item>
+        <el-sub-menu index="system">
+          <template #title>系统管理</template>
+          <el-menu-item index="accounts">用户管理</el-menu-item>
+        </el-sub-menu>
       </el-menu>
     </el-aside>
     <el-container>
       <el-header>
-        <span>{{ me.real_name || me.username }} · {{ me.role === 'admin' ? '管理员' : '测试人员' }}</span>
-        <el-button @click="logout">退出</el-button>
+        <div class="header-spacer"></div>
+        <el-dropdown trigger="click" @command="handleUserCommand">
+          <button class="user-menu-trigger">
+            <el-avatar :size="32">{{ avatarText }}</el-avatar>
+            <span>{{ me.username }}</span>
+            <span class="user-menu-arrow">▾</span>
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="changePassword">修改密码</el-dropdown-item>
+              <el-dropdown-item command="logout">退出登录</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </el-header>
       <el-main>
         <section v-if="active === 'dashboard'" class="grid">
@@ -37,14 +52,87 @@
           <el-card><h3>执行任务</h3><strong>{{ executions.length }}</strong></el-card>
         </section>
 
-        <section v-if="active === 'accounts' && me.role === 'admin'">
-          <div class="toolbar"><h2>账号管理</h2><el-button type="primary" @click="createUser">创建测试人员</el-button></div>
-          <el-form class="inline-form" :model="userForm">
-            <el-input v-model="userForm.username" placeholder="用户名" />
-            <el-input v-model="userForm.real_name" placeholder="真实姓名" />
-            <el-input v-model="userForm.password" placeholder="初始密码" type="password" />
+        <section v-if="active === 'accounts'">
+          <div class="toolbar"><h2>用户管理</h2><el-button v-if="me.role === 'admin'" type="primary" @click="openCreateUserDialog">创建测试人员</el-button></div>
+          <el-form class="search-form" label-position="top">
+            <el-form-item label="用户名">
+              <el-input v-model="userSearch.username" placeholder="请输入用户名" clearable @keyup.enter="searchUsers" />
+            </el-form-item>
+            <el-form-item label="状态">
+              <el-select v-model="userSearch.status" placeholder="请选择状态" clearable>
+                <el-option label="启用" value="active" />
+                <el-option label="禁用" value="disabled" />
+              </el-select>
+            </el-form-item>
+            <div class="search-actions">
+              <el-button type="primary" @click="searchUsers">搜索</el-button>
+              <el-button @click="resetUserSearch">重置</el-button>
+            </div>
           </el-form>
-          <el-table :data="users"><el-table-column prop="username" label="用户名" /><el-table-column prop="real_name" label="姓名" /><el-table-column prop="role" label="角色" /><el-table-column prop="status" label="状态" /></el-table>
+          <el-table :data="users">
+            <el-table-column prop="username" label="用户名" />
+            <el-table-column prop="real_name" label="姓名" />
+            <el-table-column prop="role" label="角色" />
+            <el-table-column label="状态">
+              <template #default="{ row }">
+                <el-tag :type="row.status === 'active' ? 'success' : 'warning'" effect="dark">
+                  {{ statusText(row.status) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="180" fixed="right">
+              <template #default="{ row }">
+                <el-button size="small" @click="openEditUserDialog(row)">编辑</el-button>
+                <el-button
+                  size="small"
+                  :type="row.status === 'active' ? 'warning' : 'success'"
+                  @click="toggleUserStatus(row)"
+                >
+                  {{ row.status === 'active' ? '禁用' : '启用' }}
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div class="pagination">
+            <el-pagination
+              background
+              layout="total, prev, pager, next"
+              :current-page="userPagination.page"
+              :page-size="userPagination.pageSize"
+              :total="userPagination.total"
+              @current-change="changeUserPage"
+            />
+          </div>
+
+          <el-dialog v-model="createUserDialogVisible" title="创建账号" width="420px" @closed="resetUserForm">
+            <el-form label-position="top" @submit.prevent="createUser">
+              <el-form-item label="用户名">
+                <el-input v-model="userForm.username" placeholder="请输入用户名" />
+              </el-form-item>
+              <el-form-item label="姓名">
+                <el-input v-model="userForm.real_name" placeholder="请输入姓名" />
+              </el-form-item>
+            </el-form>
+            <template #footer>
+              <el-button @click="cancelCreateUser">取消</el-button>
+              <el-button type="primary" @click="createUser">确认</el-button>
+            </template>
+          </el-dialog>
+
+          <el-dialog v-model="editUserDialogVisible" title="编辑账号" width="420px" @closed="resetEditUserForm">
+            <el-form label-position="top" @submit.prevent="updateUser">
+              <el-form-item label="用户名">
+                <el-input v-model="editUserForm.username" placeholder="请输入用户名" />
+              </el-form-item>
+              <el-form-item label="姓名">
+                <el-input v-model="editUserForm.real_name" placeholder="请输入姓名" />
+              </el-form-item>
+            </el-form>
+            <template #footer>
+              <el-button @click="cancelEditUser">取消</el-button>
+              <el-button type="primary" @click="updateUser">确认</el-button>
+            </template>
+          </el-dialog>
         </section>
 
         <section v-if="active === 'projects'">
@@ -99,17 +187,47 @@
           <h2>日志中心</h2>
           <el-table :data="logs"><el-table-column prop="module" label="模块" /><el-table-column prop="action" label="操作" /><el-table-column prop="result" label="结果" /><el-table-column prop="create_date" label="时间" /></el-table>
         </section>
+
+        <el-dialog v-model="changePasswordDialogVisible" title="修改密码" width="420px" @closed="resetChangePasswordForm">
+          <el-form label-position="top" @submit.prevent="changePassword">
+            <el-form-item label="原密码">
+              <el-input v-model="changePasswordForm.old_password" type="password" show-password placeholder="请输入原密码" />
+            </el-form-item>
+            <el-form-item label="新密码">
+              <el-input
+                v-model="changePasswordForm.new_password"
+                type="password"
+                show-password
+                placeholder="请输入新密码"
+                @blur="validatePasswordMatch"
+              />
+            </el-form-item>
+            <el-form-item label="确认密码">
+              <el-input
+                v-model="changePasswordForm.confirm_password"
+                type="password"
+                show-password
+                placeholder="请再次输入新密码"
+                @blur="validatePasswordMatch"
+              />
+            </el-form-item>
+          </el-form>
+          <template #footer>
+            <el-button @click="cancelChangePassword">取消</el-button>
+            <el-button type="primary" @click="changePassword">确认</el-button>
+          </template>
+        </el-dialog>
       </el-main>
     </el-container>
   </el-container>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api, type User } from './api'
 
-const active = ref('dashboard')
+const active = ref(localStorage.getItem('active_menu') || 'dashboard')
 const me = ref<User | null>(null)
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 const users = ref<any[]>([])
@@ -121,13 +239,21 @@ const executions = ref<any[]>([])
 const logs = ref<any[]>([])
 const selectedProject = ref<any>(null)
 
-const loginForm = reactive({ username: 'admin', password: 'admin123' })
-const userForm = reactive({ username: '', real_name: '', password: '123456', role: 'tester' })
+const loginForm = reactive({ username: '', password: '' })
+const userSearch = reactive({ username: '', status: '' })
+const userPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const createUserDialogVisible = ref(false)
+const editUserDialogVisible = ref(false)
+const changePasswordDialogVisible = ref(false)
+const userForm = reactive({ username: '', real_name: '' })
+const editUserForm = reactive({ id: undefined as number | undefined, username: '', real_name: '' })
+const changePasswordForm = reactive({ old_password: '', new_password: '', confirm_password: '' })
 const projectForm = reactive({ name: '', description: '' })
 const envForm = reactive({ project_id: undefined as number | undefined, name: 'test', base_url: '' })
 const apiForm = reactive({ project_id: undefined as number | undefined, module: '', name: '', method: 'GET', path: '', headersText: '{}', queryText: '{}', bodyText: '{}' })
 const caseForm = reactive({ project_id: undefined as number | undefined, api_id: undefined as number | undefined, name: '', priority: 'P2', assertionsText: '[{"type":"status_code","expected":200}]', extractorsText: '[]' })
 const execForm = reactive({ project_id: undefined as number | undefined, environment_id: undefined as number | undefined, target_id: undefined as number | undefined })
+const avatarText = computed(() => me.value?.username.slice(0, 1).toUpperCase() || 'U')
 
 function parseJson(text: string, fallback: any) {
   try { return JSON.parse(text || '') } catch { return fallback }
@@ -142,27 +268,223 @@ async function loadAll() {
     api.get('/executions').then(r => executions.value = r.data),
     api.get('/logs').then(r => logs.value = r.data)
   ]
-  if (me.value?.role === 'admin') calls.push(api.get('/users').then(r => users.value = r.data))
+  calls.push(loadUsers())
   await Promise.allSettled(calls)
 }
 
+async function loadUsers() {
+  const username = userSearch.username.trim()
+  const status = userSearch.status
+  const { data } = await api.get('/users', {
+    params: {
+      ...(username ? { username } : {}),
+      ...(status ? { status } : {}),
+      page: userPagination.page,
+      page_size: userPagination.pageSize
+    }
+  })
+  users.value = data.items
+  userPagination.total = data.total
+  userPagination.page = data.page
+  userPagination.pageSize = data.page_size
+}
+
+async function searchUsers() {
+  userPagination.page = 1
+  await loadUsers()
+}
+
+async function resetUserSearch() {
+  userSearch.username = ''
+  userSearch.status = ''
+  userPagination.page = 1
+  await loadUsers()
+}
+
+async function changeUserPage(page: number) {
+  userPagination.page = page
+  await loadUsers()
+}
+
 async function login() {
-  const { data } = await api.post('/auth/login', loginForm)
-  localStorage.setItem('session_token', data.token)
-  me.value = data.user
-  await loadAll()
+  try {
+    const { data } = await api.post('/auth/login', loginForm)
+    localStorage.setItem('session_token', data.token)
+    me.value = data.user
+    await loadAll()
+  } catch {
+    ElMessage.error('用户名或密码错误')
+  }
 }
 
 async function logout() {
   await api.post('/auth/logout')
   localStorage.removeItem('session_token')
+  localStorage.removeItem('active_menu')
+  active.value = 'dashboard'
   me.value = null
 }
 
+function selectMenu(index: string) {
+  active.value = index
+  localStorage.setItem('active_menu', index)
+}
+
+async function handleUserCommand(command: string) {
+  if (command === 'logout') {
+    await logout()
+  } else if (command === 'changePassword') {
+    changePasswordDialogVisible.value = true
+  }
+}
+
+function resetChangePasswordForm() {
+  changePasswordForm.old_password = ''
+  changePasswordForm.new_password = ''
+  changePasswordForm.confirm_password = ''
+}
+
+function cancelChangePassword() {
+  changePasswordDialogVisible.value = false
+  resetChangePasswordForm()
+}
+
+function passwordsMismatch() {
+  return Boolean(
+    changePasswordForm.new_password &&
+    changePasswordForm.confirm_password &&
+    changePasswordForm.new_password !== changePasswordForm.confirm_password
+  )
+}
+
+function validatePasswordMatch() {
+  if (passwordsMismatch()) {
+    ElMessage.warning('两次输入的新密码不一致')
+    return false
+  }
+  return true
+}
+
+async function changePassword() {
+  if (!changePasswordForm.old_password) {
+    ElMessage.warning('请输入原密码')
+    return
+  }
+  if (!changePasswordForm.new_password) {
+    ElMessage.warning('请输入新密码')
+    return
+  }
+  if (changePasswordForm.new_password.length < 6) {
+    ElMessage.warning('新密码至少6位')
+    return
+  }
+  if (!changePasswordForm.confirm_password) {
+    ElMessage.warning('请再次输入新密码')
+    return
+  }
+  if (passwordsMismatch()) {
+    ElMessage.warning('两次输入的新密码不一致')
+    return
+  }
+  if (changePasswordForm.old_password === changePasswordForm.new_password) {
+    ElMessage.warning('新密码不能与原密码一致')
+    return
+  }
+  try {
+    await api.post('/auth/change-password', {
+      old_password: changePasswordForm.old_password,
+      new_password: changePasswordForm.new_password
+    })
+    changePasswordDialogVisible.value = false
+    resetChangePasswordForm()
+    ElMessage.success('密码修改成功')
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || '原密码错误')
+  }
+}
+
+function resetUserForm() {
+  userForm.username = ''
+  userForm.real_name = ''
+}
+
+function openCreateUserDialog() {
+  createUserDialogVisible.value = true
+}
+
+function cancelCreateUser() {
+  createUserDialogVisible.value = false
+  resetUserForm()
+}
+
+function resetEditUserForm() {
+  editUserForm.id = undefined
+  editUserForm.username = ''
+  editUserForm.real_name = ''
+}
+
+function openEditUserDialog(user: any) {
+  editUserForm.id = user.id
+  editUserForm.username = user.username
+  editUserForm.real_name = user.real_name
+  editUserDialogVisible.value = true
+}
+
+function cancelEditUser() {
+  editUserDialogVisible.value = false
+  resetEditUserForm()
+}
+
+function statusText(status: string) {
+  return status === 'active' ? '启用' : '禁用'
+}
+
 async function createUser() {
-  await api.post('/users', userForm)
-  ElMessage.success('账号已创建')
-  await loadAll()
+  const username = userForm.username.trim()
+  const realName = userForm.real_name.trim()
+  if (!username) {
+    ElMessage.warning('请输入用户名')
+    return
+  }
+  if (!realName) {
+    ElMessage.warning('请输入姓名')
+    return
+  }
+  await api.post('/users', {
+    username,
+    password: '123456',
+    real_name: realName,
+    role: 'tester'
+  })
+  createUserDialogVisible.value = false
+  resetUserForm()
+  ElMessage.success('用户已创建')
+  await loadUsers()
+}
+
+async function updateUser() {
+  const username = editUserForm.username.trim()
+  const realName = editUserForm.real_name.trim()
+  if (!username) {
+    ElMessage.warning('请输入用户名')
+    return
+  }
+  if (!realName) {
+    ElMessage.warning('请输入姓名')
+    return
+  }
+  await api.put(`/users/${editUserForm.id}`, { username, real_name: realName })
+  editUserDialogVisible.value = false
+  resetEditUserForm()
+  ElMessage.success('用户已更新')
+  await loadUsers()
+}
+
+async function toggleUserStatus(user: any) {
+  const nextStatus = user.status === 'active' ? 'disabled' : 'active'
+  await api.patch(`/users/${user.id}/status`, { status: nextStatus })
+  ElMessage.success(nextStatus === 'active' ? '用户已启用' : '用户已禁用')
+  await loadUsers()
 }
 
 async function createProject() {

@@ -47,13 +47,19 @@ body {
   background: transparent;
 }
 
-.el-aside .el-menu-item {
+.el-aside .el-menu-item,
+.el-aside .el-sub-menu__title {
   color: #d1d5db;
 }
 
 .el-aside .el-menu-item.is-active,
-.el-aside .el-menu-item:hover {
+.el-aside .el-menu-item:hover,
+.el-aside .el-sub-menu__title:hover {
   background: #1f2937;
+  color: #fff;
+}
+
+.el-aside .el-sub-menu.is-active > .el-sub-menu__title {
   color: #fff;
 }
 
@@ -63,6 +69,32 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.header-spacer {
+  flex: 1;
+}
+
+.user-menu-trigger {
+  border: 0;
+  background: transparent;
+  color: #1f2937;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  padding: 0;
+}
+
+.user-menu-trigger:hover {
+  color: #2563eb;
+}
+
+.user-menu-arrow {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1;
 }
 
 .el-main {
@@ -102,6 +134,30 @@ body {
   margin-bottom: 16px;
 }
 
+.search-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) minmax(140px, 180px) auto;
+  gap: 12px;
+  align-items: end;
+  justify-content: start;
+  margin-bottom: 16px;
+}
+
+.search-form .el-form-item {
+  margin-bottom: 0;
+}
+
+.search-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(180px, 1fr));
@@ -116,6 +172,7 @@ body {
 @media (max-width: 900px) {
   .grid,
   .inline-form,
+  .search-form,
   .form-grid {
     grid-template-columns: 1fr;
   }
@@ -124,4 +181,3 @@ body {
     grid-column: auto;
   }
 }
-

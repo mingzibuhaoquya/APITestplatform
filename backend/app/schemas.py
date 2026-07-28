@@ -11,11 +11,25 @@ class LoginIn(BaseModel):
     password: str
 
 
+class ChangePasswordIn(BaseModel):
+    old_password: str
+    new_password: str = Field(min_length=6)
+
+
 class UserCreate(BaseModel):
     username: str
     password: str = Field(min_length=6)
     real_name: str = ""
     role: Role = "tester"
+
+
+class UserUpdate(BaseModel):
+    username: str
+    real_name: str
+
+
+class UserStatusUpdate(BaseModel):
+    status: Literal["active", "disabled"]
 
 
 class UserOut(BaseModel):
@@ -26,6 +40,13 @@ class UserOut(BaseModel):
     status: str
     create_date: str | None
     update_date: str | None
+
+
+class UserListOut(BaseModel):
+    items: list[UserOut]
+    total: int
+    page: int
+    page_size: int
 
 
 class ProjectIn(BaseModel):
@@ -93,4 +114,3 @@ class ExecutionCreate(BaseModel):
     environment_id: int
     target_type: Literal["case", "scenario"]
     target_id: int
-
