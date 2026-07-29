@@ -1,52 +1,81 @@
+x-backend-env: &backend-env
+  DATABASE_URL: mysql+pymysql://${MYSQL_USER:-api_test}:${MYSQL_PASSWORD:-api_test}@mysql:3306/${MYSQL_DATABASE:-api_test_platform}?charset=utf8mb4
+  APP_SECRET: ${APP_SECRET:-change-me-in-production}
+  ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+
 services:
   mysql:
     image: mysql:8.4
+    restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: api_test_platform
-      MYSQL_USER: api_test
-      MYSQL_PASSWORD: api_test
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-api_test_platform}
+      MYSQL_USER: ${MYSQL_USER:-api_test}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-api_test}
+      TZ: ${TZ:-Asia/Shanghai}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
     ports:
-      - "3306:3306"
+      - "${MYSQL_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 30s
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+    restart: unless-stopped
     environment:
-      DATABASE_URL: mysql+pymysql://api_test:api_test@mysql:3306/api_test_platform?charset=utf8mb4
-      APP_SECRET: change-me-in-production
-      ADMIN_USERNAME: admin
-      ADMIN_PASSWORD: admin123
+      <<: *backend-env
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./backend/logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  worker:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    command: python -m app.services.task_queue_worker
+    environment:
+      <<: *backend-env
     depends_on:
       mysql:
         condition: service_healthy
     volumes:
       - ./backend/logs:/app/logs
 
-  worker:
-    build: ./backend
-    command: python -m app.services.task_queue_worker
-    environment:
-      DATABASE_URL: mysql+pymysql://api_test:api_test@mysql:3306/api_test_platform?charset=utf8mb4
-      APP_SECRET: change-me-in-production
-    depends_on:
-      mysql:
-        condition: service_healthy
-
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+    restart: unless-stopped
     ports:
-      - "5173:80"
+      - "${FRONTEND_PORT:-5173}:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   mysql_data:

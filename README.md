@@ -26,6 +26,14 @@ docker compose up --build
 - 用户名：`admin`
 - 密码：`admin123`
 
+常用 Docker 环境变量可通过命令行或 `.env` 覆盖：
+
+- `FRONTEND_PORT`：前端端口，默认 `5173`
+- `BACKEND_PORT`：后端端口，默认 `8000`
+- `MYSQL_PORT`：MySQL 端口，默认 `3306`
+- `MYSQL_ROOT_PASSWORD`、`MYSQL_DATABASE`、`MYSQL_USER`、`MYSQL_PASSWORD`
+- `APP_SECRET`、`ADMIN_USERNAME`、`ADMIN_PASSWORD`
+
 ## 权限模型
 
 - 测试人员：项目配置、平台管理、接口管理、用例管理、执行中心、报告查看、日志查看。

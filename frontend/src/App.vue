@@ -1,7 +1,13 @@
 <template>
   <div v-if="!me" class="login-page">
     <el-card class="login-card">
-      <h1>接口自动化测试平台</h1>
+      <div class="login-brand">
+        <span class="brand-mark">API</span>
+        <div>
+          <h1>接口自动化测试平台</h1>
+          <p>统一管理接口、用例、执行任务与测试报告</p>
+        </div>
+      </div>
       <el-form label-position="top" @submit.prevent="login">
         <el-form-item label="用户名"><el-input v-model="loginForm.username" /></el-form-item>
         <el-form-item label="密码"><el-input v-model="loginForm.password" type="password" show-password /></el-form-item>
@@ -12,7 +18,10 @@
 
   <el-container v-else class="shell">
     <el-aside width="220px">
-      <div class="brand">接口测试平台</div>
+      <div class="brand">
+        <img class="brand-logo" src="/company-logo.png" alt="NETSOL" />
+        <span class="brand-title">接口测试平台</span>
+      </div>
       <el-menu :default-active="active" @select="selectMenu">
         <el-menu-item index="dashboard">数据概览</el-menu-item>
         <el-sub-menu index="project-env">
@@ -33,7 +42,10 @@
     </el-aside>
     <el-container>
       <el-header>
-        <div class="header-spacer"></div>
+        <div class="header-title">
+          <strong>{{ activeLabel }}</strong>
+          <span>专业、稳定、可追踪的接口测试工作台</span>
+        </div>
         <el-dropdown trigger="click" @command="handleUserCommand">
           <button class="user-menu-trigger">
             <el-avatar :size="32">{{ avatarText }}</el-avatar>
@@ -65,16 +77,52 @@
         </el-tabs>
       </div>
       <el-main>
-        <section v-if="active === 'dashboard'" class="grid">
-          <el-card><h3>项目数</h3><strong>{{ projects.length }}</strong></el-card>
-          <el-card><h3>接口数</h3><strong>{{ apis.length }}</strong></el-card>
-          <el-card><h3>用例数</h3><strong>{{ cases.length }}</strong></el-card>
-          <el-card><h3>执行任务</h3><strong>{{ executions.length }}</strong></el-card>
+        <section v-if="active === 'dashboard'" class="page-section dashboard-page">
+          <div class="page-heading">
+            <div>
+              <h2>数据概览</h2>
+              <p>快速掌握测试资产与执行任务规模</p>
+            </div>
+          </div>
+          <div class="grid">
+            <el-card class="metric-card metric-projects">
+              <span class="metric-icon">项</span>
+              <div>
+                <h3>项目数</h3>
+                <strong>{{ projects.length }}</strong>
+                <p>当前维护的测试项目</p>
+              </div>
+            </el-card>
+            <el-card class="metric-card metric-apis">
+              <span class="metric-icon">接</span>
+              <div>
+                <h3>接口数</h3>
+                <strong>{{ apis.length }}</strong>
+                <p>已登记的接口资产</p>
+              </div>
+            </el-card>
+            <el-card class="metric-card metric-cases">
+              <span class="metric-icon">例</span>
+              <div>
+                <h3>用例数</h3>
+                <strong>{{ cases.length }}</strong>
+                <p>可执行测试用例</p>
+              </div>
+            </el-card>
+            <el-card class="metric-card metric-executions">
+              <span class="metric-icon">执</span>
+              <div>
+                <h3>执行任务</h3>
+                <strong>{{ executions.length }}</strong>
+                <p>历史与当前执行记录</p>
+              </div>
+            </el-card>
+          </div>
         </section>
 
-        <section v-if="active === 'accounts'">
+        <section v-if="active === 'accounts'" class="page-section">
           <div class="toolbar"><h2>用户管理</h2><el-button v-if="me.role === 'admin'" type="primary" @click="openCreateUserDialog">创建测试人员</el-button></div>
-          <el-form class="search-form" label-position="top">
+          <el-form class="search-form panel" label-position="top">
             <el-form-item label="用户名">
               <el-input v-model="userSearch.username" placeholder="请输入用户名" clearable @keyup.enter="searchUsers" />
             </el-form-item>
@@ -89,7 +137,7 @@
               <el-button @click="resetUserSearch">重置</el-button>
             </div>
           </el-form>
-          <el-table :data="users">
+          <div class="table-panel"><el-table :data="users">
             <el-table-column prop="username" label="用户名" />
             <el-table-column prop="real_name" label="姓名" />
             <el-table-column prop="role" label="角色" />
@@ -112,7 +160,7 @@
                 </el-button>
               </template>
             </el-table-column>
-          </el-table>
+          </el-table></div>
           <div class="pagination">
             <el-pagination
               background
@@ -155,9 +203,9 @@
           </el-dialog>
         </section>
 
-        <section v-if="active === 'projects'">
+        <section v-if="active === 'projects'" class="page-section">
           <div class="toolbar"><h2>项目管理</h2><el-button type="primary" @click="openCreateProjectDialog">创建项目</el-button></div>
-          <el-form class="search-form" label-position="top">
+          <el-form class="search-form panel" label-position="top">
             <el-form-item label="项目名称">
               <el-input v-model="projectSearch.name" placeholder="请输入项目名称" clearable @keyup.enter="searchProjects" />
             </el-form-item>
@@ -166,7 +214,7 @@
               <el-button @click="resetProjectSearch">重置</el-button>
             </div>
           </el-form>
-          <el-table :data="projectList">
+          <div class="table-panel"><el-table :data="projectList">
             <el-table-column prop="name" label="项目" />
             <el-table-column prop="description" label="描述" />
             <el-table-column label="操作" width="160" fixed="right">
@@ -175,7 +223,7 @@
                 <el-button size="small" type="danger" @click="deleteProject(row)">删除</el-button>
               </template>
             </el-table-column>
-          </el-table>
+          </el-table></div>
           <div class="pagination">
             <el-pagination
               background
@@ -218,9 +266,9 @@
           </el-dialog>
         </section>
 
-        <section v-if="active === 'environments'">
+        <section v-if="active === 'environments'" class="page-section">
           <div class="toolbar"><h2>环境管理</h2><el-button type="primary" @click="openCreateEnvironmentDialog">新增环境</el-button></div>
-          <el-form class="search-form" label-position="top">
+          <el-form class="search-form panel" label-position="top">
             <el-form-item label="项目">
               <el-select v-model="environmentSearch.project_id" placeholder="请选择项目" clearable>
                 <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
@@ -234,7 +282,7 @@
               <el-button @click="resetEnvironmentSearch">重置</el-button>
             </div>
           </el-form>
-          <el-table :data="environmentList">
+          <div class="table-panel"><el-table :data="environmentList">
             <el-table-column prop="project_name" label="项目" />
             <el-table-column prop="name" label="环境名称" />
             <el-table-column prop="protocol" label="协议" />
@@ -246,7 +294,7 @@
                 <el-button size="small" type="danger" @click="deleteEnvironment(row)">删除</el-button>
               </template>
             </el-table-column>
-          </el-table>
+          </el-table></div>
           <div class="pagination">
             <el-pagination
               background
@@ -317,9 +365,9 @@
           </el-dialog>
         </section>
 
-        <section v-if="active === 'apis'">
+        <section v-if="active === 'apis'" class="page-section">
           <div class="toolbar"><h2>接口管理</h2><el-button type="primary" @click="createApi">保存接口</el-button></div>
-          <el-form label-position="top" class="form-grid">
+          <el-form label-position="top" class="form-grid panel">
             <el-form-item label="项目"><el-select v-model="apiForm.project_id"><el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" /></el-select></el-form-item>
             <el-form-item label="模块"><el-input v-model="apiForm.module" /></el-form-item>
             <el-form-item label="名称"><el-input v-model="apiForm.name" /></el-form-item>
@@ -329,12 +377,12 @@
             <el-form-item label="Body JSON" class="wide"><el-input v-model="apiForm.bodyText" type="textarea" :rows="4" /></el-form-item>
             <el-form-item label="Headers JSON" class="wide"><el-input v-model="apiForm.headersText" type="textarea" :rows="3" /></el-form-item>
           </el-form>
-          <el-table :data="apis"><el-table-column prop="name" label="接口" /><el-table-column prop="method" label="方法" /><el-table-column prop="path" label="路径" /></el-table>
+          <div class="table-panel"><el-table :data="apis"><el-table-column prop="name" label="接口" /><el-table-column prop="method" label="方法" /><el-table-column prop="path" label="路径" /></el-table></div>
         </section>
 
-        <section v-if="active === 'cases'">
+        <section v-if="active === 'cases'" class="page-section">
           <div class="toolbar"><h2>用例管理</h2><el-button type="primary" @click="createCase">保存用例</el-button></div>
-          <el-form label-position="top" class="form-grid">
+          <el-form label-position="top" class="form-grid panel">
             <el-form-item label="项目"><el-select v-model="caseForm.project_id"><el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" /></el-select></el-form-item>
             <el-form-item label="接口"><el-select v-model="caseForm.api_id"><el-option v-for="a in apis" :key="a.id" :label="a.name" :value="a.id" /></el-select></el-form-item>
             <el-form-item label="用例名称"><el-input v-model="caseForm.name" /></el-form-item>
@@ -342,23 +390,23 @@
             <el-form-item label="断言配置 JSON" class="wide"><el-input v-model="caseForm.assertionsText" type="textarea" :rows="5" /></el-form-item>
             <el-form-item label="变量提取 JSON" class="wide"><el-input v-model="caseForm.extractorsText" type="textarea" :rows="4" /></el-form-item>
           </el-form>
-          <el-table :data="cases"><el-table-column prop="name" label="用例" /><el-table-column prop="priority" label="优先级" /><el-table-column prop="status" label="状态" /></el-table>
+          <div class="table-panel"><el-table :data="cases"><el-table-column prop="name" label="用例" /><el-table-column prop="priority" label="优先级" /><el-table-column prop="status" label="状态" /></el-table></div>
         </section>
 
-        <section v-if="active === 'execute'">
+        <section v-if="active === 'execute'" class="page-section">
           <div class="toolbar"><h2>执行中心</h2><el-button type="primary" @click="runCase">手动执行</el-button></div>
-          <el-form class="inline-form"><el-select v-model="execForm.project_id" placeholder="项目"><el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" /></el-select><el-select v-model="execForm.environment_id" placeholder="环境"><el-option v-for="e in environments" :key="e.id" :label="e.name" :value="e.id" /></el-select><el-select v-model="execForm.target_id" placeholder="用例"><el-option v-for="c in cases" :key="c.id" :label="c.name" :value="c.id" /></el-select></el-form>
-          <el-table :data="executions"><el-table-column prop="id" label="任务" /><el-table-column prop="status" label="状态" /><el-table-column prop="create_date" label="创建时间" /></el-table>
+          <el-form class="inline-form panel"><el-select v-model="execForm.project_id" placeholder="项目"><el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" /></el-select><el-select v-model="execForm.environment_id" placeholder="环境"><el-option v-for="e in environments" :key="e.id" :label="e.name" :value="e.id" /></el-select><el-select v-model="execForm.target_id" placeholder="用例"><el-option v-for="c in cases" :key="c.id" :label="c.name" :value="c.id" /></el-select></el-form>
+          <div class="table-panel"><el-table :data="executions"><el-table-column prop="id" label="任务" /><el-table-column prop="status" label="状态" /><el-table-column prop="create_date" label="创建时间" /></el-table></div>
         </section>
 
-        <section v-if="active === 'reports'">
-          <h2>报告中心</h2>
-          <el-table :data="executions"><el-table-column prop="id" label="任务" /><el-table-column prop="status" label="状态" /><el-table-column label="HTML 报告"><template #default="{ row }"><el-link :href="`/api/executions/${row.id}/report`" target="_blank">查看报告</el-link></template></el-table-column></el-table>
+        <section v-if="active === 'reports'" class="page-section">
+          <div class="toolbar"><h2>报告中心</h2></div>
+          <div class="table-panel"><el-table :data="executions"><el-table-column prop="id" label="任务" /><el-table-column prop="status" label="状态" /><el-table-column label="HTML 报告"><template #default="{ row }"><el-link :href="`/api/executions/${row.id}/report`" target="_blank">查看报告</el-link></template></el-table-column></el-table></div>
         </section>
 
-        <section v-if="active === 'logs'">
-          <h2>日志中心</h2>
-          <el-table :data="logs"><el-table-column prop="module" label="模块" /><el-table-column prop="action" label="操作" /><el-table-column prop="result" label="结果" /><el-table-column prop="create_date" label="时间" /></el-table>
+        <section v-if="active === 'logs'" class="page-section">
+          <div class="toolbar"><h2>日志中心</h2></div>
+          <div class="table-panel"><el-table :data="logs"><el-table-column prop="module" label="模块" /><el-table-column prop="action" label="操作" /><el-table-column prop="result" label="结果" /><el-table-column prop="create_date" label="时间" /></el-table></div>
         </section>
 
         <el-dialog v-model="changePasswordDialogVisible" title="修改密码" width="420px" @closed="resetChangePasswordForm">
@@ -476,6 +524,7 @@ const apiForm = reactive({ project_id: undefined as number | undefined, module: 
 const caseForm = reactive({ project_id: undefined as number | undefined, api_id: undefined as number | undefined, name: '', priority: 'P2', assertionsText: '[{"type":"status_code","expected":200}]', extractorsText: '[]' })
 const execForm = reactive({ project_id: undefined as number | undefined, environment_id: undefined as number | undefined, target_id: undefined as number | undefined })
 const avatarText = computed(() => me.value?.username.slice(0, 1).toUpperCase() || 'U')
+const activeLabel = computed(() => menuMeta[active.value]?.label || '工作台')
 
 function parseJson(text: string, fallback: any) {
   try { return JSON.parse(text || '') } catch { return fallback }
