@@ -51,6 +51,7 @@ class ApiDefinition(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_id: Mapped[int] = mapped_column(Integer, index=True)
+    environment_id: Mapped[int] = mapped_column(Integer, default=0, server_default="0", index=True)
     module: Mapped[str] = mapped_column(String(128), default="")
     name: Mapped[str] = mapped_column(String(128))
     method: Mapped[str] = mapped_column(String(16))

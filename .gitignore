@@ -1,17 +1,38 @@
-# Frontend dependencies and build output
-/frontend/node_modules/
-/frontend/dist/
-
-# Python local environment and generated artifacts
-/.venv/
+# Python
 __pycache__/
 *.py[cod]
-/.pytest_cache/
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
 htmlcov/
 
-# Local runtime files
-/backend/logs/
-/logs/
-/outputs/
-/work/
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local environment and secrets
+.env
+.env.*
+*.local
+*.secret
+*.secret.*
+
+# Logs and runtime output
+logs/
+*.log
+backend/logs/
+
+# Frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.cache/
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

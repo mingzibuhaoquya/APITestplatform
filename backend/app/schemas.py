@@ -80,7 +80,20 @@ class EnvironmentUpdate(BaseModel):
 
 class ApiDefinitionIn(BaseModel):
     project_id: int
+    environment_id: int
     module: str = ""
+    name: str
+    method: HttpMethod
+    path: str
+    headers: dict[str, Any] = {}
+    query: dict[str, Any] = {}
+    body: Any = {}
+    description: str = ""
+
+
+class ApiDefinitionUpdate(BaseModel):
+    project_id: int
+    environment_id: int
     name: str
     method: HttpMethod
     path: str

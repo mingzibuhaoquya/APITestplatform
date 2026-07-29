@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import current_user
 from ..models import ApiDefinition, Environment, OperationLog, Project, ScenarioCase, TestCase, User
-from ..schemas import ApiDefinitionIn, EnvironmentIn, EnvironmentUpdate, ProjectIn, ProjectUpdate, ScenarioCaseIn, TestCaseIn
+from ..schemas import ApiDefinitionIn, ApiDefinitionUpdate, EnvironmentIn, EnvironmentUpdate, ProjectIn, ProjectUpdate, ScenarioCaseIn, TestCaseIn
 from ..utils import dump_json, fmt_time, parse_json
 
 
@@ -34,6 +34,28 @@ def _environment_out(row: Environment, db: Session):
     }
 
 
+def _api_out(row: ApiDefinition, db: Session):
+    project = db.get(Project, row.project_id)
+    environment = db.get(Environment, row.environment_id) if row.environment_id else None
+    return {
+        **_base(row),
+        "project_name": project.name if project and not project.is_deleted else "",
+        "environment_name": environment.name if environment and not environment.is_deleted else "",
+        "headers": parse_json(row.headers_json, {}),
+        "query": parse_json(row.query_json, {}),
+        "body": parse_json(row.body_json, {}),
+    }
+
+
+def _active_environment(environment_id: int, project_id: int, db: Session):
+    environment = db.get(Environment, environment_id)
+    if not environment or environment.is_deleted:
+        raise HTTPException(status_code=404, detail="environment does not exist")
+    if environment.project_id != project_id:
+        raise HTTPException(status_code=400, detail="environment does not belong to project")
+    return environment
+
+
 def _ensure_environment_name_available(project_id: int, name: str, db: Session, environment_id: int | None = None):
     exists = db.query(Environment).filter(
         Environment.project_id == project_id,
@@ -44,6 +66,17 @@ def _ensure_environment_name_available(project_id: int, name: str, db: Session, 
         exists = exists.filter(Environment.id != environment_id)
     if exists.first():
         raise HTTPException(status_code=400, detail="环境名称已存在")
+
+
+def _ensure_api_name_available(project_id: int, name: str, db: Session, api_id: int | None = None):
+    exists = db.query(ApiDefinition).filter(
+        ApiDefinition.project_id == project_id,
+        ApiDefinition.name == name,
+    )
+    if api_id is not None:
+        exists = exists.filter(ApiDefinition.id != api_id)
+    if exists.first():
+        raise HTTPException(status_code=400, detail="api name already exists")
 
 
 def _environment_port(protocol: str, port: int | None):
@@ -216,30 +249,112 @@ def delete_environment(environment_id: int, _: User = Depends(current_user), db:
 
 
 @router.get("/apis")
-def list_apis(project_id: int | None = None, _: User = Depends(current_user), db: Session = Depends(get_db)):
-    query = db.query(ApiDefinition)
+def list_apis(
+    project_id: int | None = None,
+    environment_id: int | None = None,
+    name: str = "",
+    url: str = "",
+    page: int | None = None,
+    page_size: int | None = None,
+    _: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    query = db.query(ApiDefinition).join(Project, ApiDefinition.project_id == Project.id).filter(
+        Project.is_deleted.is_(False),
+    )
     if project_id:
         query = query.filter(ApiDefinition.project_id == project_id)
-    return [{**_base(row), "headers": parse_json(row.headers_json, {}), "query": parse_json(row.query_json, {}), "body": parse_json(row.body_json, {})} for row in query.order_by(ApiDefinition.id.desc()).all()]
+    if environment_id:
+        query = query.filter(ApiDefinition.environment_id == environment_id)
+    if name.strip():
+        query = query.filter(ApiDefinition.name.like(f"%{name.strip()}%"))
+    if url.strip():
+        query = query.filter(ApiDefinition.path.like(f"%{url.strip()}%"))
+    if page is None and page_size is None:
+        return [_api_out(row, db) for row in query.order_by(ApiDefinition.id.desc()).all()]
+    page = max(page or 1, 1)
+    page_size = min(max(page_size or 10, 1), 10)
+    total = query.count()
+    rows = query.order_by(ApiDefinition.id.desc()).offset((page - 1) * page_size).limit(page_size).all()
+    return {
+        "items": [_api_out(row, db) for row in rows],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 @router.post("/apis")
 def create_api(payload: ApiDefinitionIn, _: User = Depends(current_user), db: Session = Depends(get_db)):
+    _active_project(payload.project_id, db)
+    _active_environment(payload.environment_id, payload.project_id, db)
+    name = payload.name.strip()
+    path = payload.path.strip()
+    description = payload.description.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="api name is required")
+    if not path:
+        raise HTTPException(status_code=400, detail="api path is required")
+    _ensure_api_name_available(payload.project_id, name, db)
     row = ApiDefinition(
         project_id=payload.project_id,
-        module=payload.module,
-        name=payload.name,
+        environment_id=payload.environment_id,
+        module="",
+        name=name,
         method=payload.method,
-        path=payload.path,
+        path=path,
         headers_json=dump_json(payload.headers),
         query_json=dump_json(payload.query),
         body_json=dump_json(payload.body),
-        description=payload.description,
+        description=description,
     )
     db.add(row)
     db.commit()
     db.refresh(row)
-    return _base(row)
+    return _api_out(row, db)
+
+
+@router.put("/apis/{api_id}")
+def update_api(api_id: int, payload: ApiDefinitionUpdate, _: User = Depends(current_user), db: Session = Depends(get_db)):
+    row = db.get(ApiDefinition, api_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="api does not exist")
+    _active_project(payload.project_id, db)
+    _active_environment(payload.environment_id, payload.project_id, db)
+    name = payload.name.strip()
+    path = payload.path.strip()
+    description = payload.description.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="api name is required")
+    if not path:
+        raise HTTPException(status_code=400, detail="api path is required")
+    _ensure_api_name_available(payload.project_id, name, db, api_id=api_id)
+    row.project_id = payload.project_id
+    row.environment_id = payload.environment_id
+    row.module = ""
+    row.name = name
+    row.method = payload.method
+    row.path = path
+    row.headers_json = dump_json(payload.headers)
+    row.query_json = dump_json(payload.query)
+    row.body_json = dump_json(payload.body)
+    row.description = description
+    db.commit()
+    db.refresh(row)
+    return _api_out(row, db)
+
+
+@router.delete("/apis/{api_id}")
+def delete_api(api_id: int, _: User = Depends(current_user), db: Session = Depends(get_db)):
+    row = db.get(ApiDefinition, api_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="api does not exist")
+    if db.query(TestCase).filter(TestCase.api_id == api_id).first():
+        raise HTTPException(status_code=400, detail="api is referenced by test cases")
+    data = _api_out(row, db)
+    db.delete(row)
+    db.commit()
+    return data
 
 
 @router.get("/cases")

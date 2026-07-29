@@ -38,6 +38,7 @@ def startup() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_project_deleted_column()
     _ensure_environment_deleted_column()
+    _ensure_api_definition_columns()
     _ensure_admin()
 
 
@@ -60,6 +61,15 @@ def _ensure_environment_deleted_column() -> None:
             conn.execute(text("ALTER TABLE environment ADD COLUMN protocol VARCHAR(16) NOT NULL DEFAULT 'https'"))
         if "port" not in columns:
             conn.execute(text("ALTER TABLE environment ADD COLUMN port INT NOT NULL DEFAULT 443"))
+
+
+def _ensure_api_definition_columns() -> None:
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("api_definition")}
+    if "environment_id" in columns:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE api_definition ADD COLUMN environment_id INT NOT NULL DEFAULT 0"))
 
 
 def _ensure_admin() -> None:
