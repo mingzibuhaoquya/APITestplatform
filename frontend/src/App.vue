@@ -15,7 +15,11 @@
       <div class="brand">接口测试平台</div>
       <el-menu :default-active="active" @select="selectMenu">
         <el-menu-item index="dashboard">数据概览</el-menu-item>
-        <el-menu-item index="projects">项目环境</el-menu-item>
+        <el-sub-menu index="project-env">
+          <template #title>项目环境</template>
+          <el-menu-item index="projects">项目管理</el-menu-item>
+          <el-menu-item index="environments">环境管理</el-menu-item>
+        </el-sub-menu>
         <el-menu-item index="apis">接口管理</el-menu-item>
         <el-menu-item index="cases">用例管理</el-menu-item>
         <el-menu-item index="execute">执行中心</el-menu-item>
@@ -44,6 +48,22 @@
           </template>
         </el-dropdown>
       </el-header>
+      <div class="tabs-bar">
+        <el-tabs
+          v-model="active"
+          type="card"
+          @tab-change="switchTab"
+          @tab-remove="closeTab"
+        >
+          <el-tab-pane
+            v-for="tab in openedTabs"
+            :key="tab.name"
+            :label="tab.label"
+            :name="tab.name"
+            :closable="tab.closable"
+          />
+        </el-tabs>
+      </div>
       <el-main>
         <section v-if="active === 'dashboard'" class="grid">
           <el-card><h3>项目数</h3><strong>{{ projects.length }}</strong></el-card>
@@ -136,12 +156,165 @@
         </section>
 
         <section v-if="active === 'projects'">
-          <div class="toolbar"><h2>项目环境</h2><el-button type="primary" @click="createProject">创建项目</el-button></div>
-          <el-form class="inline-form"><el-input v-model="projectForm.name" placeholder="项目名称" /><el-input v-model="projectForm.description" placeholder="描述" /></el-form>
-          <el-table :data="projects" @row-click="selectedProject = $event"><el-table-column prop="name" label="项目" /><el-table-column prop="description" label="描述" /><el-table-column prop="status" label="状态" /></el-table>
-          <div class="toolbar sub"><h3>环境配置</h3><el-button @click="createEnvironment">新增环境</el-button></div>
-          <el-form class="inline-form"><el-select v-model="envForm.project_id" placeholder="项目"><el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" /></el-select><el-input v-model="envForm.name" placeholder="环境名" /><el-input v-model="envForm.base_url" placeholder="Base URL" /></el-form>
-          <el-table :data="environments"><el-table-column prop="name" label="环境" /><el-table-column prop="base_url" label="Base URL" /></el-table>
+          <div class="toolbar"><h2>项目管理</h2><el-button type="primary" @click="openCreateProjectDialog">创建项目</el-button></div>
+          <el-form class="search-form" label-position="top">
+            <el-form-item label="项目名称">
+              <el-input v-model="projectSearch.name" placeholder="请输入项目名称" clearable @keyup.enter="searchProjects" />
+            </el-form-item>
+            <div class="search-actions">
+              <el-button type="primary" @click="searchProjects">搜索</el-button>
+              <el-button @click="resetProjectSearch">重置</el-button>
+            </div>
+          </el-form>
+          <el-table :data="projectList">
+            <el-table-column prop="name" label="项目" />
+            <el-table-column prop="description" label="描述" />
+            <el-table-column label="操作" width="160" fixed="right">
+              <template #default="{ row }">
+                <el-button size="small" @click="openEditProjectDialog(row)">编辑</el-button>
+                <el-button size="small" type="danger" @click="deleteProject(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div class="pagination">
+            <el-pagination
+              background
+              layout="total, prev, pager, next"
+              :current-page="projectPagination.page"
+              :page-size="projectPagination.pageSize"
+              :total="projectPagination.total"
+              @current-change="changeProjectPage"
+            />
+          </div>
+
+          <el-dialog v-model="createProjectDialogVisible" title="创建项目" width="420px" @closed="resetProjectForm">
+            <el-form label-position="top" @submit.prevent="createProject">
+              <el-form-item label="项目名称">
+                <el-input v-model="projectForm.name" placeholder="请输入项目名称" />
+              </el-form-item>
+              <el-form-item label="描述">
+                <el-input v-model="projectForm.description" placeholder="请输入描述" />
+              </el-form-item>
+            </el-form>
+            <template #footer>
+              <el-button @click="cancelCreateProject">取消</el-button>
+              <el-button type="primary" @click="createProject">确认</el-button>
+            </template>
+          </el-dialog>
+
+          <el-dialog v-model="editProjectDialogVisible" title="编辑项目" width="420px" @closed="resetEditProjectForm">
+            <el-form label-position="top" @submit.prevent="updateProject">
+              <el-form-item label="项目名称">
+                <el-input v-model="editProjectForm.name" placeholder="请输入项目名称" />
+              </el-form-item>
+              <el-form-item label="描述">
+                <el-input v-model="editProjectForm.description" placeholder="请输入描述" />
+              </el-form-item>
+            </el-form>
+            <template #footer>
+              <el-button @click="cancelEditProject">取消</el-button>
+              <el-button type="primary" @click="updateProject">确认</el-button>
+            </template>
+          </el-dialog>
+        </section>
+
+        <section v-if="active === 'environments'">
+          <div class="toolbar"><h2>环境管理</h2><el-button type="primary" @click="openCreateEnvironmentDialog">新增环境</el-button></div>
+          <el-form class="search-form" label-position="top">
+            <el-form-item label="项目">
+              <el-select v-model="environmentSearch.project_id" placeholder="请选择项目" clearable>
+                <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="环境名称">
+              <el-input v-model="environmentSearch.name" placeholder="请输入环境名称" clearable @keyup.enter="searchEnvironments" />
+            </el-form-item>
+            <div class="search-actions">
+              <el-button type="primary" @click="searchEnvironments">搜索</el-button>
+              <el-button @click="resetEnvironmentSearch">重置</el-button>
+            </div>
+          </el-form>
+          <el-table :data="environmentList">
+            <el-table-column prop="project_name" label="项目" />
+            <el-table-column prop="name" label="环境名称" />
+            <el-table-column prop="protocol" label="协议" />
+            <el-table-column prop="base_url" label="Base URL" />
+            <el-table-column prop="port" label="端口号" />
+            <el-table-column label="操作" width="160" fixed="right">
+              <template #default="{ row }">
+                <el-button size="small" @click="openEditEnvironmentDialog(row)">编辑</el-button>
+                <el-button size="small" type="danger" @click="deleteEnvironment(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div class="pagination">
+            <el-pagination
+              background
+              layout="total, prev, pager, next"
+              :current-page="environmentPagination.page"
+              :page-size="environmentPagination.pageSize"
+              :total="environmentPagination.total"
+              @current-change="changeEnvironmentPage"
+            />
+          </div>
+
+          <el-dialog v-model="createEnvironmentDialogVisible" title="新增环境" width="420px" @closed="resetEnvironmentForm">
+            <el-form label-position="top" @submit.prevent="createEnvironment">
+              <el-form-item label="项目">
+                <el-select v-model="envForm.project_id" placeholder="请选择项目">
+                  <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="环境名称">
+                <el-input v-model="envForm.name" placeholder="请输入环境名称" />
+              </el-form-item>
+              <el-form-item label="协议">
+                <el-select v-model="envForm.protocol" placeholder="请选择协议" @blur="validateEnvironmentProtocol(envForm.protocol)">
+                  <el-option label="http" value="http" />
+                  <el-option label="https" value="https" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="Base URL">
+                <el-input v-model="envForm.base_url" placeholder="请输入 Base URL" />
+              </el-form-item>
+              <el-form-item label="端口号">
+                <el-input v-model="envForm.port" placeholder="请输入端口号" @input="envForm.port = digitsOnly(envForm.port)" />
+              </el-form-item>
+            </el-form>
+            <template #footer>
+              <el-button @click="cancelCreateEnvironment">取消</el-button>
+              <el-button type="primary" @click="createEnvironment">确认</el-button>
+            </template>
+          </el-dialog>
+
+          <el-dialog v-model="editEnvironmentDialogVisible" title="编辑环境" width="420px" @closed="resetEditEnvironmentForm">
+            <el-form label-position="top" @submit.prevent="updateEnvironment">
+              <el-form-item label="项目">
+                <el-select v-model="editEnvironmentForm.project_id" placeholder="请选择项目">
+                  <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="环境名称">
+                <el-input v-model="editEnvironmentForm.name" placeholder="请输入环境名称" />
+              </el-form-item>
+              <el-form-item label="协议">
+                <el-select v-model="editEnvironmentForm.protocol" placeholder="请选择协议" @blur="validateEnvironmentProtocol(editEnvironmentForm.protocol)">
+                  <el-option label="http" value="http" />
+                  <el-option label="https" value="https" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="Base URL">
+                <el-input v-model="editEnvironmentForm.base_url" placeholder="请输入 Base URL" />
+              </el-form-item>
+              <el-form-item label="端口号">
+                <el-input v-model="editEnvironmentForm.port" placeholder="请输入端口号" @input="editEnvironmentForm.port = digitsOnly(editEnvironmentForm.port)" />
+              </el-form-item>
+            </el-form>
+            <template #footer>
+              <el-button @click="cancelEditEnvironment">取消</el-button>
+              <el-button type="primary" @click="updateEnvironment">确认</el-button>
+            </template>
+          </el-dialog>
         </section>
 
         <section v-if="active === 'apis'">
@@ -224,15 +397,54 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, type User } from './api'
 
-const active = ref(localStorage.getItem('active_menu') || 'dashboard')
+type AppTab = { name: string; label: string; closable: boolean }
+
+const menuMeta: Record<string, AppTab> = {
+  dashboard: { name: 'dashboard', label: '数据概览', closable: false },
+  projects: { name: 'projects', label: '项目管理', closable: true },
+  environments: { name: 'environments', label: '环境管理', closable: true },
+  apis: { name: 'apis', label: '接口管理', closable: true },
+  cases: { name: 'cases', label: '用例管理', closable: true },
+  execute: { name: 'execute', label: '执行中心', closable: true },
+  reports: { name: 'reports', label: '报告中心', closable: true },
+  logs: { name: 'logs', label: '日志中心', closable: true },
+  accounts: { name: 'accounts', label: '用户管理', closable: true }
+}
+
+function restoreTabs(): AppTab[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem('opened_tabs') || '[]')
+    if (Array.isArray(raw)) {
+      const restored = raw
+        .map((tab: any) => menuMeta[tab?.name])
+        .filter(Boolean)
+      const unique = Array.from(new Map(restored.map(tab => [tab.name, tab])).values())
+      if (unique.length > 0) {
+        return unique.some(tab => tab.name === 'dashboard') ? unique : [menuMeta.dashboard, ...unique]
+      }
+    }
+  } catch {}
+  return [menuMeta.dashboard]
+}
+
+function restoreActive(tabs: AppTab[]) {
+  const saved = localStorage.getItem('active_menu') || 'dashboard'
+  return tabs.some(tab => tab.name === saved) ? saved : 'dashboard'
+}
+
+const openedTabs = ref<AppTab[]>(restoreTabs())
+const active = ref(restoreActive(openedTabs.value))
+
 const me = ref<User | null>(null)
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 const users = ref<any[]>([])
 const projects = ref<any[]>([])
+const projectList = ref<any[]>([])
 const environments = ref<any[]>([])
+const environmentList = ref<any[]>([])
 const apis = ref<any[]>([])
 const cases = ref<any[]>([])
 const executions = ref<any[]>([])
@@ -242,14 +454,24 @@ const selectedProject = ref<any>(null)
 const loginForm = reactive({ username: '', password: '' })
 const userSearch = reactive({ username: '', status: '' })
 const userPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const projectSearch = reactive({ name: '' })
+const projectPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const environmentSearch = reactive({ project_id: undefined as number | undefined, name: '' })
+const environmentPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const createUserDialogVisible = ref(false)
 const editUserDialogVisible = ref(false)
+const createProjectDialogVisible = ref(false)
+const editProjectDialogVisible = ref(false)
+const createEnvironmentDialogVisible = ref(false)
+const editEnvironmentDialogVisible = ref(false)
 const changePasswordDialogVisible = ref(false)
 const userForm = reactive({ username: '', real_name: '' })
 const editUserForm = reactive({ id: undefined as number | undefined, username: '', real_name: '' })
 const changePasswordForm = reactive({ old_password: '', new_password: '', confirm_password: '' })
 const projectForm = reactive({ name: '', description: '' })
-const envForm = reactive({ project_id: undefined as number | undefined, name: 'test', base_url: '' })
+const editProjectForm = reactive({ id: undefined as number | undefined, name: '', description: '' })
+const envForm = reactive({ project_id: undefined as number | undefined, name: '', protocol: '', base_url: '', port: '' })
+const editEnvironmentForm = reactive({ id: undefined as number | undefined, project_id: undefined as number | undefined, name: '', protocol: '', base_url: '', port: '' })
 const apiForm = reactive({ project_id: undefined as number | undefined, module: '', name: '', method: 'GET', path: '', headersText: '{}', queryText: '{}', bodyText: '{}' })
 const caseForm = reactive({ project_id: undefined as number | undefined, api_id: undefined as number | undefined, name: '', priority: 'P2', assertionsText: '[{"type":"status_code","expected":200}]', extractorsText: '[]' })
 const execForm = reactive({ project_id: undefined as number | undefined, environment_id: undefined as number | undefined, target_id: undefined as number | undefined })
@@ -269,6 +491,8 @@ async function loadAll() {
     api.get('/logs').then(r => logs.value = r.data)
   ]
   calls.push(loadUsers())
+  calls.push(loadProjects())
+  calls.push(loadEnvironments())
   await Promise.allSettled(calls)
 }
 
@@ -306,6 +530,71 @@ async function changeUserPage(page: number) {
   await loadUsers()
 }
 
+async function loadProjects() {
+  const name = projectSearch.name.trim()
+  const { data } = await api.get('/projects', {
+    params: {
+      ...(name ? { name } : {}),
+      page: projectPagination.page,
+      page_size: projectPagination.pageSize
+    }
+  })
+  projectList.value = data.items
+  projectPagination.total = data.total
+  projectPagination.page = data.page
+  projectPagination.pageSize = data.page_size
+}
+
+async function searchProjects() {
+  projectPagination.page = 1
+  await loadProjects()
+}
+
+async function resetProjectSearch() {
+  projectSearch.name = ''
+  projectPagination.page = 1
+  await loadProjects()
+}
+
+async function changeProjectPage(page: number) {
+  projectPagination.page = page
+  await loadProjects()
+}
+
+async function loadEnvironments() {
+  const name = environmentSearch.name.trim()
+  const projectId = environmentSearch.project_id
+  const { data } = await api.get('/environments', {
+    params: {
+      ...(projectId ? { project_id: projectId } : {}),
+      ...(name ? { name } : {}),
+      page: environmentPagination.page,
+      page_size: environmentPagination.pageSize
+    }
+  })
+  environmentList.value = data.items
+  environmentPagination.total = data.total
+  environmentPagination.page = data.page
+  environmentPagination.pageSize = data.page_size
+}
+
+async function searchEnvironments() {
+  environmentPagination.page = 1
+  await loadEnvironments()
+}
+
+async function resetEnvironmentSearch() {
+  environmentSearch.project_id = undefined
+  environmentSearch.name = ''
+  environmentPagination.page = 1
+  await loadEnvironments()
+}
+
+async function changeEnvironmentPage(page: number) {
+  environmentPagination.page = page
+  await loadEnvironments()
+}
+
 async function login() {
   try {
     const { data } = await api.post('/auth/login', loginForm)
@@ -321,13 +610,54 @@ async function logout() {
   await api.post('/auth/logout')
   localStorage.removeItem('session_token')
   localStorage.removeItem('active_menu')
+  localStorage.removeItem('opened_tabs')
+  openedTabs.value = [menuMeta.dashboard]
   active.value = 'dashboard'
   me.value = null
 }
 
-function selectMenu(index: string) {
+function saveTabs() {
+  localStorage.setItem('opened_tabs', JSON.stringify(openedTabs.value.map(tab => ({ name: tab.name }))))
+  localStorage.setItem('active_menu', active.value)
+}
+
+function openTab(index: string) {
+  const tab = menuMeta[index]
+  if (!tab) {
+    return
+  }
+  if (!openedTabs.value.some(item => item.name === index)) {
+    openedTabs.value.push(tab)
+  }
   active.value = index
-  localStorage.setItem('active_menu', index)
+  saveTabs()
+}
+
+function selectMenu(index: string) {
+  openTab(index)
+}
+
+function switchTab(name: string | number) {
+  active.value = String(name)
+  saveTabs()
+}
+
+function closeTab(name: string | number) {
+  const target = String(name)
+  const index = openedTabs.value.findIndex(tab => tab.name === target)
+  const tab = openedTabs.value[index]
+  if (index === -1 || !tab?.closable) {
+    return
+  }
+  openedTabs.value.splice(index, 1)
+  if (openedTabs.value.length === 0) {
+    openedTabs.value = [menuMeta.dashboard]
+  }
+  if (active.value === target) {
+    const next = openedTabs.value[index - 1] || openedTabs.value[index] || menuMeta.dashboard
+    active.value = next.name
+  }
+  saveTabs()
 }
 
 async function handleUserCommand(command: string) {
@@ -487,16 +817,277 @@ async function toggleUserStatus(user: any) {
   await loadUsers()
 }
 
-async function createProject() {
-  await api.post('/projects', projectForm)
+function resetProjectForm() {
   projectForm.name = ''
   projectForm.description = ''
-  await loadAll()
+}
+
+function openCreateProjectDialog() {
+  createProjectDialogVisible.value = true
+}
+
+function cancelCreateProject() {
+  createProjectDialogVisible.value = false
+  resetProjectForm()
+}
+
+function resetEditProjectForm() {
+  editProjectForm.id = undefined
+  editProjectForm.name = ''
+  editProjectForm.description = ''
+}
+
+function openEditProjectDialog(project: any) {
+  editProjectForm.id = project.id
+  editProjectForm.name = project.name
+  editProjectForm.description = project.description || ''
+  editProjectDialogVisible.value = true
+}
+
+function cancelEditProject() {
+  editProjectDialogVisible.value = false
+  resetEditProjectForm()
+}
+
+async function refreshProjectsAfterChange() {
+  await Promise.all([
+    api.get('/projects').then(r => projects.value = r.data),
+    loadProjects()
+  ])
+}
+
+async function refreshProjectsAfterDelete() {
+  await refreshProjectsAfterChange()
+  if (projectList.value.length === 0 && projectPagination.page > 1) {
+    projectPagination.page -= 1
+    await loadProjects()
+  }
+}
+
+async function createProject() {
+  const name = projectForm.name.trim()
+  const description = projectForm.description.trim()
+  if (!name) {
+    ElMessage.warning('请输入项目名称')
+    return
+  }
+  if (!description) {
+    ElMessage.warning('请输入描述')
+    return
+  }
+  if (projects.value.some(project => project.name === name)) {
+    ElMessage.warning('项目名称已存在')
+    return
+  }
+  try {
+    await api.post('/projects', { name, description })
+    createProjectDialogVisible.value = false
+    resetProjectForm()
+    ElMessage.success('项目已创建')
+    await refreshProjectsAfterChange()
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || '项目创建失败')
+  }
+}
+
+async function updateProject() {
+  const name = editProjectForm.name.trim()
+  if (!name) {
+    ElMessage.warning('请输入项目名称')
+    return
+  }
+  await api.put(`/projects/${editProjectForm.id}`, { name, description: editProjectForm.description })
+  editProjectDialogVisible.value = false
+  resetEditProjectForm()
+  ElMessage.success('项目已更新')
+  await refreshProjectsAfterChange()
+}
+
+async function deleteProject(project: any) {
+  try {
+    await ElMessageBox.confirm('确认删除该项目吗？', '删除项目', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  await api.delete(`/projects/${project.id}`)
+  ElMessage.success('项目已删除')
+  await refreshProjectsAfterDelete()
+}
+
+function resetEnvironmentForm() {
+  envForm.project_id = undefined
+  envForm.name = ''
+  envForm.protocol = ''
+  envForm.base_url = ''
+  envForm.port = ''
+}
+
+function openCreateEnvironmentDialog() {
+  createEnvironmentDialogVisible.value = true
+}
+
+function cancelCreateEnvironment() {
+  createEnvironmentDialogVisible.value = false
+  resetEnvironmentForm()
+}
+
+function resetEditEnvironmentForm() {
+  editEnvironmentForm.id = undefined
+  editEnvironmentForm.project_id = undefined
+  editEnvironmentForm.name = ''
+  editEnvironmentForm.protocol = ''
+  editEnvironmentForm.base_url = ''
+  editEnvironmentForm.port = ''
+}
+
+function openEditEnvironmentDialog(environment: any) {
+  editEnvironmentForm.id = environment.id
+  editEnvironmentForm.project_id = environment.project_id
+  editEnvironmentForm.name = environment.name
+  editEnvironmentForm.protocol = environment.protocol || ''
+  editEnvironmentForm.base_url = environment.base_url
+  editEnvironmentForm.port = environment.port ? String(environment.port) : ''
+  editEnvironmentDialogVisible.value = true
+}
+
+function cancelEditEnvironment() {
+  editEnvironmentDialogVisible.value = false
+  resetEditEnvironmentForm()
+}
+
+async function refreshEnvironmentsAfterChange() {
+  await Promise.all([
+    api.get('/environments').then(r => environments.value = r.data),
+    loadEnvironments()
+  ])
+}
+
+async function refreshEnvironmentsAfterDelete() {
+  await refreshEnvironmentsAfterChange()
+  if (environmentList.value.length === 0 && environmentPagination.page > 1) {
+    environmentPagination.page -= 1
+    await loadEnvironments()
+  }
+}
+
+function environmentNameExists(projectId: number, name: string, environmentId?: number) {
+  return environments.value.some(environment =>
+    environment.project_id === projectId &&
+    environment.name === name &&
+    environment.id !== environmentId
+  )
+}
+
+function digitsOnly(value: string) {
+  return String(value || '').replace(/\D/g, '')
+}
+
+function validateEnvironmentProtocol(protocol: string) {
+  if (!protocol) {
+    ElMessage.warning('请选择协议')
+    return false
+  }
+  return true
+}
+
+function environmentPort(protocol: string, port: string) {
+  if (port) {
+    return Number(port)
+  }
+  return protocol === 'http' ? 80 : 443
 }
 
 async function createEnvironment() {
-  await api.post('/environments', { ...envForm, headers: {}, variables: {} })
-  await loadAll()
+  const projectId = envForm.project_id
+  const name = envForm.name.trim()
+  const protocol = envForm.protocol
+  const baseUrl = envForm.base_url.trim()
+  const port = environmentPort(protocol, envForm.port)
+  if (!projectId) {
+    ElMessage.warning('请选择项目')
+    return
+  }
+  if (!name) {
+    ElMessage.warning('请输入环境名称')
+    return
+  }
+  if (!protocol) {
+    ElMessage.warning('请选择协议')
+    return
+  }
+  if (!baseUrl) {
+    ElMessage.warning('请输入 Base URL')
+    return
+  }
+  if (environmentNameExists(projectId, name)) {
+    ElMessage.warning('环境名称已存在')
+    return
+  }
+  try {
+    await api.post('/environments', { project_id: projectId, name, protocol, base_url: baseUrl, port, headers: {}, variables: {} })
+    createEnvironmentDialogVisible.value = false
+    resetEnvironmentForm()
+    ElMessage.success('环境已创建')
+    await refreshEnvironmentsAfterChange()
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || '环境创建失败')
+  }
+}
+
+async function updateEnvironment() {
+  const projectId = editEnvironmentForm.project_id
+  const name = editEnvironmentForm.name.trim()
+  const protocol = editEnvironmentForm.protocol
+  const baseUrl = editEnvironmentForm.base_url.trim()
+  const port = environmentPort(protocol, editEnvironmentForm.port)
+  if (!projectId) {
+    ElMessage.warning('请选择项目')
+    return
+  }
+  if (!name) {
+    ElMessage.warning('请输入环境名称')
+    return
+  }
+  if (!protocol) {
+    ElMessage.warning('请选择协议')
+    return
+  }
+  if (!baseUrl) {
+    ElMessage.warning('请输入 Base URL')
+    return
+  }
+  if (environmentNameExists(projectId, name, editEnvironmentForm.id)) {
+    ElMessage.warning('环境名称已存在')
+    return
+  }
+  try {
+    await api.put(`/environments/${editEnvironmentForm.id}`, { project_id: projectId, name, protocol, base_url: baseUrl, port })
+    editEnvironmentDialogVisible.value = false
+    resetEditEnvironmentForm()
+    ElMessage.success('环境已更新')
+    await refreshEnvironmentsAfterChange()
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || '环境更新失败')
+  }
+}
+
+async function deleteEnvironment(environment: any) {
+  try {
+    await ElMessageBox.confirm('确认删除该环境吗？', '删除环境', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  await api.delete(`/environments/${environment.id}`)
+  ElMessage.success('环境已删除')
+  await refreshEnvironmentsAfterDelete()
 }
 
 async function createApi() {

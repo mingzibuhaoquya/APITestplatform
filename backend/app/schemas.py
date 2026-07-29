@@ -55,12 +55,27 @@ class ProjectIn(BaseModel):
     status: str = "active"
 
 
+class ProjectUpdate(BaseModel):
+    name: str
+    description: str = ""
+
+
 class EnvironmentIn(BaseModel):
     project_id: int
     name: str
+    protocol: Literal["http", "https"]
     base_url: str
+    port: int | None = None
     headers: dict[str, Any] = {}
     variables: dict[str, Any] = {}
+
+
+class EnvironmentUpdate(BaseModel):
+    project_id: int
+    name: str
+    protocol: Literal["http", "https"]
+    base_url: str
+    port: int | None = None
 
 
 class ApiDefinitionIn(BaseModel):

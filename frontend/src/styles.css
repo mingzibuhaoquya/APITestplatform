@@ -97,6 +97,42 @@ body {
   line-height: 1;
 }
 
+.tabs-bar {
+  height: 42px;
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: flex-end;
+  padding: 0 24px;
+}
+
+.tabs-bar .el-tabs {
+  width: 100%;
+}
+
+.tabs-bar .el-tabs__header {
+  margin: 0;
+  border-bottom: 0;
+}
+
+.tabs-bar .el-tabs__nav {
+  border: 0;
+}
+
+.tabs-bar .el-tabs__item {
+  height: 40px;
+  border: 0;
+  border-right: 1px solid #e5e7eb;
+  color: #475569;
+  background: #fff;
+}
+
+.tabs-bar .el-tabs__item.is-active {
+  color: #2563eb;
+  border-bottom: 2px solid #2563eb;
+  background: #f8fbff;
+}
+
 .el-main {
   padding: 24px;
 }

@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import DateTime, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 from .database import Base
 
@@ -29,6 +29,7 @@ class Project(Base, TimestampMixin):
     description: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(32), default="active")
     creator_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
 
 
 class Environment(Base, TimestampMixin):
@@ -38,8 +39,11 @@ class Environment(Base, TimestampMixin):
     project_id: Mapped[int] = mapped_column(Integer, index=True)
     name: Mapped[str] = mapped_column(String(128))
     base_url: Mapped[str] = mapped_column(String(512))
+    protocol: Mapped[str] = mapped_column(String(16), default="https", server_default="https")
+    port: Mapped[int] = mapped_column(Integer, default=443, server_default="443")
     headers_json: Mapped[str] = mapped_column(Text, default="{}")
     variables_json: Mapped[str] = mapped_column(Text, default="{}")
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
 
 
 class ApiDefinition(Base, TimestampMixin):

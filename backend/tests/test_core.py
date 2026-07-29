@@ -6,10 +6,11 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
-from app.models import User
+from app.models import Environment, Project, User
 from app.routers.auth import change_password, login
+from app.routers.crud import create_environment, create_project, delete_environment, delete_project, list_environments, list_projects, update_environment, update_project
 from app.routers.users import create_user, list_users, router as users_router, update_user, update_user_status
-from app.schemas import ChangePasswordIn, LoginIn, UserCreate, UserStatusUpdate, UserUpdate
+from app.schemas import ChangePasswordIn, EnvironmentIn, EnvironmentUpdate, LoginIn, ProjectIn, ProjectUpdate, UserCreate, UserStatusUpdate, UserUpdate
 from app.services.assertions import all_passed, run_assertions
 from app.services.jsonpath import find_jsonpath
 from app.services.variables import render_variables
@@ -198,3 +199,243 @@ def test_change_password_allows_new_password_login_only(db_session):
 
     login_result = login(LoginIn(username="password_login_user", password="newpass1"), Response(), db)
     assert login_result["user"].username == "password_login_user"
+
+
+def test_project_crud_keeps_full_list_and_supports_pagination_and_search(db_session):
+    db, admin = db_session
+    for index in range(12):
+        create_project(ProjectIn(name=f"page_project_{index}", description=f"描述{index}"), admin, db)
+    needle = create_project(ProjectIn(name="needle_project", description="命中", status="disabled"), admin, db)
+    assert needle["status"] == "active"
+
+    full_list = list_projects(_=admin, db=db)
+    assert isinstance(full_list, list)
+    assert len(full_list) == 13
+
+    first_page = list_projects(page=1, page_size=10, _=admin, db=db)
+    assert first_page["total"] == 13
+    assert first_page["page_size"] == 10
+    assert len(first_page["items"]) == 10
+
+    second_page = list_projects(page=2, page_size=10, _=admin, db=db)
+    assert len(second_page["items"]) == 3
+
+    searched = list_projects(name="needle", page=1, page_size=10, _=admin, db=db)
+    assert searched["total"] == 1
+    assert searched["items"][0]["name"] == "needle_project"
+
+
+def test_update_project(db_session):
+    db, admin = db_session
+    created = create_project(ProjectIn(name="old_project", description="旧描述"), admin, db)
+
+    updated = update_project(created["id"], ProjectUpdate(name="new_project", description="新描述"), admin, db)
+    assert updated["name"] == "new_project"
+    assert updated["description"] == "新描述"
+
+
+def test_create_project_requires_name_and_description(db_session):
+    db, admin = db_session
+    with pytest.raises(HTTPException) as name_error:
+        create_project(ProjectIn(name="", description="描述"), admin, db)
+    assert name_error.value.status_code == 400
+
+    with pytest.raises(HTTPException) as description_error:
+        create_project(ProjectIn(name="required_project", description=""), admin, db)
+    assert description_error.value.status_code == 400
+
+
+def test_create_project_rejects_duplicate_active_name_but_allows_deleted_name(db_session):
+    db, admin = db_session
+    first = create_project(ProjectIn(name="duplicate_project", description="第一个"), admin, db)
+
+    with pytest.raises(HTTPException) as duplicate_error:
+        create_project(ProjectIn(name="duplicate_project", description="重复"), admin, db)
+    assert duplicate_error.value.status_code == 400
+
+    delete_project(first["id"], admin, db)
+    recreated = create_project(ProjectIn(name="duplicate_project", description="重建"), admin, db)
+    assert recreated["name"] == "duplicate_project"
+    assert recreated["is_deleted"] is False
+
+
+def test_delete_project_is_logical_and_excluded_from_lists(db_session):
+    db, admin = db_session
+    keep = create_project(ProjectIn(name="keep_project", description="保留"), admin, db)
+    deleted = create_project(ProjectIn(name="delete_project", description="删除"), admin, db)
+
+    result = delete_project(deleted["id"], admin, db)
+    assert result["is_deleted"] is True
+
+    stored = db.get(Project, deleted["id"])
+    assert stored is not None
+    assert stored.is_deleted is True
+
+    full_list = list_projects(_=admin, db=db)
+    assert [row["id"] for row in full_list] == [keep["id"]]
+
+    paged = list_projects(page=1, page_size=10, _=admin, db=db)
+    assert paged["total"] == 1
+    assert [row["id"] for row in paged["items"]] == [keep["id"]]
+
+    searched = list_projects(name="delete", page=1, page_size=10, _=admin, db=db)
+    assert searched["total"] == 0
+
+
+def test_deleted_project_cannot_be_updated_or_deleted_again(db_session):
+    db, admin = db_session
+    created = create_project(ProjectIn(name="deleted_project", description="删除"), admin, db)
+    delete_project(created["id"], admin, db)
+
+    with pytest.raises(HTTPException) as update_error:
+        update_project(created["id"], ProjectUpdate(name="new_name", description="新描述"), admin, db)
+    assert update_error.value.status_code == 404
+
+    with pytest.raises(HTTPException) as delete_error:
+        delete_project(created["id"], admin, db)
+    assert delete_error.value.status_code == 404
+
+    with pytest.raises(HTTPException) as missing_error:
+        delete_project(99999, admin, db)
+    assert missing_error.value.status_code == 404
+
+
+def test_environment_crud_paginates_and_searches(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="env_project", description="环境项目"), admin, db)
+    other_project = create_project(ProjectIn(name="env_other_project", description="其它项目"), admin, db)
+    for index in range(12):
+        create_environment(EnvironmentIn(project_id=project["id"], name=f"env_{index}", protocol="https", base_url=f"env{index}.example.com"), admin, db)
+    needle = create_environment(EnvironmentIn(project_id=project["id"], name="needle_env", protocol="https", base_url="needle.example.com"), admin, db)
+    same_name_other_project = create_environment(EnvironmentIn(project_id=other_project["id"], name="needle_env", protocol="https", base_url="other.example.com"), admin, db)
+
+    full_list = list_environments(_=admin, db=db)
+    assert isinstance(full_list, list)
+    assert len(full_list) == 14
+    assert full_list[0]["project_name"] == "env_other_project"
+
+    first_page = list_environments(page=1, page_size=50, _=admin, db=db)
+    assert first_page["total"] == 14
+    assert first_page["page_size"] == 10
+    assert len(first_page["items"]) == 10
+
+    project_filtered = list_environments(project_id=project["id"], page=1, page_size=10, _=admin, db=db)
+    assert project_filtered["total"] == 13
+
+    searched = list_environments(project_id=project["id"], name="needle", page=1, page_size=10, _=admin, db=db)
+    assert searched["total"] == 1
+    assert searched["items"][0]["id"] == needle["id"]
+    assert searched["items"][0]["protocol"] == "https"
+    assert searched["items"][0]["port"] == 443
+
+    other_searched = list_environments(project_id=other_project["id"], name="needle", page=1, page_size=10, _=admin, db=db)
+    assert other_searched["total"] == 1
+    assert other_searched["items"][0]["id"] == same_name_other_project["id"]
+
+
+def test_create_environment_validates_required_project_and_duplicate_name(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="env_required_project", description="环境项目"), admin, db)
+    other_project = create_project(ProjectIn(name="env_required_other", description="其它项目"), admin, db)
+    create_environment(EnvironmentIn(project_id=project["id"], name="test", protocol="https", base_url="test.example.com"), admin, db)
+
+    with pytest.raises(HTTPException) as project_error:
+        create_environment(EnvironmentIn(project_id=99999, name="missing", protocol="https", base_url="missing.example.com"), admin, db)
+    assert project_error.value.status_code == 404
+
+    with pytest.raises(HTTPException) as name_error:
+        create_environment(EnvironmentIn(project_id=project["id"], name="", protocol="https", base_url="empty.example.com"), admin, db)
+    assert name_error.value.status_code == 400
+
+    with pytest.raises(HTTPException) as url_error:
+        create_environment(EnvironmentIn(project_id=project["id"], name="empty_url", protocol="https", base_url=""), admin, db)
+    assert url_error.value.status_code == 400
+
+    with pytest.raises(HTTPException) as duplicate_error:
+        create_environment(EnvironmentIn(project_id=project["id"], name="test", protocol="https", base_url="dup.example.com"), admin, db)
+    assert duplicate_error.value.status_code == 400
+
+    same_name_other_project = create_environment(EnvironmentIn(project_id=other_project["id"], name="test", protocol="https", base_url="other.example.com"), admin, db)
+    assert same_name_other_project["name"] == "test"
+
+
+def test_create_environment_protocol_and_port_defaults(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="env_protocol_project", description="环境项目"), admin, db)
+
+    http_env = create_environment(EnvironmentIn(project_id=project["id"], name="http_env", protocol="http", base_url="http.example.com"), admin, db)
+    assert http_env["protocol"] == "http"
+    assert http_env["port"] == 80
+
+    https_env = create_environment(EnvironmentIn(project_id=project["id"], name="https_env", protocol="https", base_url="https.example.com"), admin, db)
+    assert https_env["protocol"] == "https"
+    assert https_env["port"] == 443
+
+    custom_port = create_environment(EnvironmentIn(project_id=project["id"], name="custom_port_env", protocol="https", base_url="custom.example.com", port=8443), admin, db)
+    assert custom_port["port"] == 8443
+
+    with pytest.raises(HTTPException) as port_error:
+        create_environment(EnvironmentIn(project_id=project["id"], name="bad_port_env", protocol="https", base_url="bad.example.com", port=0), admin, db)
+    assert port_error.value.status_code == 400
+
+
+def test_update_environment_and_reject_duplicate_name(db_session):
+    db, admin = db_session
+    first_project = create_project(ProjectIn(name="env_update_project", description="环境项目"), admin, db)
+    second_project = create_project(ProjectIn(name="env_update_other", description="其它项目"), admin, db)
+    first = create_environment(EnvironmentIn(project_id=first_project["id"], name="first", protocol="https", base_url="first.example.com"), admin, db)
+    create_environment(EnvironmentIn(project_id=second_project["id"], name="duplicate", protocol="https", base_url="dup.example.com"), admin, db)
+
+    updated = update_environment(first["id"], EnvironmentUpdate(project_id=second_project["id"], name="first_new", protocol="http", base_url="new.example.com", port=8080), admin, db)
+    assert updated["project_id"] == second_project["id"]
+    assert updated["project_name"] == "env_update_other"
+    assert updated["name"] == "first_new"
+    assert updated["protocol"] == "http"
+    assert updated["base_url"] == "new.example.com"
+    assert updated["port"] == 8080
+
+    with pytest.raises(HTTPException) as duplicate_error:
+        update_environment(first["id"], EnvironmentUpdate(project_id=second_project["id"], name="duplicate", protocol="https", base_url="dup2.example.com"), admin, db)
+    assert duplicate_error.value.status_code == 400
+
+
+def test_delete_environment_is_logical_and_excluded_from_lists(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="env_delete_project", description="环境项目"), admin, db)
+    keep = create_environment(EnvironmentIn(project_id=project["id"], name="keep_env", protocol="https", base_url="keep.example.com"), admin, db)
+    deleted = create_environment(EnvironmentIn(project_id=project["id"], name="delete_env", protocol="https", base_url="delete.example.com"), admin, db)
+
+    result = delete_environment(deleted["id"], admin, db)
+    assert result["is_deleted"] is True
+
+    stored = db.get(Environment, deleted["id"])
+    assert stored is not None
+    assert stored.is_deleted is True
+
+    full_list = list_environments(_=admin, db=db)
+    assert [row["id"] for row in full_list] == [keep["id"]]
+
+    paged = list_environments(page=1, page_size=10, _=admin, db=db)
+    assert paged["total"] == 1
+    assert [row["id"] for row in paged["items"]] == [keep["id"]]
+
+    searched = list_environments(name="delete", page=1, page_size=10, _=admin, db=db)
+    assert searched["total"] == 0
+
+    recreated = create_environment(EnvironmentIn(project_id=project["id"], name="delete_env", protocol="https", base_url="recreated.example.com"), admin, db)
+    assert recreated["is_deleted"] is False
+
+
+def test_deleted_environment_cannot_be_updated_or_deleted_again(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="env_deleted_project", description="环境项目"), admin, db)
+    created = create_environment(EnvironmentIn(project_id=project["id"], name="deleted_env", protocol="https", base_url="deleted.example.com"), admin, db)
+    delete_environment(created["id"], admin, db)
+
+    with pytest.raises(HTTPException) as update_error:
+        update_environment(created["id"], EnvironmentUpdate(project_id=project["id"], name="new_env", protocol="https", base_url="new.example.com"), admin, db)
+    assert update_error.value.status_code == 404
+
+    with pytest.raises(HTTPException) as delete_error:
+        delete_environment(created["id"], admin, db)
+    assert delete_error.value.status_code == 404
