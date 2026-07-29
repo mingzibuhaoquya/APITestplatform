@@ -1,0 +1,17 @@
+# Frontend dependencies and build output
+/frontend/node_modules/
+/frontend/dist/
+
+# Python local environment and generated artifacts
+/.venv/
+__pycache__/
+*.py[cod]
+/.pytest_cache/
+.coverage
+htmlcov/
+
+# Local runtime files
+/backend/logs/
+/logs/
+/outputs/
+/work/
