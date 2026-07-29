@@ -5,7 +5,7 @@
       <el-form label-position="top" @submit.prevent="login">
         <el-form-item label="用户名"><el-input v-model="loginForm.username" /></el-form-item>
         <el-form-item label="密码"><el-input v-model="loginForm.password" type="password" show-password /></el-form-item>
-        <el-button type="primary" class="full" @click="login">登录</el-button>
+        <el-button type="primary" native-type="submit" class="full">登录</el-button>
       </el-form>
     </el-card>
   </div>
@@ -318,18 +318,156 @@
         </section>
 
         <section v-if="active === 'apis'">
-          <div class="toolbar"><h2>接口管理</h2><el-button type="primary" @click="createApi">保存接口</el-button></div>
-          <el-form label-position="top" class="form-grid">
-            <el-form-item label="项目"><el-select v-model="apiForm.project_id"><el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" /></el-select></el-form-item>
-            <el-form-item label="模块"><el-input v-model="apiForm.module" /></el-form-item>
-            <el-form-item label="名称"><el-input v-model="apiForm.name" /></el-form-item>
-            <el-form-item label="方法"><el-select v-model="apiForm.method"><el-option v-for="m in methods" :key="m" :label="m" :value="m" /></el-select></el-form-item>
-            <el-form-item label="路径"><el-input v-model="apiForm.path" placeholder="/users" /></el-form-item>
-            <el-form-item label="Query 参数 JSON"><el-input v-model="apiForm.queryText" /></el-form-item>
-            <el-form-item label="Body JSON" class="wide"><el-input v-model="apiForm.bodyText" type="textarea" :rows="4" /></el-form-item>
-            <el-form-item label="Headers JSON" class="wide"><el-input v-model="apiForm.headersText" type="textarea" :rows="3" /></el-form-item>
+          <div class="toolbar"><h2>接口管理</h2><el-button type="primary" @click="openCreateApiDialog">新增接口</el-button></div>
+          <el-form class="search-form" label-position="top">
+            <el-form-item label="项目">
+              <el-select v-model="apiSearch.project_id" placeholder="请选择项目" clearable @change="apiSearch.environment_id = undefined">
+                <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="环境">
+              <el-select v-model="apiSearch.environment_id" placeholder="请先选择项目" clearable :disabled="!apiSearch.project_id">
+                <el-option v-for="e in apiSearchEnvironments" :key="e.id" :label="e.name" :value="e.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="名称">
+              <el-input v-model="apiSearch.name" placeholder="请输入接口名称" clearable @keyup.enter="searchApis" />
+            </el-form-item>
+            <el-form-item label="URL名称">
+              <el-input v-model="apiSearch.url" placeholder="请输入接口路径" clearable @keyup.enter="searchApis" />
+            </el-form-item>
+            <div class="search-actions">
+              <el-button type="primary" @click="searchApis">搜索</el-button>
+              <el-button @click="resetApiSearch">重置</el-button>
+            </div>
           </el-form>
-          <el-table :data="apis"><el-table-column prop="name" label="接口" /><el-table-column prop="method" label="方法" /><el-table-column prop="path" label="路径" /></el-table>
+          <el-table :data="apiList">
+            <el-table-column prop="project_name" label="项目" />
+            <el-table-column prop="environment_name" label="环境" />
+            <el-table-column prop="name" label="名称" />
+            <el-table-column prop="description" label="接口描述" />
+            <el-table-column prop="method" label="方法" width="100" />
+            <el-table-column prop="path" label="路径" />
+            <el-table-column prop="create_date" label="创建时间" width="170" />
+            <el-table-column prop="update_date" label="更新时间" width="170" />
+            <el-table-column label="操作" width="160" fixed="right">
+              <template #default="{ row }">
+                <el-button size="small" @click="openEditApiDialog(row)">编辑</el-button>
+                <el-button size="small" type="danger" @click="deleteApi(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div class="pagination">
+            <el-pagination
+              background
+              layout="total, prev, pager, next"
+              :current-page="apiPagination.page"
+              :page-size="apiPagination.pageSize"
+              :total="apiPagination.total"
+              @current-change="changeApiPage"
+            />
+          </div>
+
+        </section>
+
+        <section v-if="activeApiEditor" class="api-editor-page">
+          <div class="toolbar">
+            <h2>{{ activeApiEditor.label }}</h2>
+            <div class="toolbar-actions">
+              <el-button @click="closeApiEditorFromPage(activeApiEditor)">关闭</el-button>
+              <el-button type="primary" @click="saveApiEditor(activeApiEditor)">保存</el-button>
+            </div>
+          </div>
+
+          <div class="editor-section">
+            <h3>基础信息</h3>
+            <el-form label-position="top" class="form-grid">
+              <el-form-item label="项目">
+                <el-select
+                  v-model="activeApiEditor.project_id"
+                  placeholder="请选择项目"
+                  @change="changeApiEditorProject(activeApiEditor)"
+                >
+                  <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="环境">
+                <el-select
+                  v-model="activeApiEditor.environment_id"
+                  placeholder="请先选择项目"
+                  :disabled="!activeApiEditor.project_id"
+                  @change="markApiEditorDirty(activeApiEditor)"
+                >
+                  <el-option v-for="e in editorEnvironments(activeApiEditor)" :key="e.id" :label="e.name" :value="e.id" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="名称">
+                <el-input v-model="activeApiEditor.name" placeholder="请输入接口名称" @input="markApiEditorDirty(activeApiEditor)" />
+              </el-form-item>
+              <el-form-item label="接口描述" class="wide">
+                <el-input v-model="activeApiEditor.description" type="textarea" :rows="3" placeholder="请输入接口描述" @input="markApiEditorDirty(activeApiEditor)" />
+              </el-form-item>
+            </el-form>
+          </div>
+
+          <div class="editor-section">
+            <h3>接口信息</h3>
+            <div class="request-line">
+              <el-select v-model="activeApiEditor.method" placeholder="方法" class="method-select" @change="markApiEditorDirty(activeApiEditor)">
+                <el-option v-for="m in methods" :key="m" :label="m" :value="m" />
+              </el-select>
+              <el-input v-model="activeApiEditor.path" placeholder="请输入接口路径 URL，例如 /users" @input="markApiEditorDirty(activeApiEditor)" />
+            </div>
+
+            <el-tabs v-model="activeApiEditor.activePanel" class="api-info-tabs">
+              <el-tab-pane label="URL参数" name="query">
+                <div class="kv-title">
+                  <h4>URL参数</h4>
+                  <el-button size="small" @click="addApiEditorRow(activeApiEditor.queryRows)">添加</el-button>
+                </div>
+                <el-table :data="activeApiEditor.queryRows">
+                  <el-table-column label="Key">
+                    <template #default="{ row }"><el-input v-model="row.key" placeholder="key" @input="markApiEditorDirty(activeApiEditor)" /></template>
+                  </el-table-column>
+                  <el-table-column label="Value">
+                    <template #default="{ row }"><el-input v-model="row.value" placeholder="value" @input="markApiEditorDirty(activeApiEditor)" /></template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="90">
+                    <template #default="{ $index }"><el-button size="small" type="danger" @click="removeApiEditorRow(activeApiEditor.queryRows, $index, activeApiEditor)">删除</el-button></template>
+                  </el-table-column>
+                </el-table>
+              </el-tab-pane>
+
+              <el-tab-pane label="请求头Header" name="headers">
+                <div class="kv-title">
+                  <h4>请求头Header</h4>
+                  <el-button size="small" @click="addApiEditorRow(activeApiEditor.headerRows)">添加</el-button>
+                </div>
+                <el-table :data="activeApiEditor.headerRows">
+                  <el-table-column label="Key">
+                    <template #default="{ row }"><el-input v-model="row.key" placeholder="Authorization / Content-Type" @input="markApiEditorDirty(activeApiEditor)" /></template>
+                  </el-table-column>
+                  <el-table-column label="Value">
+                    <template #default="{ row }"><el-input v-model="row.value" placeholder="value" @input="markApiEditorDirty(activeApiEditor)" /></template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="90">
+                    <template #default="{ $index }"><el-button size="small" type="danger" @click="removeApiEditorRow(activeApiEditor.headerRows, $index, activeApiEditor)">删除</el-button></template>
+                  </el-table-column>
+                </el-table>
+              </el-tab-pane>
+
+              <el-tab-pane label="请求Body" name="body">
+                <div class="body-format-row">
+                  <span>Body格式</span>
+                  <el-radio-group v-model="activeApiEditor.bodyFormat" @change="changeApiEditorBodyFormat(activeApiEditor)">
+                    <el-radio-button label="json">json</el-radio-button>
+                    <el-radio-button label="xml">xml</el-radio-button>
+                    <el-radio-button label="x-www-form-data">x-www-form-data</el-radio-button>
+                  </el-radio-group>
+                </div>
+              </el-tab-pane>
+            </el-tabs>
+          </div>
         </section>
 
         <section v-if="active === 'cases'">
@@ -401,6 +539,24 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, type User } from './api'
 
 type AppTab = { name: string; label: string; closable: boolean }
+type KeyValueRow = { id: number; key: string; value: string }
+type ApiEditor = {
+  tabName: string
+  label: string
+  mode: 'create' | 'edit'
+  apiId?: number
+  project_id?: number
+  environment_id?: number
+  name: string
+  description: string
+  method: string
+  path: string
+  bodyFormat: 'json' | 'xml' | 'x-www-form-data'
+  activePanel: '' | 'query' | 'headers' | 'body'
+  queryRows: KeyValueRow[]
+  headerRows: KeyValueRow[]
+  dirty: boolean
+}
 
 const menuMeta: Record<string, AppTab> = {
   dashboard: { name: 'dashboard', label: '数据概览', closable: false },
@@ -446,6 +602,7 @@ const projectList = ref<any[]>([])
 const environments = ref<any[]>([])
 const environmentList = ref<any[]>([])
 const apis = ref<any[]>([])
+const apiList = ref<any[]>([])
 const cases = ref<any[]>([])
 const executions = ref<any[]>([])
 const logs = ref<any[]>([])
@@ -458,6 +615,8 @@ const projectSearch = reactive({ name: '' })
 const projectPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const environmentSearch = reactive({ project_id: undefined as number | undefined, name: '' })
 const environmentPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const apiSearch = reactive({ project_id: undefined as number | undefined, environment_id: undefined as number | undefined, name: '', url: '' })
+const apiPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const createUserDialogVisible = ref(false)
 const editUserDialogVisible = ref(false)
 const createProjectDialogVisible = ref(false)
@@ -472,10 +631,12 @@ const projectForm = reactive({ name: '', description: '' })
 const editProjectForm = reactive({ id: undefined as number | undefined, name: '', description: '' })
 const envForm = reactive({ project_id: undefined as number | undefined, name: '', protocol: '', base_url: '', port: '' })
 const editEnvironmentForm = reactive({ id: undefined as number | undefined, project_id: undefined as number | undefined, name: '', protocol: '', base_url: '', port: '' })
-const apiForm = reactive({ project_id: undefined as number | undefined, module: '', name: '', method: 'GET', path: '', headersText: '{}', queryText: '{}', bodyText: '{}' })
 const caseForm = reactive({ project_id: undefined as number | undefined, api_id: undefined as number | undefined, name: '', priority: 'P2', assertionsText: '[{"type":"status_code","expected":200}]', extractorsText: '[]' })
 const execForm = reactive({ project_id: undefined as number | undefined, environment_id: undefined as number | undefined, target_id: undefined as number | undefined })
+const apiEditors = reactive<Record<string, ApiEditor>>({})
 const avatarText = computed(() => me.value?.username.slice(0, 1).toUpperCase() || 'U')
+const apiSearchEnvironments = computed(() => environments.value.filter(environment => !apiSearch.project_id || environment.project_id === apiSearch.project_id))
+const activeApiEditor = computed(() => apiEditors[active.value])
 
 function parseJson(text: string, fallback: any) {
   try { return JSON.parse(text || '') } catch { return fallback }
@@ -493,6 +654,7 @@ async function loadAll() {
   calls.push(loadUsers())
   calls.push(loadProjects())
   calls.push(loadEnvironments())
+  calls.push(loadApis())
   await Promise.allSettled(calls)
 }
 
@@ -595,6 +757,46 @@ async function changeEnvironmentPage(page: number) {
   await loadEnvironments()
 }
 
+async function loadApis() {
+  const projectId = apiSearch.project_id
+  const environmentId = apiSearch.environment_id
+  const name = apiSearch.name.trim()
+  const url = apiSearch.url.trim()
+  const { data } = await api.get('/apis', {
+    params: {
+      ...(projectId ? { project_id: projectId } : {}),
+      ...(environmentId ? { environment_id: environmentId } : {}),
+      ...(name ? { name } : {}),
+      ...(url ? { url } : {}),
+      page: apiPagination.page,
+      page_size: apiPagination.pageSize
+    }
+  })
+  apiList.value = data.items
+  apiPagination.total = data.total
+  apiPagination.page = data.page
+  apiPagination.pageSize = data.page_size
+}
+
+async function searchApis() {
+  apiPagination.page = 1
+  await loadApis()
+}
+
+async function resetApiSearch() {
+  apiSearch.project_id = undefined
+  apiSearch.environment_id = undefined
+  apiSearch.name = ''
+  apiSearch.url = ''
+  apiPagination.page = 1
+  await loadApis()
+}
+
+async function changeApiPage(page: number) {
+  apiPagination.page = page
+  await loadApis()
+}
+
 async function login() {
   try {
     const { data } = await api.post('/auth/login', loginForm)
@@ -633,6 +835,14 @@ function openTab(index: string) {
   saveTabs()
 }
 
+function openRuntimeTab(tab: AppTab) {
+  if (!openedTabs.value.some(item => item.name === tab.name)) {
+    openedTabs.value.push(tab)
+  }
+  active.value = tab.name
+  saveTabs()
+}
+
 function selectMenu(index: string) {
   openTab(index)
 }
@@ -642,8 +852,16 @@ function switchTab(name: string | number) {
   saveTabs()
 }
 
-function closeTab(name: string | number) {
+async function closeTab(name: string | number) {
   const target = String(name)
+  if (apiEditors[target]) {
+    await requestCloseApiEditor(apiEditors[target])
+    return
+  }
+  removeTab(target)
+}
+
+function removeTab(target: string) {
   const index = openedTabs.value.findIndex(tab => tab.name === target)
   const tab = openedTabs.value[index]
   if (index === -1 || !tab?.closable) {
@@ -1090,9 +1308,314 @@ async function deleteEnvironment(environment: any) {
   await refreshEnvironmentsAfterDelete()
 }
 
-async function createApi() {
-  await api.post('/apis', { ...apiForm, headers: parseJson(apiForm.headersText, {}), query: parseJson(apiForm.queryText, {}), body: parseJson(apiForm.bodyText, {}) })
-  await loadAll()
+async function refreshApisAfterChange() {
+  await Promise.all([
+    api.get('/apis').then(r => apis.value = r.data),
+    loadApis()
+  ])
+}
+
+async function refreshApisAfterDelete() {
+  await refreshApisAfterChange()
+  if (apiList.value.length === 0 && apiPagination.page > 1) {
+    apiPagination.page -= 1
+    await loadApis()
+  }
+}
+
+function apiNameExists(projectId: number, name: string, apiId?: number) {
+  return apis.value.some(item =>
+    item.project_id === projectId &&
+    item.name === name &&
+    item.id !== apiId
+  )
+}
+
+let apiRowId = 1
+const contentTypes: Record<ApiEditor['bodyFormat'], string> = {
+  json: 'application/json',
+  xml: 'application/xml',
+  'x-www-form-data': 'application/x-www-form-urlencoded'
+}
+
+function nextApiRow(key = '', value = ''): KeyValueRow {
+  return { id: apiRowId++, key, value }
+}
+
+function defaultHeaderRows() {
+  return [
+    nextApiRow('Connection', 'keep-alive'),
+    nextApiRow('Accept-Encoding', 'gzip, deflate, br'),
+    nextApiRow('Content-Type', contentTypes.json)
+  ]
+}
+
+function objectToRows(value: any, fallback: KeyValueRow[] = []) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return fallback
+  }
+  return Object.entries(value).map(([key, rowValue]) => nextApiRow(key, String(rowValue ?? '')))
+}
+
+function mergeDefaultHeaders(rows: KeyValueRow[]) {
+  const merged = [...rows]
+  defaultHeaderRows().forEach(defaultRow => {
+    if (!merged.some(row => row.key.trim().toLowerCase() === defaultRow.key.toLowerCase())) {
+      merged.push(defaultRow)
+    }
+  })
+  return merged
+}
+
+function bodyFormatFromApi(row: any): ApiEditor['bodyFormat'] {
+  const format = row?.body?.format
+  if (format === 'xml' || format === 'x-www-form-data') {
+    return format
+  }
+  return 'json'
+}
+
+function createEmptyApiEditor(): ApiEditor {
+  const editor: ApiEditor = {
+    tabName: 'api-create',
+    label: '新增接口',
+    mode: 'create',
+    project_id: undefined,
+    environment_id: undefined,
+    name: '',
+    description: '',
+    method: 'GET',
+    path: '',
+    bodyFormat: 'json',
+    activePanel: '',
+    queryRows: [],
+    headerRows: defaultHeaderRows(),
+    dirty: false
+  }
+  return editor
+}
+
+function createEditApiEditor(row: any): ApiEditor {
+  const savedHeaderRows = objectToRows(row.headers)
+  const editor: ApiEditor = {
+    tabName: `api-edit-${row.id}`,
+    label: `编辑接口-${row.id}`,
+    mode: 'edit',
+    apiId: row.id,
+    project_id: row.project_id,
+    environment_id: row.environment_id || undefined,
+    name: row.name || '',
+    description: row.description || '',
+    method: row.method || 'GET',
+    path: row.path || '',
+    bodyFormat: bodyFormatFromApi(row),
+    activePanel: '',
+    queryRows: objectToRows(row.query),
+    headerRows: mergeDefaultHeaders(savedHeaderRows),
+    dirty: false
+  }
+  syncApiEditorContentType(editor, false)
+  return editor
+}
+
+function openCreateApiDialog() {
+  if (!apiEditors['api-create']) {
+    apiEditors['api-create'] = createEmptyApiEditor()
+  }
+  openRuntimeTab({ name: 'api-create', label: '新增接口', closable: true })
+}
+
+function openEditApiDialog(row: any) {
+  const tabName = `api-edit-${row.id}`
+  if (!apiEditors[tabName]) {
+    apiEditors[tabName] = createEditApiEditor(row)
+  }
+  openRuntimeTab({ name: tabName, label: `编辑接口-${row.id}`, closable: true })
+}
+
+function editorEnvironments(editor: ApiEditor) {
+  return environments.value.filter(environment => editor.project_id && environment.project_id === editor.project_id)
+}
+
+function markApiEditorDirty(editor: ApiEditor) {
+  editor.dirty = true
+}
+
+function changeApiEditorProject(editor: ApiEditor) {
+  editor.environment_id = undefined
+  markApiEditorDirty(editor)
+}
+
+function syncApiEditorContentType(editor: ApiEditor, dirty = true) {
+  const row = editor.headerRows.find(item => item.key.trim().toLowerCase() === 'content-type')
+  if (row) {
+    row.value = contentTypes[editor.bodyFormat]
+  } else {
+    editor.headerRows.push(nextApiRow('Content-Type', contentTypes[editor.bodyFormat]))
+  }
+  if (dirty) {
+    markApiEditorDirty(editor)
+  }
+}
+
+function changeApiEditorBodyFormat(editor: ApiEditor) {
+  syncApiEditorContentType(editor)
+}
+
+function addApiEditorRow(rows: KeyValueRow[], key = '') {
+  rows.push(nextApiRow(key, ''))
+  if (activeApiEditor.value) {
+    markApiEditorDirty(activeApiEditor.value)
+  }
+}
+
+function removeApiEditorRow(rows: KeyValueRow[], index: number, editor: ApiEditor) {
+  rows.splice(index, 1)
+  markApiEditorDirty(editor)
+}
+
+function rowsToObject(rows: KeyValueRow[]) {
+  return rows.reduce<Record<string, string>>((result, row) => {
+    const key = row.key.trim()
+    if (key) {
+      result[key] = row.value
+    }
+    return result
+  }, {})
+}
+
+function apiPayload(editor: ApiEditor) {
+  const headers = rowsToObject(editor.headerRows)
+  return {
+    project_id: editor.project_id,
+    environment_id: editor.environment_id,
+    name: editor.name.trim(),
+    description: editor.description.trim(),
+    method: editor.method,
+    path: editor.path.trim(),
+    headers,
+    query: rowsToObject(editor.queryRows),
+    body: { format: editor.bodyFormat }
+  }
+}
+
+function validateApiEditor(editor: ApiEditor) {
+  const payload = apiPayload(editor)
+  if (!payload.project_id) {
+    ElMessage.warning('请选择项目')
+    return null
+  }
+  if (!payload.environment_id) {
+    ElMessage.warning('请选择环境')
+    return null
+  }
+  if (!payload.name) {
+    ElMessage.warning('请输入接口名称')
+    return null
+  }
+  if (!payload.path) {
+    ElMessage.warning('请输入接口路径')
+    return null
+  }
+  if (apiNameExists(payload.project_id, payload.name, editor.apiId)) {
+    ElMessage.warning('接口名称已存在')
+    return null
+  }
+  return payload
+}
+
+async function saveApiEditor(editor: ApiEditor, closeAfterSave = false) {
+  const payload = validateApiEditor(editor)
+  if (!payload) {
+    return false
+  }
+  try {
+    if (editor.mode === 'edit') {
+      await api.put(`/apis/${editor.apiId}`, payload)
+      ElMessage.success('接口已更新')
+    } else {
+      const { data } = await api.post('/apis', payload)
+      ElMessage.success('接口已创建')
+      if (!closeAfterSave) {
+        promoteCreatedApiEditor(editor, data.id)
+      }
+    }
+    editor.dirty = false
+    await refreshApisAfterChange()
+    if (closeAfterSave) {
+      closeApiEditorSilently(editor.tabName)
+    }
+    return true
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || '接口保存失败')
+    return false
+  }
+}
+
+function promoteCreatedApiEditor(editor: ApiEditor, apiId: number) {
+  const oldTabName = editor.tabName
+  const newTabName = `api-edit-${apiId}`
+  delete apiEditors[oldTabName]
+  editor.tabName = newTabName
+  editor.label = `编辑接口-${apiId}`
+  editor.mode = 'edit'
+  editor.apiId = apiId
+  apiEditors[newTabName] = editor
+  const tab = openedTabs.value.find(item => item.name === oldTabName)
+  if (tab) {
+    tab.name = newTabName
+    tab.label = editor.label
+  }
+  active.value = newTabName
+  saveTabs()
+}
+
+function closeApiEditorSilently(tabName: string) {
+  delete apiEditors[tabName]
+  removeTab(tabName)
+}
+
+async function requestCloseApiEditor(editor: ApiEditor) {
+  if (!editor.dirty) {
+    closeApiEditorSilently(editor.tabName)
+    return
+  }
+  try {
+    await ElMessageBox.confirm('当前接口内容尚未保存，是否保存后关闭？', '关闭接口', {
+      confirmButtonText: '保存并关闭',
+      cancelButtonText: '不保存关闭',
+      distinguishCancelAndClose: true,
+      type: 'warning'
+    })
+    await saveApiEditor(editor, true)
+  } catch (action) {
+    if (action === 'cancel') {
+      closeApiEditorSilently(editor.tabName)
+    }
+  }
+}
+
+async function closeApiEditorFromPage(editor: ApiEditor) {
+  await requestCloseApiEditor(editor)
+}
+
+async function deleteApi(row: any) {
+  try {
+    await ElMessageBox.confirm('确认删除该接口吗？', '删除接口', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  try {
+    await api.delete(`/apis/${row.id}`)
+    ElMessage.success('接口已删除')
+    await refreshApisAfterDelete()
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || '接口删除失败')
+  }
 }
 
 async function createCase() {

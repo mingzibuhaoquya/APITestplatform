@@ -32,6 +32,16 @@ body {
 .el-aside {
   background: #111827;
   color: #fff;
+  position: fixed;
+  inset: 0 auto 0 0;
+  height: 100vh;
+  overflow-y: auto;
+  z-index: 20;
+}
+
+.shell > .el-container {
+  margin-left: 220px;
+  min-width: 0;
 }
 
 .brand {
@@ -134,19 +144,24 @@ body {
 }
 
 .el-main {
-  padding: 24px;
+  padding: 16px 18px;
 }
 
 .toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .toolbar h2,
 .toolbar h3 {
   margin: 0;
+}
+
+.toolbar-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .sub {
@@ -166,17 +181,17 @@ body {
 .inline-form {
   display: grid;
   grid-template-columns: repeat(4, minmax(160px, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
 .search-form {
   display: grid;
-  grid-template-columns: minmax(220px, 320px) minmax(140px, 180px) auto;
-  gap: 12px;
+  grid-template-columns: repeat(4, minmax(150px, 240px)) auto;
+  gap: 10px;
   align-items: end;
   justify-content: start;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .search-form .el-form-item {
@@ -185,7 +200,7 @@ body {
 
 .search-actions {
   display: flex;
-  gap: 12px;
+  gap: 8px;
 }
 
 .pagination {
@@ -197,19 +212,84 @@ body {
 .form-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(180px, 1fr));
-  gap: 12px 16px;
-  margin-bottom: 20px;
+  gap: 8px 12px;
+  margin-bottom: 10px;
 }
 
 .wide {
   grid-column: span 3;
 }
 
+.api-editor-page {
+  display: grid;
+  gap: 12px;
+}
+
+.editor-section {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 12px 14px;
+}
+
+.editor-section h3,
+.kv-title h4 {
+  margin: 0;
+}
+
+.editor-section h3 {
+  margin-bottom: 10px;
+  font-size: 16px;
+}
+
+.request-line {
+  display: grid;
+  grid-template-columns: 120px minmax(320px, 1fr);
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.method-select {
+  width: 120px;
+}
+
+.api-info-tabs .el-tabs__header {
+  margin: 0 0 10px;
+}
+
+.api-info-tabs .el-tabs__nav-wrap::after {
+  height: 1px;
+}
+
+.api-info-tabs .el-tabs__item {
+  height: 34px;
+  padding: 0 18px;
+}
+
+.api-info-tabs .el-table .el-table__cell {
+  padding: 6px 0;
+}
+
+.kv-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.body-format-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+}
+
 @media (max-width: 900px) {
   .grid,
   .inline-form,
   .search-form,
-  .form-grid {
+  .form-grid,
+  .request-line {
     grid-template-columns: 1fr;
   }
 

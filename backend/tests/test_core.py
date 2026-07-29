@@ -6,11 +6,11 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
-from app.models import Environment, Project, User
+from app.models import Environment, Project, TestCase as TestCaseModel, User
 from app.routers.auth import change_password, login
-from app.routers.crud import create_environment, create_project, delete_environment, delete_project, list_environments, list_projects, update_environment, update_project
+from app.routers.crud import create_api, create_environment, create_project, delete_api, delete_environment, delete_project, list_apis, list_environments, list_projects, update_api, update_environment, update_project
 from app.routers.users import create_user, list_users, router as users_router, update_user, update_user_status
-from app.schemas import ChangePasswordIn, EnvironmentIn, EnvironmentUpdate, LoginIn, ProjectIn, ProjectUpdate, UserCreate, UserStatusUpdate, UserUpdate
+from app.schemas import ApiDefinitionIn, ApiDefinitionUpdate, ChangePasswordIn, EnvironmentIn, EnvironmentUpdate, LoginIn, ProjectIn, ProjectUpdate, UserCreate, UserStatusUpdate, UserUpdate
 from app.services.assertions import all_passed, run_assertions
 from app.services.jsonpath import find_jsonpath
 from app.services.variables import render_variables
@@ -37,6 +37,14 @@ def db_session():
         yield db, admin
     finally:
         db.close()
+
+
+def create_test_environment(project_id: int, admin: User, db):
+    return create_environment(
+        EnvironmentIn(project_id=project_id, name=f"env_{project_id}", protocol="https", base_url=f"project-{project_id}.example.com"),
+        admin,
+        db,
+    )
 
 
 def test_render_variables_nested():
@@ -439,3 +447,157 @@ def test_deleted_environment_cannot_be_updated_or_deleted_again(db_session):
     with pytest.raises(HTTPException) as delete_error:
         delete_environment(created["id"], admin, db)
     assert delete_error.value.status_code == 404
+
+
+def test_api_crud_paginates_and_searches(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="api_project", description="api project"), admin, db)
+    other_project = create_project(ProjectIn(name="api_other_project", description="other project"), admin, db)
+    environment = create_test_environment(project["id"], admin, db)
+    other_environment = create_test_environment(other_project["id"], admin, db)
+    for index in range(12):
+        create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name=f"api_{index}", method="GET", path=f"/api/{index}"), admin, db)
+    needle = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="needle_api", method="POST", path="/needle/url", description="target api"), admin, db)
+    same_name_other_project = create_api(ApiDefinitionIn(project_id=other_project["id"], environment_id=other_environment["id"], name="needle_api", method="GET", path="/other/needle"), admin, db)
+
+    full_list = list_apis(_=admin, db=db)
+    assert isinstance(full_list, list)
+    assert len(full_list) == 14
+    assert full_list[0]["project_name"] == "api_other_project"
+    assert full_list[0]["environment_name"] == "env_{}".format(other_project["id"])
+
+    first_page = list_apis(page=1, page_size=50, _=admin, db=db)
+    assert first_page["total"] == 14
+    assert first_page["page_size"] == 10
+    assert len(first_page["items"]) == 10
+
+    project_filtered = list_apis(project_id=project["id"], page=1, page_size=10, _=admin, db=db)
+    assert project_filtered["total"] == 13
+
+    environment_filtered = list_apis(environment_id=environment["id"], page=1, page_size=10, _=admin, db=db)
+    assert environment_filtered["total"] == 13
+
+    name_searched = list_apis(project_id=project["id"], name="needle", page=1, page_size=10, _=admin, db=db)
+    assert name_searched["total"] == 1
+    assert name_searched["items"][0]["id"] == needle["id"]
+    assert name_searched["items"][0]["description"] == "target api"
+
+    url_searched = list_apis(project_id=project["id"], url="/needle", page=1, page_size=10, _=admin, db=db)
+    assert url_searched["total"] == 1
+    assert url_searched["items"][0]["id"] == needle["id"]
+
+    other_searched = list_apis(project_id=other_project["id"], name="needle", page=1, page_size=10, _=admin, db=db)
+    assert other_searched["total"] == 1
+    assert other_searched["items"][0]["id"] == same_name_other_project["id"]
+
+
+def test_create_api_validates_required_project_name_path_and_duplicate_name(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="api_required_project", description="api project"), admin, db)
+    other_project = create_project(ProjectIn(name="api_required_other", description="other project"), admin, db)
+    environment = create_test_environment(project["id"], admin, db)
+    other_environment = create_test_environment(other_project["id"], admin, db)
+    created = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="login", method="POST", path="/login", module="legacy", headers={"A": "B"}, query={"q": 1}, body={"x": 1}, description="login api"), admin, db)
+
+    assert created["environment_id"] == environment["id"]
+    assert created["environment_name"] == "env_{}".format(project["id"])
+    assert created["module"] == ""
+    assert created["headers"] == {"A": "B"}
+    assert created["query"] == {"q": 1}
+    assert created["body"] == {"x": 1}
+    assert created["description"] == "login api"
+
+    with pytest.raises(HTTPException) as project_error:
+        create_api(ApiDefinitionIn(project_id=99999, environment_id=environment["id"], name="missing", method="GET", path="/missing"), admin, db)
+    assert project_error.value.status_code == 404
+
+    with pytest.raises(HTTPException) as environment_error:
+        create_api(ApiDefinitionIn(project_id=project["id"], environment_id=99999, name="missing_env", method="GET", path="/missing-env"), admin, db)
+    assert environment_error.value.status_code == 404
+
+    with pytest.raises(HTTPException) as environment_project_error:
+        create_api(ApiDefinitionIn(project_id=project["id"], environment_id=other_environment["id"], name="wrong_env", method="GET", path="/wrong-env"), admin, db)
+    assert environment_project_error.value.status_code == 400
+
+    with pytest.raises(HTTPException) as name_error:
+        create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="", method="GET", path="/empty"), admin, db)
+    assert name_error.value.status_code == 400
+
+    with pytest.raises(HTTPException) as path_error:
+        create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="empty_path", method="GET", path=""), admin, db)
+    assert path_error.value.status_code == 400
+
+    with pytest.raises(HTTPException) as duplicate_error:
+        create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="login", method="GET", path="/duplicate"), admin, db)
+    assert duplicate_error.value.status_code == 400
+
+    same_name_other_project = create_api(ApiDefinitionIn(project_id=other_project["id"], environment_id=other_environment["id"], name="login", method="GET", path="/login"), admin, db)
+    assert same_name_other_project["name"] == "login"
+
+
+def test_update_api_and_reject_duplicate_name(db_session):
+    db, admin = db_session
+    first_project = create_project(ProjectIn(name="api_update_project", description="api project"), admin, db)
+    second_project = create_project(ProjectIn(name="api_update_other", description="other project"), admin, db)
+    first_environment = create_test_environment(first_project["id"], admin, db)
+    second_environment = create_test_environment(second_project["id"], admin, db)
+    first = create_api(ApiDefinitionIn(project_id=first_project["id"], environment_id=first_environment["id"], name="first_api", method="GET", path="/first"), admin, db)
+    create_api(ApiDefinitionIn(project_id=second_project["id"], environment_id=second_environment["id"], name="duplicate_api", method="GET", path="/duplicate"), admin, db)
+
+    updated = update_api(
+        first["id"],
+        ApiDefinitionUpdate(
+            project_id=second_project["id"],
+            environment_id=second_environment["id"],
+            name="first_new",
+            method="PUT",
+            path="/new",
+            headers={"Content-Type": "application/json", "Authorization": "Bearer abc"},
+            query={"page": "1"},
+            body={"format": "json"},
+            description="new description",
+        ),
+        admin,
+        db,
+    )
+    assert updated["project_id"] == second_project["id"]
+    assert updated["environment_id"] == second_environment["id"]
+    assert updated["project_name"] == "api_update_other"
+    assert updated["environment_name"] == "env_{}".format(second_project["id"])
+    assert updated["name"] == "first_new"
+    assert updated["method"] == "PUT"
+    assert updated["path"] == "/new"
+    assert updated["headers"] == {"Content-Type": "application/json", "Authorization": "Bearer abc"}
+    assert updated["query"] == {"page": "1"}
+    assert updated["body"] == {"format": "json"}
+    assert updated["description"] == "new description"
+
+    with pytest.raises(HTTPException) as duplicate_error:
+        update_api(first["id"], ApiDefinitionUpdate(project_id=second_project["id"], environment_id=second_environment["id"], name="duplicate_api", method="GET", path="/dup2"), admin, db)
+    assert duplicate_error.value.status_code == 400
+
+    with pytest.raises(HTTPException) as environment_project_error:
+        update_api(first["id"], ApiDefinitionUpdate(project_id=first_project["id"], environment_id=second_environment["id"], name="wrong_env_update", method="GET", path="/wrong-env"), admin, db)
+    assert environment_project_error.value.status_code == 400
+
+
+def test_delete_api_removes_unreferenced_and_rejects_referenced(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="api_delete_project", description="api project"), admin, db)
+    environment = create_test_environment(project["id"], admin, db)
+    unreferenced = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="unreferenced_api", method="GET", path="/free"), admin, db)
+    referenced = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="referenced_api", method="GET", path="/used"), admin, db)
+    db.add(TestCaseModel(project_id=project["id"], api_id=referenced["id"], name="uses_api"))
+    db.commit()
+
+    deleted = delete_api(unreferenced["id"], admin, db)
+    assert deleted["id"] == unreferenced["id"]
+    assert list_apis(name="unreferenced", page=1, page_size=10, _=admin, db=db)["total"] == 0
+
+    with pytest.raises(HTTPException) as referenced_error:
+        delete_api(referenced["id"], admin, db)
+    assert referenced_error.value.status_code == 400
+
+    with pytest.raises(HTTPException) as missing_error:
+        delete_api(99999, admin, db)
+    assert missing_error.value.status_code == 404
