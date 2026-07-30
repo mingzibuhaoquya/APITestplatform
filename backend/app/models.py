@@ -76,7 +76,7 @@ class TestCase(Base, TimestampMixin):
     extractors_json: Mapped[str] = mapped_column(Text, default="[]")
     tags: Mapped[str] = mapped_column(String(255), default="")
     priority: Mapped[str] = mapped_column(String(32), default="P2")
-    status: Mapped[str] = mapped_column(String(32), default="active")
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
     maintainer_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
 
 

@@ -8,9 +8,10 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base, get_db
 from app.models import Environment, Project, TestCase as TestCaseModel, User
 from app.routers.auth import change_password, login
-from app.routers.crud import create_api, create_environment, create_project, delete_api, delete_environment, delete_project, list_apis, list_environments, list_projects, update_api, update_environment, update_project
+from app.routers.crud import create_api, create_case, create_environment, create_project, delete_api, delete_case, delete_environment, delete_project, list_apis, list_cases, list_environments, list_projects, update_api, update_case, update_environment, update_project
+from app.routers.mock import router as mock_router
 from app.routers.users import create_user, list_users, router as users_router, update_user, update_user_status
-from app.schemas import ApiDefinitionIn, ApiDefinitionUpdate, ChangePasswordIn, EnvironmentIn, EnvironmentUpdate, LoginIn, ProjectIn, ProjectUpdate, UserCreate, UserStatusUpdate, UserUpdate
+from app.schemas import ApiDefinitionIn, ApiDefinitionUpdate, ChangePasswordIn, EnvironmentIn, EnvironmentUpdate, LoginIn, ProjectIn, ProjectUpdate, TestCaseIn, TestCaseUpdate, UserCreate, UserStatusUpdate, UserUpdate
 from app.services.assertions import all_passed, run_assertions
 from app.services.jsonpath import find_jsonpath
 from app.services.variables import render_variables
@@ -70,6 +71,43 @@ def test_assertion_rules():
         {"type": "body_contains", "expected": "code"},
     ])
     assert all_passed(results)
+
+
+def test_mock_user_login_success():
+    app = FastAPI()
+    app.include_router(mock_router)
+    client = TestClient(app)
+
+    response = client.post("/mock/userLogin", json={"username": "zmn", "password": "123456"})
+
+    assert response.status_code == 200
+    assert response.json() == {"result": "success"}
+
+
+def test_mock_user_login_failed_when_credentials_do_not_match():
+    app = FastAPI()
+    app.include_router(mock_router)
+    client = TestClient(app)
+
+    wrong_password = client.post("/mock/userLogin", json={"username": "zmn", "password": "bad-pass"})
+    wrong_username = client.post("/mock/userLogin", json={"username": "bad-user", "password": "123456"})
+
+    assert wrong_password.status_code == 401
+    assert wrong_password.json() == {"result": "failed"}
+    assert wrong_username.status_code == 401
+    assert wrong_username.json() == {"result": "failed"}
+
+
+def test_mock_user_login_requires_username_and_password():
+    app = FastAPI()
+    app.include_router(mock_router)
+    client = TestClient(app)
+
+    missing_username = client.post("/mock/userLogin", json={"password": "123456"})
+    missing_password = client.post("/mock/userLogin", json={"username": "zmn"})
+
+    assert missing_username.status_code == 422
+    assert missing_password.status_code == 422
 
 
 def test_create_user_defaults_active_and_can_login(db_session):
@@ -497,10 +535,10 @@ def test_create_api_validates_required_project_name_path_and_duplicate_name(db_s
     other_project = create_project(ProjectIn(name="api_required_other", description="other project"), admin, db)
     environment = create_test_environment(project["id"], admin, db)
     other_environment = create_test_environment(other_project["id"], admin, db)
-    created = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="login", method="POST", path="/login", module="legacy", headers={"A": "B"}, query={"q": 1}, body={"x": 1}, description="login api"), admin, db)
+    created = create_api(ApiDefinitionIn(project_id=project["id"], name="login", method="POST", path="/login", module="legacy", headers={"A": "B"}, query={"q": 1}, body={"x": 1}, description="login api"), admin, db)
 
-    assert created["environment_id"] == environment["id"]
-    assert created["environment_name"] == "env_{}".format(project["id"])
+    assert created["environment_id"] == 0
+    assert created["environment_name"] == ""
     assert created["module"] == ""
     assert created["headers"] == {"A": "B"}
     assert created["query"] == {"q": 1}
@@ -511,13 +549,8 @@ def test_create_api_validates_required_project_name_path_and_duplicate_name(db_s
         create_api(ApiDefinitionIn(project_id=99999, environment_id=environment["id"], name="missing", method="GET", path="/missing"), admin, db)
     assert project_error.value.status_code == 404
 
-    with pytest.raises(HTTPException) as environment_error:
-        create_api(ApiDefinitionIn(project_id=project["id"], environment_id=99999, name="missing_env", method="GET", path="/missing-env"), admin, db)
-    assert environment_error.value.status_code == 404
-
-    with pytest.raises(HTTPException) as environment_project_error:
-        create_api(ApiDefinitionIn(project_id=project["id"], environment_id=other_environment["id"], name="wrong_env", method="GET", path="/wrong-env"), admin, db)
-    assert environment_project_error.value.status_code == 400
+    historical_environment = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=other_environment["id"], name="historical_env", method="GET", path="/historical-env"), admin, db)
+    assert historical_environment["environment_id"] == other_environment["id"]
 
     with pytest.raises(HTTPException) as name_error:
         create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="", method="GET", path="/empty"), admin, db)
@@ -548,7 +581,6 @@ def test_update_api_and_reject_duplicate_name(db_session):
         first["id"],
         ApiDefinitionUpdate(
             project_id=second_project["id"],
-            environment_id=second_environment["id"],
             name="first_new",
             method="PUT",
             path="/new",
@@ -561,9 +593,9 @@ def test_update_api_and_reject_duplicate_name(db_session):
         db,
     )
     assert updated["project_id"] == second_project["id"]
-    assert updated["environment_id"] == second_environment["id"]
+    assert updated["environment_id"] == 0
     assert updated["project_name"] == "api_update_other"
-    assert updated["environment_name"] == "env_{}".format(second_project["id"])
+    assert updated["environment_name"] == ""
     assert updated["name"] == "first_new"
     assert updated["method"] == "PUT"
     assert updated["path"] == "/new"
@@ -576,9 +608,8 @@ def test_update_api_and_reject_duplicate_name(db_session):
         update_api(first["id"], ApiDefinitionUpdate(project_id=second_project["id"], environment_id=second_environment["id"], name="duplicate_api", method="GET", path="/dup2"), admin, db)
     assert duplicate_error.value.status_code == 400
 
-    with pytest.raises(HTTPException) as environment_project_error:
-        update_api(first["id"], ApiDefinitionUpdate(project_id=first_project["id"], environment_id=second_environment["id"], name="wrong_env_update", method="GET", path="/wrong-env"), admin, db)
-    assert environment_project_error.value.status_code == 400
+    historical_update = update_api(first["id"], ApiDefinitionUpdate(project_id=first_project["id"], environment_id=second_environment["id"], name="historical_env_update", method="GET", path="/historical-env"), admin, db)
+    assert historical_update["environment_id"] == second_environment["id"]
 
 
 def test_delete_api_removes_unreferenced_and_rejects_referenced(db_session):
@@ -598,6 +629,136 @@ def test_delete_api_removes_unreferenced_and_rejects_referenced(db_session):
         delete_api(referenced["id"], admin, db)
     assert referenced_error.value.status_code == 400
 
+    referenced_case = db.query(TestCaseModel).filter(TestCaseModel.api_id == referenced["id"]).first()
+    deleted_case = delete_case(referenced_case.id, admin, db)
+    assert deleted_case["is_deleted"] is True
+    deleted_referenced_api = delete_api(referenced["id"], admin, db)
+    assert deleted_referenced_api["id"] == referenced["id"]
+
     with pytest.raises(HTTPException) as missing_error:
         delete_api(99999, admin, db)
     assert missing_error.value.status_code == 404
+
+
+def test_create_and_filter_cases_by_project_and_api(db_session):
+    db, admin = db_session
+    first_project = create_project(ProjectIn(name="case_project_first", description="case project"), admin, db)
+    second_project = create_project(ProjectIn(name="case_project_second", description="case project"), admin, db)
+    first_api = create_api(ApiDefinitionIn(project_id=first_project["id"], name="case_api_first", method="POST", path="/first"), admin, db)
+    second_api = create_api(ApiDefinitionIn(project_id=second_project["id"], name="case_api_second", method="GET", path="/second"), admin, db)
+
+    created = create_case(
+        TestCaseIn(
+            project_id=first_project["id"],
+            api_id=first_api["id"],
+            name="first_case",
+            request_body={"username": "tester"},
+            priority="P1",
+        ),
+        admin,
+        db,
+    )
+    create_case(
+        TestCaseIn(
+            project_id=second_project["id"],
+            api_id=second_api["id"],
+            name="second_case",
+            request_body={"page": 1},
+            assertions=[{"type": "body_contains", "expected": "ok"}],
+            priority="P2",
+        ),
+        admin,
+        db,
+    )
+
+    assert created["project_name"] == "case_project_first"
+    assert created["api_name"] == "case_api_first"
+    assert created["request_body"] == {"username": "tester"}
+    assert created["priority"] == "P1"
+    assert "status" not in created
+    assert created["is_deleted"] is False
+    assert created["assertions"] == []
+
+    paged = list_cases(page=1, page_size=10, _=admin, db=db)
+    assert paged["total"] == 2
+    assert paged["page"] == 1
+    assert paged["page_size"] == 10
+    assert [item["name"] for item in paged["items"]] == ["first_case", "second_case"]
+
+    first_project_cases = list_cases(project_id=first_project["id"], _=admin, db=db)
+    assert [item["name"] for item in first_project_cases] == ["first_case"]
+
+    first_api_cases = list_cases(api_id=first_api["id"], _=admin, db=db)
+    assert [item["name"] for item in first_api_cases] == ["first_case"]
+
+    second_project_paged = list_cases(project_id=second_project["id"], api_id=second_api["id"], page=1, page_size=10, _=admin, db=db)
+    assert second_project_paged["total"] == 1
+    assert second_project_paged["items"][0]["assertions"] == [{"type": "body_contains", "path": "", "operator": "==", "expected": "ok"}]
+
+    with pytest.raises(HTTPException) as mismatch_error:
+        create_case(
+            TestCaseIn(project_id=first_project["id"], api_id=second_api["id"], name="mismatch_case"),
+            admin,
+            db,
+        )
+    assert mismatch_error.value.status_code == 400
+
+
+def test_update_and_logically_delete_case(db_session):
+    db, admin = db_session
+    first_project = create_project(ProjectIn(name="case_update_first", description="case project"), admin, db)
+    second_project = create_project(ProjectIn(name="case_update_second", description="case project"), admin, db)
+    first_api = create_api(ApiDefinitionIn(project_id=first_project["id"], name="case_update_api_first", method="POST", path="/first"), admin, db)
+    second_api = create_api(ApiDefinitionIn(project_id=second_project["id"], name="case_update_api_second", method="GET", path="/second"), admin, db)
+    created = create_case(TestCaseIn(project_id=first_project["id"], api_id=first_api["id"], name="old_case"), admin, db)
+
+    updated = update_case(
+        created["id"],
+        TestCaseUpdate(
+            project_id=second_project["id"],
+            api_id=second_api["id"],
+            name="updated_case",
+            request_body={"updated": True},
+            assertions=[{"type": "jsonpath_equal", "path": "$.code", "operator": "==", "expected": 0}],
+            tags="updated description",
+            priority="P0",
+        ),
+        admin,
+        db,
+    )
+    assert updated["project_id"] == second_project["id"]
+    assert updated["api_id"] == second_api["id"]
+    assert updated["project_name"] == "case_update_second"
+    assert updated["api_name"] == "case_update_api_second"
+    assert updated["name"] == "updated_case"
+    assert updated["request_body"] == {"updated": True}
+    assert updated["assertions"] == [{"type": "jsonpath_equal", "path": "$.code", "operator": "==", "expected": 0}]
+    assert updated["tags"] == "updated description"
+    assert updated["priority"] == "P0"
+    assert "status" not in updated
+
+    with pytest.raises(HTTPException) as mismatch_error:
+        update_case(
+            created["id"],
+            TestCaseUpdate(project_id=first_project["id"], api_id=second_api["id"], name="bad_case"),
+            admin,
+            db,
+        )
+    assert mismatch_error.value.status_code == 400
+
+    deleted = delete_case(created["id"], admin, db)
+    assert deleted["is_deleted"] is True
+    assert list_cases(project_id=second_project["id"], _=admin, db=db) == []
+
+    with pytest.raises(HTTPException) as update_deleted_error:
+        update_case(
+            created["id"],
+            TestCaseUpdate(project_id=second_project["id"], api_id=second_api["id"], name="deleted_case"),
+            admin,
+            db,
+        )
+    assert update_deleted_error.value.status_code == 404
+
+    with pytest.raises(HTTPException) as delete_again_error:
+        delete_case(created["id"], admin, db)
+    assert delete_again_error.value.status_code == 404

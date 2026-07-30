@@ -11,6 +11,11 @@ class LoginIn(BaseModel):
     password: str
 
 
+class MockUserLoginIn(BaseModel):
+    username: str
+    password: str
+
+
 class ChangePasswordIn(BaseModel):
     old_password: str
     new_password: str = Field(min_length=6)
@@ -80,7 +85,7 @@ class EnvironmentUpdate(BaseModel):
 
 class ApiDefinitionIn(BaseModel):
     project_id: int
-    environment_id: int
+    environment_id: int = 0
     module: str = ""
     name: str
     method: HttpMethod
@@ -93,7 +98,7 @@ class ApiDefinitionIn(BaseModel):
 
 class ApiDefinitionUpdate(BaseModel):
     project_id: int
-    environment_id: int
+    environment_id: int = 0
     name: str
     method: HttpMethod
     path: str
@@ -126,7 +131,19 @@ class TestCaseIn(BaseModel):
     extractors: list[ExtractorRule] = []
     tags: str = ""
     priority: str = "P2"
-    status: str = "active"
+
+
+class TestCaseUpdate(BaseModel):
+    project_id: int
+    api_id: int
+    name: str
+    request_headers: dict[str, Any] = {}
+    request_query: dict[str, Any] = {}
+    request_body: Any = {}
+    assertions: list[AssertionRule] = []
+    extractors: list[ExtractorRule] = []
+    tags: str = ""
+    priority: str = "P2"
 
 
 class ScenarioCaseIn(BaseModel):

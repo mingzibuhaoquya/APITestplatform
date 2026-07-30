@@ -40,6 +40,8 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    healthcheck:
+      disable: true
 
   frontend:
     build: ./frontend

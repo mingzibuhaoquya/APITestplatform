@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import current_user
 from ..models import ApiDefinition, Environment, OperationLog, Project, ScenarioCase, TestCase, User
-from ..schemas import ApiDefinitionIn, ApiDefinitionUpdate, EnvironmentIn, EnvironmentUpdate, ProjectIn, ProjectUpdate, ScenarioCaseIn, TestCaseIn
+from ..schemas import ApiDefinitionIn, ApiDefinitionUpdate, EnvironmentIn, EnvironmentUpdate, ProjectIn, ProjectUpdate, ScenarioCaseIn, TestCaseIn, TestCaseUpdate
 from ..utils import dump_json, fmt_time, parse_json
 
 
@@ -44,6 +44,21 @@ def _api_out(row: ApiDefinition, db: Session):
         "headers": parse_json(row.headers_json, {}),
         "query": parse_json(row.query_json, {}),
         "body": parse_json(row.body_json, {}),
+    }
+
+
+def _case_out(row: TestCase, db: Session):
+    project = db.get(Project, row.project_id)
+    api = db.get(ApiDefinition, row.api_id)
+    return {
+        **_base(row),
+        "project_name": project.name if project and not project.is_deleted else "",
+        "api_name": api.name if api else "",
+        "request_headers": parse_json(row.request_headers_json, {}),
+        "request_query": parse_json(row.request_query_json, {}),
+        "request_body": parse_json(row.request_body_json, {}),
+        "assertions": parse_json(row.assertions_json, []),
+        "extractors": parse_json(row.extractors_json, []),
     }
 
 
@@ -287,7 +302,6 @@ def list_apis(
 @router.post("/apis")
 def create_api(payload: ApiDefinitionIn, _: User = Depends(current_user), db: Session = Depends(get_db)):
     _active_project(payload.project_id, db)
-    _active_environment(payload.environment_id, payload.project_id, db)
     name = payload.name.strip()
     path = payload.path.strip()
     description = payload.description.strip()
@@ -298,7 +312,7 @@ def create_api(payload: ApiDefinitionIn, _: User = Depends(current_user), db: Se
     _ensure_api_name_available(payload.project_id, name, db)
     row = ApiDefinition(
         project_id=payload.project_id,
-        environment_id=payload.environment_id,
+        environment_id=payload.environment_id or 0,
         module="",
         name=name,
         method=payload.method,
@@ -320,7 +334,6 @@ def update_api(api_id: int, payload: ApiDefinitionUpdate, _: User = Depends(curr
     if not row:
         raise HTTPException(status_code=404, detail="api does not exist")
     _active_project(payload.project_id, db)
-    _active_environment(payload.environment_id, payload.project_id, db)
     name = payload.name.strip()
     path = payload.path.strip()
     description = payload.description.strip()
@@ -330,7 +343,7 @@ def update_api(api_id: int, payload: ApiDefinitionUpdate, _: User = Depends(curr
         raise HTTPException(status_code=400, detail="api path is required")
     _ensure_api_name_available(payload.project_id, name, db, api_id=api_id)
     row.project_id = payload.project_id
-    row.environment_id = payload.environment_id
+    row.environment_id = payload.environment_id or 0
     row.module = ""
     row.name = name
     row.method = payload.method
@@ -349,7 +362,7 @@ def delete_api(api_id: int, _: User = Depends(current_user), db: Session = Depen
     row = db.get(ApiDefinition, api_id)
     if not row:
         raise HTTPException(status_code=404, detail="api does not exist")
-    if db.query(TestCase).filter(TestCase.api_id == api_id).first():
+    if db.query(TestCase).filter(TestCase.api_id == api_id, TestCase.is_deleted.is_(False)).first():
         raise HTTPException(status_code=400, detail="api is referenced by test cases")
     data = _api_out(row, db)
     db.delete(row)
@@ -358,17 +371,42 @@ def delete_api(api_id: int, _: User = Depends(current_user), db: Session = Depen
 
 
 @router.get("/cases")
-def list_cases(project_id: int | None = None, _: User = Depends(current_user), db: Session = Depends(get_db)):
-    query = db.query(TestCase)
+def list_cases(
+    project_id: int | None = None,
+    api_id: int | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
+    _: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    query = db.query(TestCase).filter(TestCase.is_deleted.is_(False))
     if project_id:
         query = query.filter(TestCase.project_id == project_id)
-    return [{**_base(row), "request_headers": parse_json(row.request_headers_json, {}), "request_query": parse_json(row.request_query_json, {}), "request_body": parse_json(row.request_body_json, {}), "assertions": parse_json(row.assertions_json, []), "extractors": parse_json(row.extractors_json, [])} for row in query.order_by(TestCase.id.desc()).all()]
+    if api_id:
+        query = query.filter(TestCase.api_id == api_id)
+    ordered = query.order_by(TestCase.create_date.asc(), TestCase.id.asc())
+    if page is None and page_size is None:
+        return [_case_out(row, db) for row in ordered.all()]
+    page = max(page or 1, 1)
+    page_size = min(max(page_size or 10, 1), 10)
+    total = query.count()
+    rows = ordered.offset((page - 1) * page_size).limit(page_size).all()
+    return {
+        "items": [_case_out(row, db) for row in rows],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 @router.post("/cases")
 def create_case(payload: TestCaseIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    if not db.get(ApiDefinition, payload.api_id):
+    _active_project(payload.project_id, db)
+    api = db.get(ApiDefinition, payload.api_id)
+    if not api:
         raise HTTPException(status_code=404, detail="接口不存在")
+    if api.project_id != payload.project_id:
+        raise HTTPException(status_code=400, detail="接口不属于所选项目")
     row = TestCase(
         project_id=payload.project_id,
         api_id=payload.api_id,
@@ -380,13 +418,50 @@ def create_case(payload: TestCaseIn, user: User = Depends(current_user), db: Ses
         extractors_json=dump_json([item.model_dump() for item in payload.extractors]),
         tags=payload.tags,
         priority=payload.priority,
-        status=payload.status,
+        is_deleted=False,
         maintainer_id=user.id,
     )
     db.add(row)
     db.commit()
     db.refresh(row)
-    return _base(row)
+    return _case_out(row, db)
+
+
+@router.put("/cases/{case_id}")
+def update_case(case_id: int, payload: TestCaseUpdate, _: User = Depends(current_user), db: Session = Depends(get_db)):
+    row = db.get(TestCase, case_id)
+    if not row or row.is_deleted:
+        raise HTTPException(status_code=404, detail="用例不存在")
+    _active_project(payload.project_id, db)
+    api = db.get(ApiDefinition, payload.api_id)
+    if not api:
+        raise HTTPException(status_code=404, detail="接口不存在")
+    if api.project_id != payload.project_id:
+        raise HTTPException(status_code=400, detail="接口不属于所选项目")
+    row.project_id = payload.project_id
+    row.api_id = payload.api_id
+    row.name = payload.name
+    row.request_headers_json = dump_json(payload.request_headers)
+    row.request_query_json = dump_json(payload.request_query)
+    row.request_body_json = dump_json(payload.request_body)
+    row.assertions_json = dump_json([item.model_dump() for item in payload.assertions])
+    row.extractors_json = dump_json([item.model_dump() for item in payload.extractors])
+    row.tags = payload.tags
+    row.priority = payload.priority
+    db.commit()
+    db.refresh(row)
+    return _case_out(row, db)
+
+
+@router.delete("/cases/{case_id}")
+def delete_case(case_id: int, _: User = Depends(current_user), db: Session = Depends(get_db)):
+    row = db.get(TestCase, case_id)
+    if not row or row.is_deleted:
+        raise HTTPException(status_code=404, detail="用例不存在")
+    row.is_deleted = True
+    db.commit()
+    db.refresh(row)
+    return _case_out(row, db)
 
 
 @router.get("/scenarios")

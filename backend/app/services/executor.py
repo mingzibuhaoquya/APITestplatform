@@ -79,7 +79,7 @@ def _execute_case(db: Session, task: ExecutionTask, case_id: int, variables: dic
     case = db.get(TestCase, case_id)
     env = db.get(Environment, task.environment_id)
     api = db.get(ApiDefinition, case.api_id) if case else None
-    if not case or not api or not env:
+    if not case or case.is_deleted or not api or not env:
         return _save_result(db, task.id, case_id, "error", {}, {}, [], 0, "用例、接口或环境不存在")
 
     env_headers = parse_json(env.headers_json, {})
@@ -157,4 +157,3 @@ def _save_result(
     db.commit()
     db.refresh(row)
     return row
-

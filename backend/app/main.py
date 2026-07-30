@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from .config import get_settings
 from .database import Base, SessionLocal, engine
 from .models import User
-from .routers import auth, crud, executions, users
+from .routers import auth, crud, executions, mock, users
 from .security import hash_password
 
 
@@ -31,6 +31,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(crud.router)
 app.include_router(executions.router)
+app.include_router(mock.router)
 
 
 @app.on_event("startup")
@@ -39,6 +40,7 @@ def startup() -> None:
     _ensure_project_deleted_column()
     _ensure_environment_deleted_column()
     _ensure_api_definition_columns()
+    _ensure_test_case_columns()
     _ensure_admin()
 
 
@@ -70,6 +72,16 @@ def _ensure_api_definition_columns() -> None:
         return
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE api_definition ADD COLUMN environment_id INT NOT NULL DEFAULT 0"))
+
+
+def _ensure_test_case_columns() -> None:
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("test_case")}
+    with engine.begin() as conn:
+        if "is_deleted" not in columns:
+            conn.execute(text("ALTER TABLE test_case ADD COLUMN is_deleted BOOL NOT NULL DEFAULT 0"))
+        if "status" in columns:
+            conn.execute(text("ALTER TABLE test_case DROP COLUMN status"))
 
 
 def _ensure_admin() -> None:

@@ -321,13 +321,8 @@
           <div class="toolbar"><h2>接口管理</h2><el-button type="primary" @click="openCreateApiDialog">新增接口</el-button></div>
           <el-form class="search-form" label-position="top">
             <el-form-item label="项目">
-              <el-select v-model="apiSearch.project_id" placeholder="请选择项目" clearable @change="apiSearch.environment_id = undefined">
+              <el-select v-model="apiSearch.project_id" placeholder="请选择项目" clearable>
                 <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="环境">
-              <el-select v-model="apiSearch.environment_id" placeholder="请先选择项目" clearable :disabled="!apiSearch.project_id">
-                <el-option v-for="e in apiSearchEnvironments" :key="e.id" :label="e.name" :value="e.id" />
               </el-select>
             </el-form-item>
             <el-form-item label="名称">
@@ -343,7 +338,6 @@
           </el-form>
           <el-table :data="apiList">
             <el-table-column prop="project_name" label="项目" />
-            <el-table-column prop="environment_name" label="环境" />
             <el-table-column prop="name" label="名称" />
             <el-table-column prop="description" label="接口描述" />
             <el-table-column prop="method" label="方法" width="100" />
@@ -389,16 +383,6 @@
                   @change="changeApiEditorProject(activeApiEditor)"
                 >
                   <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="环境">
-                <el-select
-                  v-model="activeApiEditor.environment_id"
-                  placeholder="请先选择项目"
-                  :disabled="!activeApiEditor.project_id"
-                  @change="markApiEditorDirty(activeApiEditor)"
-                >
-                  <el-option v-for="e in editorEnvironments(activeApiEditor)" :key="e.id" :label="e.name" :value="e.id" />
                 </el-select>
               </el-form-item>
               <el-form-item label="名称">
@@ -471,17 +455,122 @@
         </section>
 
         <section v-if="active === 'cases'">
-          <div class="toolbar"><h2>用例管理</h2><el-button type="primary" @click="createCase">保存用例</el-button></div>
-          <el-form label-position="top" class="form-grid">
-            <el-form-item label="项目"><el-select v-model="caseForm.project_id"><el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" /></el-select></el-form-item>
-            <el-form-item label="接口"><el-select v-model="caseForm.api_id"><el-option v-for="a in apis" :key="a.id" :label="a.name" :value="a.id" /></el-select></el-form-item>
-            <el-form-item label="用例名称"><el-input v-model="caseForm.name" /></el-form-item>
-            <el-form-item label="优先级"><el-select v-model="caseForm.priority"><el-option label="P0" value="P0" /><el-option label="P1" value="P1" /><el-option label="P2" value="P2" /></el-select></el-form-item>
-            <el-form-item label="断言配置 JSON" class="wide"><el-input v-model="caseForm.assertionsText" type="textarea" :rows="5" /></el-form-item>
-            <el-form-item label="变量提取 JSON" class="wide"><el-input v-model="caseForm.extractorsText" type="textarea" :rows="4" /></el-form-item>
+          <div class="toolbar"><h2>用例管理</h2><el-button type="primary" @click="openCreateCasePage">新增用例</el-button></div>
+          <el-form class="search-form" label-position="top">
+            <el-form-item label="项目">
+              <el-select v-model="caseSearch.project_id" placeholder="请选择项目" clearable @change="changeCaseSearchProject">
+                <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="接口">
+              <el-select v-model="caseSearch.api_id" placeholder="请先选择项目" clearable :disabled="!caseSearch.project_id">
+                <el-option v-for="a in caseSearchApis" :key="a.id" :label="a.name" :value="a.id" />
+              </el-select>
+            </el-form-item>
+            <div class="search-actions">
+              <el-button type="primary" @click="searchCases">搜索</el-button>
+              <el-button @click="resetCaseSearch">重置</el-button>
+            </div>
           </el-form>
-          <el-table :data="cases"><el-table-column prop="name" label="用例" /><el-table-column prop="priority" label="优先级" /><el-table-column prop="status" label="状态" /></el-table>
+          <el-table :data="caseList">
+            <el-table-column label="编号" width="80">
+              <template #default="{ $index }">{{ caseSerialNumber($index) }}</template>
+            </el-table-column>
+            <el-table-column prop="project_name" label="项目" />
+            <el-table-column prop="api_name" label="接口" />
+            <el-table-column prop="name" label="用例名称" />
+            <el-table-column prop="priority" label="优先级" width="100" />
+            <el-table-column label="操作" width="220" fixed="right">
+              <template #default="{ row }">
+                <el-button size="small" @click="openCaseBodyDialog(row)">查看</el-button>
+                <el-button size="small" @click="openEditCasePage(row)">编辑</el-button>
+                <el-button size="small" type="danger" @click="deleteCase(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div class="pagination">
+            <el-pagination
+              background
+              layout="total, prev, pager, next"
+              :current-page="casePagination.page"
+              :page-size="casePagination.pageSize"
+              :total="casePagination.total"
+              @current-change="changeCasePage"
+            />
+          </div>
         </section>
+
+        <section v-if="active === 'case-create' || active.startsWith('case-edit-')">
+          <div class="toolbar">
+            <h2>{{ caseForm.id ? '编辑用例' : '新增用例' }}</h2>
+            <div class="toolbar-actions">
+              <el-button @click="closeCaseEditorPage">关闭</el-button>
+              <el-button type="primary" @click="saveCase">保存</el-button>
+            </div>
+          </div>
+          <el-form label-position="top" class="form-grid">
+            <el-form-item label="项目">
+              <el-select v-model="caseForm.project_id" placeholder="请选择项目" @change="changeCaseFormProject">
+                <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="接口">
+              <el-select v-model="caseForm.api_id" placeholder="请先选择项目" :disabled="!caseForm.project_id">
+                <el-option v-for="a in caseFormApis" :key="a.id" :label="a.name" :value="a.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="用例名称">
+              <el-input v-model="caseForm.name" placeholder="请输入用例名称" />
+            </el-form-item>
+            <el-form-item label="优先级">
+              <el-select v-model="caseForm.priority">
+                <el-option label="P0" value="P0" />
+                <el-option label="P1" value="P1" />
+                <el-option label="P2" value="P2" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="用例描述" class="wide">
+              <el-input v-model="caseForm.description" type="textarea" :rows="3" placeholder="请输入用例描述" />
+            </el-form-item>
+            <el-form-item label="Body" class="wide">
+              <el-input v-model="caseForm.bodyText" type="textarea" :rows="8" placeholder="请输入 JSON Body" />
+            </el-form-item>
+            <div class="wide">
+              <div class="kv-title">
+                <h4>断言</h4>
+                <el-button size="small" @click="addCaseAssertionRow">添加</el-button>
+              </div>
+              <el-table :data="caseForm.assertionRows">
+                <el-table-column label="断言类型" width="190">
+                  <template #default="{ row }">
+                    <el-select v-model="row.type">
+                      <el-option v-for="option in assertionTypes" :key="option.value" :label="option.label" :value="option.value" />
+                    </el-select>
+                  </template>
+                </el-table-column>
+                <el-table-column label="JSONPath/路径">
+                  <template #default="{ row }"><el-input v-model="row.path" placeholder="$.data.id / status_code" /></template>
+                </el-table-column>
+                <el-table-column label="操作符" width="120">
+                  <template #default="{ row }"><el-input v-model="row.operator" placeholder="==" /></template>
+                </el-table-column>
+                <el-table-column label="期望值">
+                  <template #default="{ row }"><el-input v-model="row.expected" placeholder="200 / success" /></template>
+                </el-table-column>
+                <el-table-column label="操作" width="90">
+                  <template #default="{ $index }"><el-button size="small" type="danger" @click="removeCaseAssertionRow($index)">删除</el-button></template>
+                </el-table-column>
+              </el-table>
+            </div>
+          </el-form>
+        </section>
+
+        <el-dialog v-model="caseBodyDialogVisible" title="请求 Body" width="640px">
+          <el-input v-model="caseBodyPreview" type="textarea" :rows="16" readonly />
+          <template #footer>
+            <el-button type="primary" @click="caseBodyDialogVisible = false">关闭</el-button>
+          </template>
+        </el-dialog>
 
         <section v-if="active === 'execute'">
           <div class="toolbar"><h2>执行中心</h2><el-button type="primary" @click="runCase">手动执行</el-button></div>
@@ -540,13 +629,13 @@ import { api, type User } from './api'
 
 type AppTab = { name: string; label: string; closable: boolean }
 type KeyValueRow = { id: number; key: string; value: string }
+type CaseAssertionRow = { id: number; type: string; path: string; operator: string; expected: string }
 type ApiEditor = {
   tabName: string
   label: string
   mode: 'create' | 'edit'
   apiId?: number
   project_id?: number
-  environment_id?: number
   name: string
   description: string
   method: string
@@ -604,6 +693,7 @@ const environmentList = ref<any[]>([])
 const apis = ref<any[]>([])
 const apiList = ref<any[]>([])
 const cases = ref<any[]>([])
+const caseList = ref<any[]>([])
 const executions = ref<any[]>([])
 const logs = ref<any[]>([])
 const selectedProject = ref<any>(null)
@@ -615,8 +705,10 @@ const projectSearch = reactive({ name: '' })
 const projectPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const environmentSearch = reactive({ project_id: undefined as number | undefined, name: '' })
 const environmentPagination = reactive({ page: 1, pageSize: 10, total: 0 })
-const apiSearch = reactive({ project_id: undefined as number | undefined, environment_id: undefined as number | undefined, name: '', url: '' })
+const apiSearch = reactive({ project_id: undefined as number | undefined, name: '', url: '' })
 const apiPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const caseSearch = reactive({ project_id: undefined as number | undefined, api_id: undefined as number | undefined })
+const casePagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const createUserDialogVisible = ref(false)
 const editUserDialogVisible = ref(false)
 const createProjectDialogVisible = ref(false)
@@ -624,6 +716,8 @@ const editProjectDialogVisible = ref(false)
 const createEnvironmentDialogVisible = ref(false)
 const editEnvironmentDialogVisible = ref(false)
 const changePasswordDialogVisible = ref(false)
+const caseBodyDialogVisible = ref(false)
+const caseBodyPreview = ref('')
 const userForm = reactive({ username: '', real_name: '' })
 const editUserForm = reactive({ id: undefined as number | undefined, username: '', real_name: '' })
 const changePasswordForm = reactive({ old_password: '', new_password: '', confirm_password: '' })
@@ -631,12 +725,21 @@ const projectForm = reactive({ name: '', description: '' })
 const editProjectForm = reactive({ id: undefined as number | undefined, name: '', description: '' })
 const envForm = reactive({ project_id: undefined as number | undefined, name: '', protocol: '', base_url: '', port: '' })
 const editEnvironmentForm = reactive({ id: undefined as number | undefined, project_id: undefined as number | undefined, name: '', protocol: '', base_url: '', port: '' })
-const caseForm = reactive({ project_id: undefined as number | undefined, api_id: undefined as number | undefined, name: '', priority: 'P2', assertionsText: '[{"type":"status_code","expected":200}]', extractorsText: '[]' })
+const caseForm = reactive({ id: undefined as number | undefined, project_id: undefined as number | undefined, api_id: undefined as number | undefined, name: '', description: '', priority: 'P2', bodyText: '{}', assertionRows: [] as CaseAssertionRow[] })
 const execForm = reactive({ project_id: undefined as number | undefined, environment_id: undefined as number | undefined, target_id: undefined as number | undefined })
 const apiEditors = reactive<Record<string, ApiEditor>>({})
 const avatarText = computed(() => me.value?.username.slice(0, 1).toUpperCase() || 'U')
-const apiSearchEnvironments = computed(() => environments.value.filter(environment => !apiSearch.project_id || environment.project_id === apiSearch.project_id))
 const activeApiEditor = computed(() => apiEditors[active.value])
+const caseSearchApis = computed(() => apis.value.filter(item => caseSearch.project_id && item.project_id === caseSearch.project_id))
+const caseFormApis = computed(() => apis.value.filter(item => caseForm.project_id && item.project_id === caseForm.project_id))
+const assertionTypes = [
+  { label: 'HTTP状态码', value: 'status_code' },
+  { label: 'JSONPath等于', value: 'jsonpath_equal' },
+  { label: 'JSONPath存在', value: 'jsonpath_exists' },
+  { label: 'JSONPath非空', value: 'jsonpath_not_empty' },
+  { label: '响应时间小于', value: 'duration_lt' },
+  { label: '响应文本包含', value: 'body_contains' }
+]
 
 function parseJson(text: string, fallback: any) {
   try { return JSON.parse(text || '') } catch { return fallback }
@@ -647,7 +750,7 @@ async function loadAll() {
     api.get('/projects').then(r => projects.value = r.data),
     api.get('/environments').then(r => environments.value = r.data),
     api.get('/apis').then(r => apis.value = r.data),
-    api.get('/cases').then(r => cases.value = r.data),
+    refreshAllCases(),
     api.get('/executions').then(r => executions.value = r.data),
     api.get('/logs').then(r => logs.value = r.data)
   ]
@@ -655,6 +758,7 @@ async function loadAll() {
   calls.push(loadProjects())
   calls.push(loadEnvironments())
   calls.push(loadApis())
+  calls.push(loadCases())
   await Promise.allSettled(calls)
 }
 
@@ -759,13 +863,11 @@ async function changeEnvironmentPage(page: number) {
 
 async function loadApis() {
   const projectId = apiSearch.project_id
-  const environmentId = apiSearch.environment_id
   const name = apiSearch.name.trim()
   const url = apiSearch.url.trim()
   const { data } = await api.get('/apis', {
     params: {
       ...(projectId ? { project_id: projectId } : {}),
-      ...(environmentId ? { environment_id: environmentId } : {}),
       ...(name ? { name } : {}),
       ...(url ? { url } : {}),
       page: apiPagination.page,
@@ -785,7 +887,6 @@ async function searchApis() {
 
 async function resetApiSearch() {
   apiSearch.project_id = undefined
-  apiSearch.environment_id = undefined
   apiSearch.name = ''
   apiSearch.url = ''
   apiPagination.page = 1
@@ -795,6 +896,53 @@ async function resetApiSearch() {
 async function changeApiPage(page: number) {
   apiPagination.page = page
   await loadApis()
+}
+
+async function loadCases() {
+  const projectId = caseSearch.project_id
+  const apiId = caseSearch.api_id
+  const { data } = await api.get('/cases', {
+    params: {
+      ...(projectId ? { project_id: projectId } : {}),
+      ...(apiId ? { api_id: apiId } : {}),
+      page: casePagination.page,
+      page_size: casePagination.pageSize
+    }
+  })
+  caseList.value = data.items
+  casePagination.total = data.total
+  casePagination.page = data.page
+  casePagination.pageSize = data.page_size
+}
+
+async function refreshAllCases() {
+  const { data } = await api.get('/cases')
+  cases.value = data
+}
+
+async function searchCases() {
+  casePagination.page = 1
+  await loadCases()
+}
+
+async function resetCaseSearch() {
+  caseSearch.project_id = undefined
+  caseSearch.api_id = undefined
+  casePagination.page = 1
+  await loadCases()
+}
+
+function changeCaseSearchProject() {
+  caseSearch.api_id = undefined
+}
+
+async function changeCasePage(page: number) {
+  casePagination.page = page
+  await loadCases()
+}
+
+function caseSerialNumber(index: number) {
+  return (casePagination.page - 1) * casePagination.pageSize + index + 1
 }
 
 async function login() {
@@ -1332,6 +1480,7 @@ function apiNameExists(projectId: number, name: string, apiId?: number) {
 }
 
 let apiRowId = 1
+let caseAssertionRowId = 1
 const contentTypes: Record<ApiEditor['bodyFormat'], string> = {
   json: 'application/json',
   xml: 'application/xml',
@@ -1340,6 +1489,10 @@ const contentTypes: Record<ApiEditor['bodyFormat'], string> = {
 
 function nextApiRow(key = '', value = ''): KeyValueRow {
   return { id: apiRowId++, key, value }
+}
+
+function nextCaseAssertionRow(type = 'status_code', path = '', operator = '==', expected = ''): CaseAssertionRow {
+  return { id: caseAssertionRowId++, type, path, operator, expected }
 }
 
 function defaultHeaderRows() {
@@ -1381,7 +1534,6 @@ function createEmptyApiEditor(): ApiEditor {
     label: '新增接口',
     mode: 'create',
     project_id: undefined,
-    environment_id: undefined,
     name: '',
     description: '',
     method: 'GET',
@@ -1403,7 +1555,6 @@ function createEditApiEditor(row: any): ApiEditor {
     mode: 'edit',
     apiId: row.id,
     project_id: row.project_id,
-    environment_id: row.environment_id || undefined,
     name: row.name || '',
     description: row.description || '',
     method: row.method || 'GET',
@@ -1433,16 +1584,11 @@ function openEditApiDialog(row: any) {
   openRuntimeTab({ name: tabName, label: `编辑接口-${row.id}`, closable: true })
 }
 
-function editorEnvironments(editor: ApiEditor) {
-  return environments.value.filter(environment => editor.project_id && environment.project_id === editor.project_id)
-}
-
 function markApiEditorDirty(editor: ApiEditor) {
   editor.dirty = true
 }
 
 function changeApiEditorProject(editor: ApiEditor) {
-  editor.environment_id = undefined
   markApiEditorDirty(editor)
 }
 
@@ -1488,7 +1634,6 @@ function apiPayload(editor: ApiEditor) {
   const headers = rowsToObject(editor.headerRows)
   return {
     project_id: editor.project_id,
-    environment_id: editor.environment_id,
     name: editor.name.trim(),
     description: editor.description.trim(),
     method: editor.method,
@@ -1503,10 +1648,6 @@ function validateApiEditor(editor: ApiEditor) {
   const payload = apiPayload(editor)
   if (!payload.project_id) {
     ElMessage.warning('请选择项目')
-    return null
-  }
-  if (!payload.environment_id) {
-    ElMessage.warning('请选择环境')
     return null
   }
   if (!payload.name) {
@@ -1618,9 +1759,171 @@ async function deleteApi(row: any) {
   }
 }
 
-async function createCase() {
-  await api.post('/cases', { ...caseForm, assertions: parseJson(caseForm.assertionsText, []), extractors: parseJson(caseForm.extractorsText, []), request_headers: {}, request_query: {}, request_body: {} })
-  await loadAll()
+function resetCaseForm() {
+  caseForm.id = undefined
+  caseForm.project_id = undefined
+  caseForm.api_id = undefined
+  caseForm.name = ''
+  caseForm.description = ''
+  caseForm.priority = 'P2'
+  caseForm.bodyText = '{}'
+  caseForm.assertionRows = []
+}
+
+function openCreateCasePage() {
+  resetCaseForm()
+  openRuntimeTab({ name: 'case-create', label: '新增用例', closable: true })
+}
+
+function openEditCasePage(row: any) {
+  caseForm.id = row.id
+  caseForm.project_id = row.project_id
+  caseForm.api_id = row.api_id
+  caseForm.name = row.name || ''
+  caseForm.description = row.tags || ''
+  caseForm.priority = row.priority || 'P2'
+  caseForm.bodyText = JSON.stringify(row.request_body ?? {}, null, 2)
+  caseForm.assertionRows = caseAssertionsToRows(row.assertions)
+  openRuntimeTab({ name: `case-edit-${row.id}`, label: `编辑用例-${row.id}`, closable: true })
+}
+
+function closeCaseEditorPage() {
+  const target = active.value
+  resetCaseForm()
+  removeTab(target)
+}
+
+function changeCaseFormProject() {
+  caseForm.api_id = undefined
+}
+
+function caseAssertionsToRows(assertions: any[]): CaseAssertionRow[] {
+  if (!Array.isArray(assertions)) {
+    return []
+  }
+  return assertions.map(item => nextCaseAssertionRow(
+    item?.type || 'status_code',
+    item?.path || '',
+    item?.operator || '==',
+    String(item?.expected ?? '')
+  ))
+}
+
+function caseAssertionRowsToPayload() {
+  return caseForm.assertionRows
+    .filter(row => row.type)
+    .map(row => ({
+      type: row.type,
+      path: row.path.trim(),
+      operator: row.operator.trim() || '==',
+      expected: parseAssertionExpected(row.expected)
+    }))
+}
+
+function parseAssertionExpected(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return ''
+  }
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return trimmed
+  }
+}
+
+function addCaseAssertionRow() {
+  caseForm.assertionRows.push(nextCaseAssertionRow())
+}
+
+function removeCaseAssertionRow(index: number) {
+  caseForm.assertionRows.splice(index, 1)
+}
+
+function validateCaseForm() {
+  if (!caseForm.project_id) {
+    ElMessage.warning('请选择项目')
+    return null
+  }
+  if (!caseForm.api_id) {
+    ElMessage.warning('请选择接口')
+    return null
+  }
+  const name = caseForm.name.trim()
+  if (!name) {
+    ElMessage.warning('请输入用例名称')
+    return null
+  }
+  const requestBody = parseJson(caseForm.bodyText, undefined)
+  if (requestBody === undefined) {
+    ElMessage.warning('Body 必须是合法 JSON')
+    return null
+  }
+  return {
+    project_id: caseForm.project_id,
+    api_id: caseForm.api_id,
+    name,
+    request_headers: {},
+    request_query: {},
+    request_body: requestBody,
+    assertions: caseAssertionRowsToPayload(),
+    extractors: [],
+    tags: caseForm.description.trim(),
+    priority: caseForm.priority,
+  }
+}
+
+function openCaseBodyDialog(row: any) {
+  caseBodyPreview.value = JSON.stringify(row.request_body ?? {}, null, 2)
+  caseBodyDialogVisible.value = true
+}
+
+async function saveCase() {
+  const payload = validateCaseForm()
+  if (!payload) {
+    return
+  }
+  try {
+    if (caseForm.id) {
+      await api.put(`/cases/${caseForm.id}`, payload)
+      ElMessage.success('用例已更新')
+    } else {
+      await api.post('/cases', payload)
+      ElMessage.success('用例已创建')
+    }
+    caseSearch.project_id = payload.project_id
+    caseSearch.api_id = payload.api_id
+    resetCaseForm()
+    await loadCases()
+    await refreshAllCases()
+    closeCaseEditorPage()
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || '用例保存失败')
+  }
+}
+
+async function deleteCase(row: any) {
+  try {
+    await ElMessageBox.confirm('确认删除该用例吗？', '删除用例', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  try {
+    await api.delete(`/cases/${row.id}`)
+    ElMessage.success('用例已删除')
+    await loadCases()
+    if (caseList.value.length === 0 && casePagination.page > 1) {
+      casePagination.page -= 1
+      await loadCases()
+    }
+    await refreshAllCases()
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || '用例删除失败')
+  }
 }
 
 async function runCase() {
