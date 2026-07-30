@@ -41,6 +41,8 @@ def startup() -> None:
     _ensure_environment_deleted_column()
     _ensure_api_definition_columns()
     _ensure_test_case_columns()
+    _ensure_test_suite_columns()
+    _ensure_execution_task_columns()
     _ensure_admin()
 
 
@@ -82,6 +84,35 @@ def _ensure_test_case_columns() -> None:
             conn.execute(text("ALTER TABLE test_case ADD COLUMN is_deleted BOOL NOT NULL DEFAULT 0"))
         if "status" in columns:
             conn.execute(text("ALTER TABLE test_case DROP COLUMN status"))
+
+
+def _ensure_test_suite_columns() -> None:
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("test_suite")}
+    with engine.begin() as conn:
+        if "environment_id" not in columns:
+            conn.execute(text("ALTER TABLE test_suite ADD COLUMN environment_id INT NOT NULL DEFAULT 0"))
+        if "api_id" not in columns:
+            conn.execute(text("ALTER TABLE test_suite ADD COLUMN api_id INT NOT NULL DEFAULT 0"))
+        if "creator_id" not in columns:
+            conn.execute(text("ALTER TABLE test_suite ADD COLUMN creator_id INT NULL"))
+        if "last_execution_id" not in columns:
+            conn.execute(text("ALTER TABLE test_suite ADD COLUMN last_execution_id INT NULL"))
+        if "last_status" not in columns:
+            conn.execute(text("ALTER TABLE test_suite ADD COLUMN last_status VARCHAR(32) NOT NULL DEFAULT ''"))
+        if "last_executed_at" not in columns:
+            conn.execute(text("ALTER TABLE test_suite ADD COLUMN last_executed_at DATETIME NULL"))
+        if "is_deleted" not in columns:
+            conn.execute(text("ALTER TABLE test_suite ADD COLUMN is_deleted BOOL NOT NULL DEFAULT 0"))
+
+
+def _ensure_execution_task_columns() -> None:
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("execution_task")}
+    if "is_deleted" in columns:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE execution_task ADD COLUMN is_deleted BOOL NOT NULL DEFAULT 0"))
 
 
 def _ensure_admin() -> None:

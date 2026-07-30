@@ -1,10 +1,11 @@
-import time
 from datetime import datetime
-from urllib.parse import urljoin
+import time
+from urllib.parse import urljoin, urlparse
+from uuid import uuid4
 import httpx
 from sqlalchemy.orm import Session
 from ..config import get_settings
-from ..models import ApiDefinition, Environment, ExecutionResult, ExecutionTask, ScenarioCase, TestCase
+from ..models import ApiDefinition, Environment, ExecutionResult, ExecutionTask, ScenarioCase, TestCase, TestSuite
 from ..utils import dump_json, parse_json
 from .assertions import all_passed, run_assertions
 from .jsonpath import find_jsonpath
@@ -32,6 +33,7 @@ def execute_task(task_id: int) -> None:
             return
         task.status = "running"
         task.started_at = datetime.now()
+        _sync_plan_execution(db, task)
         db.commit()
         rows = _execute(db, task)
         passed = sum(1 for row in rows if row.status == "passed")
@@ -40,6 +42,7 @@ def execute_task(task_id: int) -> None:
         task.ended_at = datetime.now()
         task.summary_json = dump_json({"total": len(rows), "passed": passed, "failed": failed})
         task.report_html = build_html_report(task, [ResultView(row) for row in rows])
+        _sync_plan_execution(db, task)
         db.commit()
     except Exception as exc:
         task = db.get(ExecutionTask, task_id)
@@ -47,6 +50,7 @@ def execute_task(task_id: int) -> None:
             task.status = "error"
             task.ended_at = datetime.now()
             task.summary_json = dump_json({"error": str(exc)})
+            _sync_plan_execution(db, task)
             db.commit()
     finally:
         db.close()
@@ -55,6 +59,9 @@ def execute_task(task_id: int) -> None:
 def _execute(db: Session, task: ExecutionTask) -> list[ExecutionResult]:
     if task.target_type == "case":
         case_ids = [task.target_id]
+    elif task.target_type == "plan":
+        plan = db.get(TestSuite, task.target_id)
+        case_ids = parse_json(plan.items_json if plan else "[]", [])
     else:
         scenario = db.get(ScenarioCase, task.target_id)
         case_ids = parse_json(scenario.steps_json if scenario else "[]", [])
@@ -70,9 +77,36 @@ def _execute(db: Session, task: ExecutionTask) -> list[ExecutionResult]:
     return rows
 
 
+def _sync_plan_execution(db: Session, task: ExecutionTask) -> None:
+    if task.target_type != "plan":
+        return
+    plan = db.get(TestSuite, task.target_id)
+    if not plan:
+        return
+    plan.last_execution_id = task.id
+    plan.last_status = task.status
+    plan.last_executed_at = task.ended_at or datetime.now()
+
+
 def _initial_variables(db: Session, environment_id: int) -> dict:
     env = db.get(Environment, environment_id)
-    return parse_json(env.variables_json if env else "{}", {})
+    variables = parse_json(env.variables_json if env else "{}", {})
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    variables.setdefault("timestamp", timestamp)
+    variables.setdefault("uuid", uuid4().hex)
+    variables.setdefault("unique_username", f"test_user_{timestamp}")
+    return variables
+
+
+def _build_request_url(env: Environment, path: str) -> str:
+    base_url = (env.base_url or "").strip().rstrip("/")
+    if urlparse(base_url).scheme:
+        root = base_url
+    else:
+        default_port = 80 if env.protocol == "http" else 443
+        port = "" if env.port == default_port else f":{env.port}"
+        root = f"{env.protocol}://{base_url.lstrip('/')}{port}"
+    return urljoin(root.rstrip("/") + "/", path.lstrip("/"))
 
 
 def _execute_case(db: Session, task: ExecutionTask, case_id: int, variables: dict) -> ExecutionResult:
@@ -86,7 +120,7 @@ def _execute_case(db: Session, task: ExecutionTask, case_id: int, variables: dic
     headers = {**env_headers, **parse_json(api.headers_json, {}), **parse_json(case.request_headers_json, {})}
     query = {**parse_json(api.query_json, {}), **parse_json(case.request_query_json, {})}
     body = parse_json(case.request_body_json, {})
-    url = urljoin(env.base_url.rstrip("/") + "/", api.path.lstrip("/"))
+    url = _build_request_url(env, api.path)
     request_snapshot = {
         "method": api.method,
         "url": render_variables(url, variables),

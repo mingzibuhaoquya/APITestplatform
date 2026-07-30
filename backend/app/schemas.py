@@ -154,8 +154,24 @@ class ScenarioCaseIn(BaseModel):
     status: str = "active"
 
 
+class TestPlanIn(BaseModel):
+    project_id: int
+    environment_id: int
+    api_id: int
+    name: str
+    items: list[int]
+
+
+class TestPlanUpdate(BaseModel):
+    project_id: int
+    environment_id: int
+    api_id: int
+    name: str
+    items: list[int]
+
+
 class ExecutionCreate(BaseModel):
     project_id: int
     environment_id: int
-    target_type: Literal["case", "scenario"]
+    target_type: Literal["case", "scenario", "plan"]
     target_id: int

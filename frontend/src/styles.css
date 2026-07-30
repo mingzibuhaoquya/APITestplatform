@@ -203,6 +203,17 @@ body {
   gap: 8px;
 }
 
+.table-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.table-actions .el-button + .el-button {
+  margin-left: 0;
+}
+
 .pagination {
   display: flex;
   justify-content: flex-end;
@@ -221,6 +232,11 @@ body {
 }
 
 .api-editor-page {
+  display: grid;
+  gap: 12px;
+}
+
+.plan-editor-page {
   display: grid;
   gap: 12px;
 }
@@ -284,12 +300,78 @@ body {
   min-height: 40px;
 }
 
+.compact-toolbar {
+  margin-bottom: 8px;
+}
+
+.nested-table {
+  margin: 4px 0;
+}
+
+.plan-queue {
+  display: grid;
+  gap: 8px;
+}
+
+.plan-queue-row {
+  display: grid;
+  grid-template-columns: 32px minmax(160px, 1fr) minmax(140px, 220px) 80px 64px 64px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.plan-queue-row:hover {
+  border-color: #93c5fd;
+  background: #f8fbff;
+}
+
+.drag-handle {
+  color: #94a3b8;
+  cursor: grab;
+  font-weight: 700;
+}
+
+.queue-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-api {
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 10px 12px;
+}
+
+.detail-grid pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 8px;
+}
+
 @media (max-width: 900px) {
   .grid,
   .inline-form,
   .search-form,
   .form-grid,
-  .request-line {
+  .request-line,
+  .plan-queue-row,
+  .detail-grid {
     grid-template-columns: 1fr;
   }
 

@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import current_user
-from ..models import ApiDefinition, Environment, OperationLog, Project, ScenarioCase, TestCase, User
-from ..schemas import ApiDefinitionIn, ApiDefinitionUpdate, EnvironmentIn, EnvironmentUpdate, ProjectIn, ProjectUpdate, ScenarioCaseIn, TestCaseIn, TestCaseUpdate
+from ..models import ApiDefinition, Environment, ExecutionTask, OperationLog, Project, ScenarioCase, TestCase, TestSuite, User
+from ..schemas import ApiDefinitionIn, ApiDefinitionUpdate, EnvironmentIn, EnvironmentUpdate, ProjectIn, ProjectUpdate, ScenarioCaseIn, TestCaseIn, TestCaseUpdate, TestPlanIn, TestPlanUpdate
 from ..utils import dump_json, fmt_time, parse_json
 
 
@@ -62,6 +62,52 @@ def _case_out(row: TestCase, db: Session):
     }
 
 
+def _plan_case_out(case: TestCase, db: Session):
+    api = db.get(ApiDefinition, case.api_id)
+    return {
+        "id": case.id,
+        "name": case.name,
+        "priority": case.priority,
+        "api_id": case.api_id,
+        "api_name": api.name if api else "",
+        "method": api.method if api else "",
+        "path": api.path if api else "",
+        "request_headers": parse_json(case.request_headers_json, {}),
+        "request_query": parse_json(case.request_query_json, {}),
+        "request_body": parse_json(case.request_body_json, {}),
+        "assertions": parse_json(case.assertions_json, []),
+    }
+
+
+def _plan_out(row: TestSuite, db: Session):
+    project = db.get(Project, row.project_id)
+    environment = db.get(Environment, row.environment_id) if row.environment_id else None
+    api = db.get(ApiDefinition, row.api_id) if row.api_id else None
+    creator = db.get(User, row.creator_id) if row.creator_id else None
+    last_execution = db.get(ExecutionTask, row.last_execution_id) if row.last_execution_id else None
+    executor = db.get(User, last_execution.executor_id) if last_execution else None
+    item_ids = [int(item) for item in parse_json(row.items_json, []) if str(item).isdigit()]
+    cases = []
+    if item_ids:
+        rows = db.query(TestCase).filter(TestCase.id.in_(item_ids), TestCase.is_deleted.is_(False)).all()
+        row_map = {item.id: item for item in rows}
+        cases = [_plan_case_out(row_map[item_id], db) for item_id in item_ids if item_id in row_map]
+    api_names = list(dict.fromkeys([case["api_name"] for case in cases if case["api_name"]]))
+    return {
+        **_base(row),
+        "project_name": project.name if project and not project.is_deleted else "",
+        "environment_name": environment.name if environment and not environment.is_deleted else "",
+        "api_name": "、".join(api_names) if api_names else api.name if api else "",
+        "items": item_ids,
+        "cases": cases,
+        "creator_name": creator.real_name or creator.username if creator else "",
+        "executor_name": executor.real_name or executor.username if executor else "",
+        "last_status": row.last_status or "",
+        "last_execution_id": row.last_execution_id,
+        "last_executed_at": fmt_time(row.last_executed_at),
+    }
+
+
 def _active_environment(environment_id: int, project_id: int, db: Session):
     environment = db.get(Environment, environment_id)
     if not environment or environment.is_deleted:
@@ -92,6 +138,47 @@ def _ensure_api_name_available(project_id: int, name: str, db: Session, api_id: 
         exists = exists.filter(ApiDefinition.id != api_id)
     if exists.first():
         raise HTTPException(status_code=400, detail="api name already exists")
+
+
+def _ensure_plan_name_available(project_id: int, name: str, db: Session, plan_id: int | None = None):
+    exists = db.query(TestSuite).filter(
+        TestSuite.project_id == project_id,
+        TestSuite.name == name,
+        TestSuite.is_deleted.is_(False),
+    )
+    if plan_id is not None:
+        exists = exists.filter(TestSuite.id != plan_id)
+    if exists.first():
+        raise HTTPException(status_code=400, detail="test plan name already exists")
+
+
+def _validate_plan_payload(payload: TestPlanIn | TestPlanUpdate, db: Session):
+    _active_project(payload.project_id, db)
+    _active_environment(payload.environment_id, payload.project_id, db)
+    api = db.get(ApiDefinition, payload.api_id)
+    if not api:
+        raise HTTPException(status_code=404, detail="api does not exist")
+    if api.project_id != payload.project_id:
+        raise HTTPException(status_code=400, detail="api does not belong to project")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="test plan name is required")
+    item_ids = []
+    for item in payload.items:
+        case_id = int(item)
+        if case_id not in item_ids:
+            item_ids.append(case_id)
+    if not item_ids:
+        raise HTTPException(status_code=400, detail="test plan cases are required")
+    cases = db.query(TestCase).filter(TestCase.id.in_(item_ids), TestCase.is_deleted.is_(False)).all()
+    case_map = {case.id: case for case in cases}
+    for case_id in item_ids:
+        case = case_map.get(case_id)
+        if not case:
+            raise HTTPException(status_code=404, detail="test case does not exist")
+        if case.project_id != payload.project_id:
+            raise HTTPException(status_code=400, detail="test case does not belong to selected project")
+    return name, item_ids
 
 
 def _environment_port(protocol: str, port: int | None):
@@ -462,6 +549,129 @@ def delete_case(case_id: int, _: User = Depends(current_user), db: Session = Dep
     db.commit()
     db.refresh(row)
     return _case_out(row, db)
+
+
+@router.get("/plans")
+def list_plans(
+    project_id: int | None = None,
+    api_id: int | None = None,
+    name: str = "",
+    page: int | None = None,
+    page_size: int | None = None,
+    _: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    query = db.query(TestSuite).join(Project, TestSuite.project_id == Project.id).filter(
+        TestSuite.is_deleted.is_(False),
+        Project.is_deleted.is_(False),
+    )
+    if project_id:
+        query = query.filter(TestSuite.project_id == project_id)
+    if name.strip():
+        query = query.filter(TestSuite.name.like(f"%{name.strip()}%"))
+    if api_id:
+        case_ids = {
+            row.id
+            for row in db.query(TestCase).filter(TestCase.api_id == api_id, TestCase.is_deleted.is_(False)).all()
+        }
+        ordered_rows = query.order_by(TestSuite.id.desc()).all()
+        filtered_rows = [
+            row for row in ordered_rows
+            if row.api_id == api_id or any(int(item) in case_ids for item in parse_json(row.items_json, []))
+        ]
+        if page is None and page_size is None:
+            return [_plan_out(row, db) for row in filtered_rows]
+        page = max(page or 1, 1)
+        page_size = min(max(page_size or 10, 1), 10)
+        total = len(filtered_rows)
+        rows = filtered_rows[(page - 1) * page_size: page * page_size]
+        return {
+            "items": [_plan_out(row, db) for row in rows],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+    if page is None and page_size is None:
+        return [_plan_out(row, db) for row in query.order_by(TestSuite.id.desc()).all()]
+    page = max(page or 1, 1)
+    page_size = min(max(page_size or 10, 1), 10)
+    total = query.count()
+    rows = query.order_by(TestSuite.id.desc()).offset((page - 1) * page_size).limit(page_size).all()
+    return {
+        "items": [_plan_out(row, db) for row in rows],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.post("/plans")
+def create_plan(payload: TestPlanIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    name, item_ids = _validate_plan_payload(payload, db)
+    _ensure_plan_name_available(payload.project_id, name, db)
+    row = TestSuite(
+        project_id=payload.project_id,
+        environment_id=payload.environment_id,
+        api_id=payload.api_id,
+        creator_id=user.id,
+        name=name,
+        items_json=dump_json(item_ids),
+        status="active",
+        is_deleted=False,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _plan_out(row, db)
+
+
+@router.put("/plans/{plan_id}")
+def update_plan(plan_id: int, payload: TestPlanUpdate, _: User = Depends(current_user), db: Session = Depends(get_db)):
+    row = db.get(TestSuite, plan_id)
+    if not row or row.is_deleted:
+        raise HTTPException(status_code=404, detail="test plan does not exist")
+    name, item_ids = _validate_plan_payload(payload, db)
+    _ensure_plan_name_available(payload.project_id, name, db, plan_id=plan_id)
+    row.project_id = payload.project_id
+    row.environment_id = payload.environment_id
+    row.api_id = payload.api_id
+    row.name = name
+    row.items_json = dump_json(item_ids)
+    db.commit()
+    db.refresh(row)
+    return _plan_out(row, db)
+
+
+@router.delete("/plans/{plan_id}")
+def delete_plan(plan_id: int, _: User = Depends(current_user), db: Session = Depends(get_db)):
+    row = db.get(TestSuite, plan_id)
+    if not row or row.is_deleted:
+        raise HTTPException(status_code=404, detail="test plan does not exist")
+    row.is_deleted = True
+    db.commit()
+    db.refresh(row)
+    return _plan_out(row, db)
+
+
+@router.post("/plans/{plan_id}/execute")
+def execute_plan(plan_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    row = db.get(TestSuite, plan_id)
+    if not row or row.is_deleted:
+        raise HTTPException(status_code=404, detail="test plan does not exist")
+    task = ExecutionTask(
+        executor_id=user.id,
+        project_id=row.project_id,
+        environment_id=row.environment_id,
+        target_type="plan",
+        target_id=row.id,
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    row.last_execution_id = task.id
+    row.last_status = task.status
+    db.commit()
+    return {"id": task.id, "status": task.status}
 
 
 @router.get("/scenarios")

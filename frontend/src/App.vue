@@ -22,7 +22,7 @@
         </el-sub-menu>
         <el-menu-item index="apis">接口管理</el-menu-item>
         <el-menu-item index="cases">用例管理</el-menu-item>
-        <el-menu-item index="execute">执行中心</el-menu-item>
+        <el-menu-item index="execute">测试计划</el-menu-item>
         <el-menu-item index="reports">报告中心</el-menu-item>
         <el-menu-item index="logs">日志中心</el-menu-item>
         <el-sub-menu index="system">
@@ -482,7 +482,7 @@
             <el-table-column prop="priority" label="优先级" width="100" />
             <el-table-column label="操作" width="220" fixed="right">
               <template #default="{ row }">
-                <el-button size="small" @click="openCaseBodyDialog(row)">查看</el-button>
+                <el-button size="small" @click="openCaseDetailDialog(row)">查看</el-button>
                 <el-button size="small" @click="openEditCasePage(row)">编辑</el-button>
                 <el-button size="small" type="danger" @click="deleteCase(row)">删除</el-button>
               </template>
@@ -573,14 +573,246 @@
         </el-dialog>
 
         <section v-if="active === 'execute'">
-          <div class="toolbar"><h2>执行中心</h2><el-button type="primary" @click="runCase">手动执行</el-button></div>
-          <el-form class="inline-form"><el-select v-model="execForm.project_id" placeholder="项目"><el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" /></el-select><el-select v-model="execForm.environment_id" placeholder="环境"><el-option v-for="e in environments" :key="e.id" :label="e.name" :value="e.id" /></el-select><el-select v-model="execForm.target_id" placeholder="用例"><el-option v-for="c in cases" :key="c.id" :label="c.name" :value="c.id" /></el-select></el-form>
-          <el-table :data="executions"><el-table-column prop="id" label="任务" /><el-table-column prop="status" label="状态" /><el-table-column prop="create_date" label="创建时间" /></el-table>
+          <div class="toolbar">
+            <h2>测试计划</h2>
+            <el-button type="primary" @click="openCreatePlanPage">添加测试计划</el-button>
+          </div>
+          <el-form class="search-form" label-position="top">
+            <el-form-item label="计划名称">
+              <el-input v-model="planSearch.name" placeholder="请输入计划名称" clearable @keyup.enter="searchPlans" />
+            </el-form-item>
+            <el-form-item label="项目">
+              <el-select v-model="planSearch.project_id" placeholder="请选择项目" clearable @change="changePlanSearchProject">
+                <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="包含接口">
+              <el-select v-model="planSearch.api_id" placeholder="请先选择项目" clearable :disabled="!planSearch.project_id">
+                <el-option v-for="a in planSearchApis" :key="a.id" :label="a.name" :value="a.id" />
+              </el-select>
+            </el-form-item>
+            <div class="search-actions">
+              <el-button type="primary" @click="searchPlans">搜索</el-button>
+              <el-button @click="resetPlanSearch">重置</el-button>
+            </div>
+          </el-form>
+          <el-table :data="planList" row-key="id">
+            <el-table-column type="expand">
+              <template #default="{ row }">
+                <el-table :data="row.cases || []" size="small" class="nested-table">
+                  <el-table-column prop="name" label="用例名称" />
+                  <el-table-column prop="api_name" label="接口" />
+                  <el-table-column prop="priority" label="优先级" width="100" />
+                  <el-table-column label="操作" width="100">
+                    <template #default="{ row: caseRow }">
+                      <el-button size="small" @click="openCaseDetailDialog(caseRow, row.environment_id, row.last_execution_id)">查看</el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </template>
+            </el-table-column>
+            <el-table-column prop="name" label="计划名称" min-width="150" />
+            <el-table-column prop="project_name" label="项目" />
+            <el-table-column prop="environment_name" label="环境" />
+            <el-table-column prop="api_name" label="包含接口" />
+            <el-table-column label="状态" width="110">
+              <template #default="{ row }">
+                <el-tag :type="executionStatusType(row.last_status)">{{ row.last_status || '未执行' }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="executor_name" label="执行用户" width="120" />
+            <el-table-column prop="creator_name" label="创建用户" width="120" />
+            <el-table-column label="执行时间" width="150">
+              <template #default="{ row }">{{ formatMinute(row.last_executed_at) }}</template>
+            </el-table-column>
+            <el-table-column label="创建时间" width="150">
+              <template #default="{ row }">{{ formatMinute(row.create_date) }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="340" fixed="right">
+              <template #default="{ row }">
+                <div class="table-actions">
+                  <el-button size="small" type="primary" @click="executePlan(row)">执行</el-button>
+                  <el-button size="small" @click="openEditPlanPage(row)">编辑</el-button>
+                  <el-button size="small" @click="openExecutionDetail(row)">查看进度</el-button>
+                  <el-button size="small" type="danger" @click="deletePlan(row)">删除</el-button>
+                </div>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div class="pagination">
+            <el-pagination
+              background
+              layout="total, prev, pager, next"
+              :current-page="planPagination.page"
+              :page-size="planPagination.pageSize"
+              :total="planPagination.total"
+              @current-change="changePlanPage"
+            />
+          </div>
         </section>
 
+        <section v-if="activePlanEditor" class="plan-editor-page">
+          <div class="toolbar">
+            <h2>{{ activePlanEditor.label }}</h2>
+            <div class="toolbar-actions">
+              <el-button @click="closePlanEditorFromPage(activePlanEditor)">关闭</el-button>
+              <el-button type="primary" @click="savePlanEditor(activePlanEditor, true)">保存</el-button>
+            </div>
+          </div>
+
+          <div class="editor-section">
+            <h3>基础信息</h3>
+            <el-form label-position="top" class="form-grid">
+              <el-form-item label="项目">
+                <el-select v-model="activePlanEditor.project_id" placeholder="请选择项目" @change="changePlanEditorProject(activePlanEditor)">
+                  <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="环境">
+                <el-select v-model="activePlanEditor.environment_id" placeholder="请先选择项目" :disabled="!activePlanEditor.project_id" @change="markPlanEditorDirty(activePlanEditor)">
+                  <el-option v-for="e in planEditorEnvironments(activePlanEditor)" :key="e.id" :label="e.name" :value="e.id" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="接口">
+                <el-select v-model="activePlanEditor.api_id" placeholder="请先选择项目" :disabled="!activePlanEditor.project_id" @change="changePlanEditorApi(activePlanEditor)">
+                  <el-option v-for="a in planEditorApis(activePlanEditor)" :key="a.id" :label="a.name" :value="a.id" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="测试计划名称">
+                <el-input v-model="activePlanEditor.name" placeholder="请输入测试计划名称" @input="markPlanEditorDirty(activePlanEditor)" />
+              </el-form-item>
+            </el-form>
+          </div>
+
+          <div class="editor-section">
+            <div class="toolbar compact-toolbar">
+              <h3>测试用例</h3>
+              <div class="toolbar-actions">
+                <el-button type="primary" @click="loadPlanCandidateCases(activePlanEditor)">搜索</el-button>
+                <el-button @click="addSelectedPlanCases(activePlanEditor)">添加</el-button>
+              </div>
+            </div>
+            <el-table
+              :data="activePlanEditor.candidateCases"
+              size="small"
+              row-key="id"
+              @selection-change="changePlanCandidateSelection(activePlanEditor, $event)"
+            >
+              <el-table-column type="selection" width="48" />
+              <el-table-column prop="name" label="用例名称" />
+              <el-table-column prop="api_name" label="接口" />
+              <el-table-column prop="priority" label="优先级" width="100" />
+              <el-table-column label="操作" width="100">
+                <template #default="{ row }">
+                  <el-button size="small" @click="openCaseDetailDialog(row, activePlanEditor.environment_id)">查看</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+
+          <div class="editor-section">
+            <h3>测试计划</h3>
+            <div class="plan-queue">
+              <div
+                v-for="(item, index) in activePlanEditor.queue"
+                :key="item.id"
+                class="plan-queue-row"
+                draggable="true"
+                @dragstart="startPlanQueueDrag(activePlanEditor, index)"
+                @dragover.prevent
+                @drop="dropPlanQueueRow(activePlanEditor, index)"
+              >
+                <span class="drag-handle">⋮⋮</span>
+                <span class="queue-name">{{ item.name }}</span>
+                <span class="queue-api">{{ item.api_name || '-' }}</span>
+                <el-tag size="small">{{ item.priority }}</el-tag>
+                <el-button size="small" @click="openCaseDetailDialog(item, activePlanEditor.environment_id)">查看</el-button>
+                <el-button size="small" type="danger" @click="removePlanQueueCase(activePlanEditor, index)">移除</el-button>
+              </div>
+              <el-empty v-if="activePlanEditor.queue.length === 0" description="暂无用例" />
+            </div>
+          </div>
+        </section>
+
+        <el-dialog v-model="caseDetailDialogVisible" title="用例详情" width="760px">
+          <div class="detail-grid">
+            <strong>请求方法</strong><span>{{ caseDetail.method || '-' }}</span>
+            <strong>URL</strong><span>{{ caseDetail.url || '-' }}</span>
+            <strong>请求头</strong><pre>{{ formatJson(caseDetail.request_headers) }}</pre>
+            <strong>请求体</strong><pre>{{ formatJson(caseDetail.request_body) }}</pre>
+            <strong>断言信息</strong><pre>{{ formatJson(caseDetail.assertions) }}</pre>
+            <strong>返回报文</strong><pre>{{ formatJson(caseDetail.response_snapshot) }}</pre>
+          </div>
+          <template #footer>
+            <el-button type="primary" @click="caseDetailDialogVisible = false">关闭</el-button>
+          </template>
+        </el-dialog>
+
+        <el-dialog v-model="executionDetailDialogVisible" title="执行进度" width="820px">
+          <el-descriptions v-if="executionDetail.task" :column="3" border>
+            <el-descriptions-item label="状态">{{ executionDetail.task.status }}</el-descriptions-item>
+            <el-descriptions-item label="汇总">{{ formatJson(executionDetail.task.summary) }}</el-descriptions-item>
+          </el-descriptions>
+          <el-table :data="executionDetail.results" size="small" class="sub">
+            <el-table-column prop="case_name" label="用例名称" min-width="140" />
+            <el-table-column prop="api_name" label="接口" min-width="140" />
+            <el-table-column prop="status" label="状态" width="100" />
+            <el-table-column prop="duration_ms" label="耗时(ms)" width="110" />
+            <el-table-column prop="error_message" label="错误信息" />
+          </el-table>
+          <template #footer>
+            <el-button type="primary" @click="executionDetailDialogVisible = false">关闭</el-button>
+          </template>
+        </el-dialog>
+
         <section v-if="active === 'reports'">
-          <h2>报告中心</h2>
-          <el-table :data="executions"><el-table-column prop="id" label="任务" /><el-table-column prop="status" label="状态" /><el-table-column label="HTML 报告"><template #default="{ row }"><el-link :href="`/api/executions/${row.id}/report`" target="_blank">查看报告</el-link></template></el-table-column></el-table>
+          <div class="toolbar"><h2>报告中心</h2></div>
+          <el-form class="search-form" label-position="top">
+            <el-form-item label="测试计划名称">
+              <el-input v-model="reportSearch.name" placeholder="请输入测试计划名称" clearable @keyup.enter="searchReports" />
+            </el-form-item>
+            <el-form-item label="状态">
+              <el-select v-model="reportSearch.status" placeholder="请选择状态" clearable>
+                <el-option label="queued" value="queued" />
+                <el-option label="running" value="running" />
+                <el-option label="passed" value="passed" />
+                <el-option label="failed" value="failed" />
+                <el-option label="error" value="error" />
+              </el-select>
+            </el-form-item>
+            <div class="search-actions">
+              <el-button type="primary" @click="searchReports">搜索</el-button>
+              <el-button @click="resetReportSearch">重置</el-button>
+            </div>
+          </el-form>
+          <el-table :data="reportList">
+            <el-table-column prop="target_name" label="测试计划名称" min-width="160" />
+            <el-table-column prop="project_name" label="项目" />
+            <el-table-column prop="environment_name" label="环境" />
+            <el-table-column prop="status" label="状态" width="100" />
+            <el-table-column label="执行时间" width="150">
+              <template #default="{ row }">{{ formatMinute(row.ended_at || row.started_at || row.create_date) }}</template>
+            </el-table-column>
+            <el-table-column prop="executor_name" label="执行用户" width="120" />
+            <el-table-column label="操作" width="190" fixed="right">
+              <template #default="{ row }">
+                <div class="table-actions">
+                  <el-link :href="`/api/executions/${row.id}/report`" target="_blank">查看报告</el-link>
+                  <el-button size="small" type="danger" @click="deleteReport(row)">删除</el-button>
+                </div>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div class="pagination">
+            <el-pagination
+              background
+              layout="total, prev, pager, next"
+              :current-page="reportPagination.page"
+              :page-size="reportPagination.pageSize"
+              :total="reportPagination.total"
+              @current-change="changeReportPage"
+            />
+          </div>
         </section>
 
         <section v-if="active === 'logs'">
@@ -646,6 +878,21 @@ type ApiEditor = {
   headerRows: KeyValueRow[]
   dirty: boolean
 }
+type PlanEditor = {
+  tabName: string
+  label: string
+  mode: 'create' | 'edit'
+  planId?: number
+  project_id?: number
+  environment_id?: number
+  api_id?: number
+  name: string
+  candidateCases: any[]
+  selectedCases: any[]
+  queue: any[]
+  dragIndex?: number
+  dirty: boolean
+}
 
 const menuMeta: Record<string, AppTab> = {
   dashboard: { name: 'dashboard', label: '数据概览', closable: false },
@@ -653,7 +900,7 @@ const menuMeta: Record<string, AppTab> = {
   environments: { name: 'environments', label: '环境管理', closable: true },
   apis: { name: 'apis', label: '接口管理', closable: true },
   cases: { name: 'cases', label: '用例管理', closable: true },
-  execute: { name: 'execute', label: '执行中心', closable: true },
+  execute: { name: 'execute', label: '测试计划', closable: true },
   reports: { name: 'reports', label: '报告中心', closable: true },
   logs: { name: 'logs', label: '日志中心', closable: true },
   accounts: { name: 'accounts', label: '用户管理', closable: true }
@@ -695,6 +942,8 @@ const apiList = ref<any[]>([])
 const cases = ref<any[]>([])
 const caseList = ref<any[]>([])
 const executions = ref<any[]>([])
+const reportList = ref<any[]>([])
+const planList = ref<any[]>([])
 const logs = ref<any[]>([])
 const selectedProject = ref<any>(null)
 
@@ -709,6 +958,10 @@ const apiSearch = reactive({ project_id: undefined as number | undefined, name: 
 const apiPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const caseSearch = reactive({ project_id: undefined as number | undefined, api_id: undefined as number | undefined })
 const casePagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const planSearch = reactive({ project_id: undefined as number | undefined, api_id: undefined as number | undefined, name: '' })
+const planPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const reportSearch = reactive({ name: '', status: '' })
+const reportPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const createUserDialogVisible = ref(false)
 const editUserDialogVisible = ref(false)
 const createProjectDialogVisible = ref(false)
@@ -717,7 +970,11 @@ const createEnvironmentDialogVisible = ref(false)
 const editEnvironmentDialogVisible = ref(false)
 const changePasswordDialogVisible = ref(false)
 const caseBodyDialogVisible = ref(false)
+const caseDetailDialogVisible = ref(false)
+const executionDetailDialogVisible = ref(false)
 const caseBodyPreview = ref('')
+const caseDetail = reactive<any>({})
+const executionDetail = reactive<any>({ task: null, results: [] })
 const userForm = reactive({ username: '', real_name: '' })
 const editUserForm = reactive({ id: undefined as number | undefined, username: '', real_name: '' })
 const changePasswordForm = reactive({ old_password: '', new_password: '', confirm_password: '' })
@@ -728,10 +985,13 @@ const editEnvironmentForm = reactive({ id: undefined as number | undefined, proj
 const caseForm = reactive({ id: undefined as number | undefined, project_id: undefined as number | undefined, api_id: undefined as number | undefined, name: '', description: '', priority: 'P2', bodyText: '{}', assertionRows: [] as CaseAssertionRow[] })
 const execForm = reactive({ project_id: undefined as number | undefined, environment_id: undefined as number | undefined, target_id: undefined as number | undefined })
 const apiEditors = reactive<Record<string, ApiEditor>>({})
+const planEditors = reactive<Record<string, PlanEditor>>({})
 const avatarText = computed(() => me.value?.username.slice(0, 1).toUpperCase() || 'U')
 const activeApiEditor = computed(() => apiEditors[active.value])
+const activePlanEditor = computed(() => planEditors[active.value])
 const caseSearchApis = computed(() => apis.value.filter(item => caseSearch.project_id && item.project_id === caseSearch.project_id))
 const caseFormApis = computed(() => apis.value.filter(item => caseForm.project_id && item.project_id === caseForm.project_id))
+const planSearchApis = computed(() => apis.value.filter(item => planSearch.project_id && item.project_id === planSearch.project_id))
 const assertionTypes = [
   { label: 'HTTP状态码', value: 'status_code' },
   { label: 'JSONPath等于', value: 'jsonpath_equal' },
@@ -759,6 +1019,8 @@ async function loadAll() {
   calls.push(loadEnvironments())
   calls.push(loadApis())
   calls.push(loadCases())
+  calls.push(loadPlans())
+  calls.push(loadReports())
   await Promise.allSettled(calls)
 }
 
@@ -945,6 +1207,86 @@ function caseSerialNumber(index: number) {
   return (casePagination.page - 1) * casePagination.pageSize + index + 1
 }
 
+async function loadPlans() {
+  const projectId = planSearch.project_id
+  const apiId = planSearch.api_id
+  const name = planSearch.name.trim()
+  const { data } = await api.get('/plans', {
+    params: {
+      ...(projectId ? { project_id: projectId } : {}),
+      ...(apiId ? { api_id: apiId } : {}),
+      ...(name ? { name } : {}),
+      page: planPagination.page,
+      page_size: planPagination.pageSize
+    }
+  })
+  planList.value = data.items
+  planPagination.total = data.total
+  planPagination.page = data.page
+  planPagination.pageSize = data.page_size
+}
+
+async function refreshPlansAfterChange() {
+  await loadPlans()
+}
+
+async function searchPlans() {
+  planPagination.page = 1
+  await loadPlans()
+}
+
+async function resetPlanSearch() {
+  planSearch.project_id = undefined
+  planSearch.api_id = undefined
+  planSearch.name = ''
+  planPagination.page = 1
+  await loadPlans()
+}
+
+function changePlanSearchProject() {
+  planSearch.api_id = undefined
+}
+
+async function changePlanPage(page: number) {
+  planPagination.page = page
+  await loadPlans()
+}
+
+async function loadReports() {
+  const name = reportSearch.name.trim()
+  const status = reportSearch.status
+  const { data } = await api.get('/executions', {
+    params: {
+      target_type: 'plan',
+      ...(name ? { name } : {}),
+      ...(status ? { status } : {}),
+      page: reportPagination.page,
+      page_size: reportPagination.pageSize
+    }
+  })
+  reportList.value = data.items
+  reportPagination.total = data.total
+  reportPagination.page = data.page
+  reportPagination.pageSize = data.page_size
+}
+
+async function searchReports() {
+  reportPagination.page = 1
+  await loadReports()
+}
+
+async function resetReportSearch() {
+  reportSearch.name = ''
+  reportSearch.status = ''
+  reportPagination.page = 1
+  await loadReports()
+}
+
+async function changeReportPage(page: number) {
+  reportPagination.page = page
+  await loadReports()
+}
+
 async function login() {
   try {
     const { data } = await api.post('/auth/login', loginForm)
@@ -1004,6 +1346,10 @@ async function closeTab(name: string | number) {
   const target = String(name)
   if (apiEditors[target]) {
     await requestCloseApiEditor(apiEditors[target])
+    return
+  }
+  if (planEditors[target]) {
+    await requestClosePlanEditor(planEditors[target])
     return
   }
   removeTab(target)
@@ -1551,7 +1897,7 @@ function createEditApiEditor(row: any): ApiEditor {
   const savedHeaderRows = objectToRows(row.headers)
   const editor: ApiEditor = {
     tabName: `api-edit-${row.id}`,
-    label: `编辑接口-${row.id}`,
+    label: '编辑接口',
     mode: 'edit',
     apiId: row.id,
     project_id: row.project_id,
@@ -1581,7 +1927,7 @@ function openEditApiDialog(row: any) {
   if (!apiEditors[tabName]) {
     apiEditors[tabName] = createEditApiEditor(row)
   }
-  openRuntimeTab({ name: tabName, label: `编辑接口-${row.id}`, closable: true })
+  openRuntimeTab({ name: tabName, label: '编辑接口', closable: true })
 }
 
 function markApiEditorDirty(editor: ApiEditor) {
@@ -1698,7 +2044,7 @@ function promoteCreatedApiEditor(editor: ApiEditor, apiId: number) {
   const newTabName = `api-edit-${apiId}`
   delete apiEditors[oldTabName]
   editor.tabName = newTabName
-  editor.label = `编辑接口-${apiId}`
+  editor.label = '编辑接口'
   editor.mode = 'edit'
   editor.apiId = apiId
   apiEditors[newTabName] = editor
@@ -1924,6 +2270,369 @@ async function deleteCase(row: any) {
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.detail || '用例删除失败')
   }
+}
+
+function createEmptyPlanEditor(): PlanEditor {
+  return {
+    tabName: 'plan-create',
+    label: '新增测试计划',
+    mode: 'create',
+    project_id: undefined,
+    environment_id: undefined,
+    api_id: undefined,
+    name: '',
+    candidateCases: [],
+    selectedCases: [],
+    queue: [],
+    dirty: false
+  }
+}
+
+function createEditPlanEditor(row: any): PlanEditor {
+  return {
+    tabName: `plan-edit-${row.id}`,
+    label: '编辑测试计划',
+    mode: 'edit',
+    planId: row.id,
+    project_id: row.project_id,
+    environment_id: row.environment_id,
+    api_id: row.api_id,
+    name: row.name || '',
+    candidateCases: [],
+    selectedCases: [],
+    queue: [...(row.cases || [])],
+    dirty: false
+  }
+}
+
+function openCreatePlanPage() {
+  if (!planEditors['plan-create']) {
+    planEditors['plan-create'] = createEmptyPlanEditor()
+  }
+  openRuntimeTab({ name: 'plan-create', label: '新增测试计划', closable: true })
+}
+
+function openEditPlanPage(row: any) {
+  const tabName = `plan-edit-${row.id}`
+  if (!planEditors[tabName]) {
+    planEditors[tabName] = createEditPlanEditor(row)
+  }
+  openRuntimeTab({ name: tabName, label: '编辑测试计划', closable: true })
+}
+
+function markPlanEditorDirty(editor: PlanEditor) {
+  editor.dirty = true
+}
+
+function planEditorEnvironments(editor: PlanEditor) {
+  return environments.value.filter(item => editor.project_id && item.project_id === editor.project_id)
+}
+
+function planEditorApis(editor: PlanEditor) {
+  return apis.value.filter(item => editor.project_id && item.project_id === editor.project_id)
+}
+
+function changePlanEditorProject(editor: PlanEditor) {
+  editor.environment_id = undefined
+  editor.api_id = undefined
+  editor.candidateCases = []
+  editor.selectedCases = []
+  markPlanEditorDirty(editor)
+}
+
+function changePlanEditorApi(editor: PlanEditor) {
+  editor.candidateCases = []
+  editor.selectedCases = []
+  markPlanEditorDirty(editor)
+}
+
+function planNameExists(projectId: number, name: string, planId?: number) {
+  return planList.value.some(item =>
+    item.project_id === projectId &&
+    item.name === name &&
+    item.id !== planId
+  )
+}
+
+function validatePlanEditor(editor: PlanEditor) {
+  if (!editor.project_id) {
+    ElMessage.warning('请选择项目')
+    return null
+  }
+  if (!editor.environment_id) {
+    ElMessage.warning('请选择环境')
+    return null
+  }
+  if (!editor.api_id) {
+    ElMessage.warning('请选择接口')
+    return null
+  }
+  const name = editor.name.trim()
+  if (!name) {
+    ElMessage.warning('请输入测试计划名称')
+    return null
+  }
+  if (planNameExists(editor.project_id, name, editor.planId)) {
+    ElMessage.warning('测试计划名称已存在')
+    return null
+  }
+  if (editor.queue.length === 0) {
+    ElMessage.warning('请至少添加一条测试用例')
+    return null
+  }
+  return {
+    project_id: editor.project_id,
+    environment_id: editor.environment_id,
+    api_id: editor.api_id,
+    name,
+    items: editor.queue.map(item => item.id)
+  }
+}
+
+async function loadPlanCandidateCases(editor: PlanEditor) {
+  if (!editor.project_id || !editor.environment_id || !editor.api_id) {
+    ElMessage.warning('请先选择项目、环境和接口')
+    return
+  }
+  const { data } = await api.get('/cases', {
+    params: {
+      project_id: editor.project_id,
+      api_id: editor.api_id
+    }
+  })
+  editor.candidateCases = data
+  editor.selectedCases = []
+}
+
+function changePlanCandidateSelection(editor: PlanEditor, rows: any[]) {
+  editor.selectedCases = rows
+}
+
+function addSelectedPlanCases(editor: PlanEditor) {
+  const exists = new Set(editor.queue.map(item => item.id))
+  editor.selectedCases.forEach(item => {
+    if (!exists.has(item.id)) {
+      editor.queue.push(item)
+      exists.add(item.id)
+    }
+  })
+  markPlanEditorDirty(editor)
+}
+
+function removePlanQueueCase(editor: PlanEditor, index: number) {
+  editor.queue.splice(index, 1)
+  markPlanEditorDirty(editor)
+}
+
+function startPlanQueueDrag(editor: PlanEditor, index: number) {
+  editor.dragIndex = index
+}
+
+function dropPlanQueueRow(editor: PlanEditor, index: number) {
+  const from = editor.dragIndex
+  editor.dragIndex = undefined
+  if (from === undefined || from === index) {
+    return
+  }
+  const [row] = editor.queue.splice(from, 1)
+  editor.queue.splice(index, 0, row)
+  markPlanEditorDirty(editor)
+}
+
+async function savePlanEditor(editor: PlanEditor, closeAfterSave = false) {
+  const payload = validatePlanEditor(editor)
+  if (!payload) {
+    return false
+  }
+  try {
+    if (editor.mode === 'edit') {
+      await api.put(`/plans/${editor.planId}`, payload)
+      ElMessage.success('测试计划已更新')
+    } else {
+      const { data } = await api.post('/plans', payload)
+      ElMessage.success('测试计划已创建')
+      if (!closeAfterSave) {
+        promoteCreatedPlanEditor(editor, data.id)
+      }
+    }
+    editor.dirty = false
+    planSearch.project_id = payload.project_id
+    planSearch.api_id = payload.api_id
+    await refreshPlansAfterChange()
+    if (closeAfterSave) {
+      closePlanEditorSilently(editor.tabName)
+    }
+    return true
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || '测试计划保存失败')
+    return false
+  }
+}
+
+function promoteCreatedPlanEditor(editor: PlanEditor, planId: number) {
+  const oldTabName = editor.tabName
+  const newTabName = `plan-edit-${planId}`
+  delete planEditors[oldTabName]
+  editor.tabName = newTabName
+  editor.label = '编辑测试计划'
+  editor.mode = 'edit'
+  editor.planId = planId
+  planEditors[newTabName] = editor
+  const tab = openedTabs.value.find(item => item.name === oldTabName)
+  if (tab) {
+    tab.name = newTabName
+    tab.label = editor.label
+  }
+  active.value = newTabName
+  saveTabs()
+}
+
+function closePlanEditorSilently(tabName: string) {
+  delete planEditors[tabName]
+  removeTab(tabName)
+}
+
+async function requestClosePlanEditor(editor: PlanEditor) {
+  if (!editor.dirty) {
+    closePlanEditorSilently(editor.tabName)
+    return
+  }
+  try {
+    await ElMessageBox.confirm('当前测试计划内容尚未保存，是否保存后关闭？', '关闭测试计划', {
+      confirmButtonText: '保存并关闭',
+      cancelButtonText: '不保存关闭',
+      distinguishCancelAndClose: true,
+      type: 'warning'
+    })
+    await savePlanEditor(editor, true)
+  } catch (action) {
+    if (action === 'cancel') {
+      closePlanEditorSilently(editor.tabName)
+    }
+  }
+}
+
+async function closePlanEditorFromPage(editor: PlanEditor) {
+  await requestClosePlanEditor(editor)
+}
+
+async function deletePlan(row: any) {
+  try {
+    await ElMessageBox.confirm('确认删除该测试计划吗？', '删除测试计划', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  await api.delete(`/plans/${row.id}`)
+  ElMessage.success('测试计划已删除')
+  await loadPlans()
+}
+
+async function executePlan(row: any) {
+  await api.post(`/plans/${row.id}/execute`)
+  ElMessage.success('执行任务已提交')
+  await Promise.all([loadPlans(), loadReports(), api.get('/executions').then(r => executions.value = r.data)])
+}
+
+function findCaseApi(row: any) {
+  return apis.value.find(item => item.id === row.api_id)
+}
+
+function findCaseEnvironment(row: any, environmentId?: number) {
+  const apiRow = findCaseApi(row)
+  return environments.value.find(item => item.id === environmentId) ||
+    environments.value.find(item => apiRow?.environment_id && item.id === apiRow.environment_id)
+}
+
+function buildFullRequestUrl(environment: any, apiRow: any, query: Record<string, any>) {
+  if (!apiRow) {
+    return ''
+  }
+  const baseUrl = String(environment?.base_url || '').trim().replace(/\/+$/, '')
+  const protocol = environment?.protocol || 'http'
+  const defaultPort = protocol === 'http' ? 80 : 443
+  const port = environment?.port && Number(environment.port) !== defaultPort ? `:${environment.port}` : ''
+  const root = /^https?:\/\//i.test(baseUrl) ? baseUrl : `${protocol}://${baseUrl.replace(/^\/+/, '')}${port}`
+  const path = String(apiRow.path || '').replace(/^\/+/, '')
+  const url = `${root}/${path}`
+  const queryText = new URLSearchParams(
+    Object.entries(query || {}).reduce<Record<string, string>>((result, [key, value]) => {
+      if (key.trim()) {
+        result[key] = String(value ?? '')
+      }
+      return result
+    }, {})
+  ).toString()
+  return queryText ? `${url}?${queryText}` : url
+}
+
+async function openCaseDetailDialog(row: any, environmentId?: number, executionId?: number) {
+  const apiRow = apis.value.find(item => item.id === row.api_id)
+  const environment = findCaseEnvironment(row, environmentId)
+  const requestQuery = { ...(apiRow?.query || {}), ...(row.request_query || {}) }
+  const requestHeaders = { ...(environment?.headers || {}), ...(apiRow?.headers || {}), ...(row.request_headers || {}) }
+  let responseSnapshot = {}
+  if (executionId && row.id) {
+    try {
+      const { data } = await api.get(`/executions/${executionId}`)
+      const result = (data.results || []).find((item: any) => item.case_id === row.id)
+      responseSnapshot = result?.response_snapshot || {}
+    } catch {}
+  }
+  Object.keys(caseDetail).forEach(key => delete caseDetail[key])
+  Object.assign(caseDetail, {
+    method: row.method || apiRow?.method || '',
+    url: buildFullRequestUrl(environment, apiRow || row, requestQuery),
+    request_headers: requestHeaders,
+    request_body: row.request_body || {},
+    assertions: row.assertions || [],
+    response_snapshot: responseSnapshot
+  })
+  caseDetailDialogVisible.value = true
+}
+
+function formatJson(value: any) {
+  return JSON.stringify(value ?? {}, null, 2)
+}
+
+function formatMinute(value: string) {
+  return value ? value.slice(0, 16) : ''
+}
+
+function executionStatusType(status: string) {
+  if (status === 'passed') return 'success'
+  if (status === 'failed' || status === 'error') return 'danger'
+  if (status === 'running') return 'warning'
+  return 'info'
+}
+
+async function openExecutionDetail(row: any) {
+  if (!row.last_execution_id) {
+    ElMessage.warning('该测试计划暂无执行记录')
+    return
+  }
+  const { data } = await api.get(`/executions/${row.last_execution_id}`)
+  executionDetail.task = data.task
+  executionDetail.results = data.results || []
+  executionDetailDialogVisible.value = true
+}
+
+async function deleteReport(row: any) {
+  try {
+    await ElMessageBox.confirm('确认删除该报告吗？删除后报告中心将不再展示。', '删除报告', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  await api.delete(`/executions/${row.id}`)
+  ElMessage.success('报告已删除')
+  await loadReports()
 }
 
 async function runCase() {

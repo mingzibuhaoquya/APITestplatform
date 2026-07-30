@@ -96,9 +96,16 @@ class TestSuite(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_id: Mapped[int] = mapped_column(Integer, index=True)
+    environment_id: Mapped[int] = mapped_column(Integer, default=0, server_default="0", index=True)
+    api_id: Mapped[int] = mapped_column(Integer, default=0, server_default="0", index=True)
+    creator_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(128))
     items_json: Mapped[str] = mapped_column(Text, default="[]")
     status: Mapped[str] = mapped_column(String(32), default="active")
+    last_execution_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    last_status: Mapped[str] = mapped_column(String(32), default="")
+    last_executed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
 
 
 class ExecutionTask(Base, TimestampMixin):
@@ -115,6 +122,7 @@ class ExecutionTask(Base, TimestampMixin):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     summary_json: Mapped[str] = mapped_column(Text, default="{}")
     report_html: Mapped[str] = mapped_column(Text, default="")
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
 
 
 class ExecutionResult(Base, TimestampMixin):

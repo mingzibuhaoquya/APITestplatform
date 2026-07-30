@@ -6,13 +6,15 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
-from app.models import Environment, Project, TestCase as TestCaseModel, User
+from app.models import Environment, ExecutionTask, Project, TestCase as TestCaseModel, TestSuite, User
 from app.routers.auth import change_password, login
-from app.routers.crud import create_api, create_case, create_environment, create_project, delete_api, delete_case, delete_environment, delete_project, list_apis, list_cases, list_environments, list_projects, update_api, update_case, update_environment, update_project
+from app.routers.crud import create_api, create_case, create_environment, create_plan, create_project, delete_api, delete_case, delete_environment, delete_plan, delete_project, execute_plan, list_apis, list_cases, list_environments, list_plans, list_projects, update_api, update_case, update_environment, update_plan, update_project
+from app.routers.executions import delete_execution, list_executions
 from app.routers.mock import router as mock_router
 from app.routers.users import create_user, list_users, router as users_router, update_user, update_user_status
-from app.schemas import ApiDefinitionIn, ApiDefinitionUpdate, ChangePasswordIn, EnvironmentIn, EnvironmentUpdate, LoginIn, ProjectIn, ProjectUpdate, TestCaseIn, TestCaseUpdate, UserCreate, UserStatusUpdate, UserUpdate
+from app.schemas import ApiDefinitionIn, ApiDefinitionUpdate, ChangePasswordIn, EnvironmentIn, EnvironmentUpdate, LoginIn, ProjectIn, ProjectUpdate, TestCaseIn, TestCaseUpdate, TestPlanIn, TestPlanUpdate, UserCreate, UserStatusUpdate, UserUpdate
 from app.services.assertions import all_passed, run_assertions
+from app.services.executor import _build_request_url, _initial_variables
 from app.services.jsonpath import find_jsonpath
 from app.services.variables import render_variables
 from app.security import create_session_token, hash_password
@@ -54,6 +56,38 @@ def test_render_variables_nested():
         "headers": {"Authorization": "Bearer abc"},
         "ids": ["12"],
     }
+
+
+def test_build_request_url_uses_environment_protocol_and_port():
+    env = Environment(project_id=1, name="local", protocol="http", base_url="127.0.0.1", port=8080)
+    default_https = Environment(project_id=1, name="prod", protocol="https", base_url="api.example.com", port=443)
+
+    assert _build_request_url(env, "/users") == "http://127.0.0.1:8080/users"
+    assert _build_request_url(default_https, "v1/users") == "https://api.example.com/v1/users"
+
+
+def test_initial_variables_add_runtime_unique_values(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="runtime_var_project", description="runtime variables"), admin, db)
+    env = create_environment(
+        EnvironmentIn(
+            project_id=project["id"],
+            name="runtime_env",
+            protocol="https",
+            base_url="runtime.example.com",
+            variables={"token": "abc"},
+        ),
+        admin,
+        db,
+    )
+
+    variables = _initial_variables(db, env["id"])
+
+    assert variables["token"] == "abc"
+    assert variables["unique_username"].startswith("test_user_")
+    assert variables["timestamp"]
+    assert variables["uuid"]
+    assert render_variables({"name": "${unique_username}"}, variables)["name"] == variables["unique_username"]
 
 
 def test_jsonpath_simple_path_and_index():
@@ -762,3 +796,126 @@ def test_update_and_logically_delete_case(db_session):
     with pytest.raises(HTTPException) as delete_again_error:
         delete_case(created["id"], admin, db)
     assert delete_again_error.value.status_code == 404
+
+
+def test_plan_crud_paginates_searches_and_validates_relations(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="plan_project", description="plan project"), admin, db)
+    other_project = create_project(ProjectIn(name="plan_other_project", description="other plan project"), admin, db)
+    environment = create_test_environment(project["id"], admin, db)
+    other_environment = create_test_environment(other_project["id"], admin, db)
+    api_row = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="plan_api", method="POST", path="/plan"), admin, db)
+    same_project_other_api = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="plan_token_api", method="POST", path="/token"), admin, db)
+    other_api = create_api(ApiDefinitionIn(project_id=other_project["id"], environment_id=other_environment["id"], name="other_plan_api", method="GET", path="/other"), admin, db)
+    first_case = create_case(TestCaseIn(project_id=project["id"], api_id=api_row["id"], name="first_plan_case", priority="P0"), admin, db)
+    second_case = create_case(TestCaseIn(project_id=project["id"], api_id=api_row["id"], name="second_plan_case", priority="P2"), admin, db)
+    token_case = create_case(TestCaseIn(project_id=project["id"], api_id=same_project_other_api["id"], name="token_plan_case", priority="P1"), admin, db)
+    other_case = create_case(TestCaseIn(project_id=other_project["id"], api_id=other_api["id"], name="other_plan_case"), admin, db)
+
+    created = create_plan(
+        TestPlanIn(
+            project_id=project["id"],
+            environment_id=environment["id"],
+            api_id=api_row["id"],
+            name="daily plan",
+            items=[first_case["id"], second_case["id"]],
+        ),
+        admin,
+        db,
+    )
+    assert created["name"] == "daily plan"
+    assert created["project_name"] == "plan_project"
+    assert created["environment_name"] == f"env_{project['id']}"
+    assert created["api_name"] == "plan_api"
+    assert created["items"] == [first_case["id"], second_case["id"]]
+    assert [item["name"] for item in created["cases"]] == ["first_plan_case", "second_plan_case"]
+    assert created["creator_name"] == "Admin"
+
+    with pytest.raises(HTTPException) as duplicate_error:
+        create_plan(TestPlanIn(project_id=project["id"], environment_id=environment["id"], api_id=api_row["id"], name="daily plan", items=[first_case["id"]]), admin, db)
+    assert duplicate_error.value.status_code == 400
+
+    same_name_other_project = create_plan(TestPlanIn(project_id=other_project["id"], environment_id=other_environment["id"], api_id=other_api["id"], name="daily plan", items=[other_case["id"]]), admin, db)
+    assert same_name_other_project["project_id"] == other_project["id"]
+
+    with pytest.raises(HTTPException) as env_mismatch:
+        create_plan(TestPlanIn(project_id=project["id"], environment_id=other_environment["id"], api_id=api_row["id"], name="bad env", items=[first_case["id"]]), admin, db)
+    assert env_mismatch.value.status_code == 400
+
+    with pytest.raises(HTTPException) as case_mismatch:
+        create_plan(TestPlanIn(project_id=project["id"], environment_id=environment["id"], api_id=api_row["id"], name="bad case", items=[other_case["id"]]), admin, db)
+    assert case_mismatch.value.status_code == 400
+
+    mixed_api_plan = create_plan(
+        TestPlanIn(
+            project_id=project["id"],
+            environment_id=environment["id"],
+            api_id=api_row["id"],
+            name="mixed api plan",
+            items=[first_case["id"], token_case["id"]],
+        ),
+        admin,
+        db,
+    )
+    assert mixed_api_plan["items"] == [first_case["id"], token_case["id"]]
+    assert mixed_api_plan["api_name"] == "plan_api、plan_token_api"
+
+    paged = list_plans(project_id=project["id"], page=1, page_size=10, _=admin, db=db)
+    assert paged["total"] == 2
+
+    searched = list_plans(project_id=project["id"], api_id=api_row["id"], name="daily", page=1, page_size=10, _=admin, db=db)
+    assert searched["total"] == 1
+
+    token_api_searched = list_plans(project_id=project["id"], api_id=same_project_other_api["id"], name="mixed", page=1, page_size=10, _=admin, db=db)
+    assert token_api_searched["total"] == 1
+    assert token_api_searched["items"][0]["id"] == mixed_api_plan["id"]
+
+    updated = update_plan(
+        created["id"],
+        TestPlanUpdate(project_id=project["id"], environment_id=environment["id"], api_id=api_row["id"], name="daily plan updated", items=[second_case["id"], first_case["id"]]),
+        admin,
+        db,
+    )
+    assert updated["items"] == [second_case["id"], first_case["id"]]
+
+    deleted = delete_plan(created["id"], admin, db)
+    assert deleted["is_deleted"] is True
+    assert list_plans(project_id=project["id"], page=1, page_size=10, _=admin, db=db)["total"] == 1
+
+
+def test_execute_plan_creates_task_and_executor_syncs_status(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="plan_execute_project", description="plan execute project"), admin, db)
+    environment = create_test_environment(project["id"], admin, db)
+    api_row = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="plan_execute_api", method="GET", path="/missing"), admin, db)
+    case_row = create_case(TestCaseIn(project_id=project["id"], api_id=api_row["id"], name="execute_case"), admin, db)
+    plan = create_plan(TestPlanIn(project_id=project["id"], environment_id=environment["id"], api_id=api_row["id"], name="execute plan", items=[case_row["id"]]), admin, db)
+
+    task = execute_plan(plan["id"], admin, db)
+    stored_task = db.get(ExecutionTask, task["id"])
+    stored_plan = db.get(TestSuite, plan["id"])
+
+    assert task["status"] == "queued"
+    assert stored_task.target_type == "plan"
+    assert stored_task.target_id == plan["id"]
+    assert stored_plan.last_execution_id == task["id"]
+    assert stored_plan.last_status == "queued"
+
+
+def test_execution_reports_search_and_soft_delete(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="report_project", description="report project"), admin, db)
+    environment = create_test_environment(project["id"], admin, db)
+    api_row = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="report_api", method="GET", path="/report"), admin, db)
+    case_row = create_case(TestCaseIn(project_id=project["id"], api_id=api_row["id"], name="report_case"), admin, db)
+    plan = create_plan(TestPlanIn(project_id=project["id"], environment_id=environment["id"], api_id=api_row["id"], name="nightly report plan", items=[case_row["id"]]), admin, db)
+    task = execute_plan(plan["id"], admin, db)
+
+    listed = list_executions(name="nightly", target_type="plan", page=1, page_size=10, _=admin, db=db)
+    assert listed["total"] == 1
+    assert listed["items"][0]["target_name"] == "nightly report plan"
+    assert listed["items"][0]["project_name"] == "report_project"
+
+    deleted = delete_execution(task["id"], admin, db)
+    assert deleted["id"] == task["id"]
+    assert list_executions(name="nightly", target_type="plan", page=1, page_size=10, _=admin, db=db)["total"] == 0
