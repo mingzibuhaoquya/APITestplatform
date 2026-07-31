@@ -628,7 +628,7 @@
               <el-button @click="resetPlanSearch">重置</el-button>
             </div>
           </el-form>
-          <el-table :data="planList" row-key="id">
+          <el-table :data="planList" row-key="id" class="plan-list-table">
             <el-table-column type="expand">
               <template #default="{ row }">
                 <div class="plan-case-expand-list">
@@ -650,24 +650,21 @@
                 </div>
               </template>
             </el-table-column>
-            <el-table-column prop="name" label="计划名称" min-width="150" />
-            <el-table-column prop="project_name" label="项目" />
-            <el-table-column prop="environment_name" label="环境" />
-            <el-table-column prop="api_name" label="包含接口" />
-            <el-table-column label="状态" width="110">
+            <el-table-column prop="name" label="计划名称" min-width="128" />
+            <el-table-column prop="project_name" label="项目" min-width="88" />
+            <el-table-column prop="environment_name" label="环境" min-width="96" />
+            <el-table-column prop="api_name" label="包含接口" min-width="110" />
+            <el-table-column label="状态" width="88">
               <template #default="{ row }">
                 <el-tag :type="executionStatusType(row.last_status)">{{ row.last_status || '未执行' }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="executor_name" label="执行用户" width="120" />
-            <el-table-column prop="creator_name" label="创建用户" width="120" />
-            <el-table-column label="执行时间" width="150">
+            <el-table-column prop="executor_name" label="执行用户" width="104" />
+            <el-table-column prop="creator_name" label="创建用户" width="104" />
+            <el-table-column label="执行时间" width="136">
               <template #default="{ row }">{{ formatMinute(row.last_executed_at) }}</template>
             </el-table-column>
-            <el-table-column label="创建时间" width="150">
-              <template #default="{ row }">{{ formatMinute(row.create_date) }}</template>
-            </el-table-column>
-            <el-table-column label="操作" width="340" fixed="right">
+            <el-table-column label="操作" width="280" fixed="right">
               <template #default="{ row }">
                 <div class="table-actions">
                   <el-button size="small" type="primary" @click="executePlan(row)">执行</el-button>

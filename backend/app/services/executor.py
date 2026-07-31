@@ -51,6 +51,7 @@ def execute_task(task_id: int) -> None:
         _sync_plan_execution(db, task)
         db.commit()
     except Exception as exc:
+        db.rollback()
         task = db.get(ExecutionTask, task_id)
         if task:
             task.status = "error"

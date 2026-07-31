@@ -308,22 +308,24 @@ body {
   margin: 4px 0;
 }
 
-.el-table__expanded-cell {
-  max-width: 0;
-}
-
 .plan-case-expand-list {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   width: 100%;
   min-width: 0;
+  box-sizing: border-box;
+}
+
+.plan-list-table .el-table__expanded-cell {
+  padding: 8px 12px !important;
 }
 
 .plan-case-expand-head,
 .plan-case-expand-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1.2fr) minmax(120px, 1fr) 76px 72px;
-  gap: 10px;
+  grid-template-columns: minmax(180px, 360px) minmax(150px, 280px) 44px 56px;
+  gap: 12px;
+  justify-content: start;
   align-items: center;
 }
 
@@ -331,14 +333,14 @@ body {
   color: #64748b;
   font-size: 12px;
   font-weight: 600;
-  padding: 0 10px 4px;
+  padding: 0 8px 2px;
 }
 
 .plan-case-expand-row {
   background: #f8fafc;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
-  padding: 8px 10px;
+  padding: 6px 8px;
 }
 
 .plan-case-expand-row span {

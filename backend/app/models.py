@@ -1,5 +1,6 @@
 from datetime import datetime
 from sqlalchemy import Boolean, DateTime, Integer, String, Text, func
+from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import Mapped, mapped_column
 from .database import Base
 
@@ -123,7 +124,7 @@ class ExecutionTask(Base, TimestampMixin):
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     summary_json: Mapped[str] = mapped_column(Text, default="{}")
-    report_html: Mapped[str] = mapped_column(Text, default="")
+    report_html: Mapped[str] = mapped_column(Text().with_variant(LONGTEXT, "mysql"), default="")
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
 
 

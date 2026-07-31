@@ -114,11 +114,12 @@ def _ensure_test_suite_columns() -> None:
 
 def _ensure_execution_task_columns() -> None:
     inspector = inspect(engine)
-    columns = {column["name"] for column in inspector.get_columns("execution_task")}
-    if "is_deleted" in columns:
-        return
+    columns = {column["name"]: column for column in inspector.get_columns("execution_task")}
     with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE execution_task ADD COLUMN is_deleted BOOL NOT NULL DEFAULT 0"))
+        if "is_deleted" not in columns:
+            conn.execute(text("ALTER TABLE execution_task ADD COLUMN is_deleted BOOL NOT NULL DEFAULT 0"))
+        if engine.dialect.name == "mysql" and "LONGTEXT" not in str(columns["report_html"]["type"]).upper():
+            conn.execute(text("ALTER TABLE execution_task MODIFY COLUMN report_html LONGTEXT NOT NULL"))
 
 
 def _ensure_admin() -> None:
