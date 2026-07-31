@@ -599,16 +599,23 @@
           <el-table :data="planList" row-key="id">
             <el-table-column type="expand">
               <template #default="{ row }">
-                <el-table :data="row.cases || []" size="small" class="nested-table">
-                  <el-table-column prop="name" label="用例名称" />
-                  <el-table-column prop="api_name" label="接口" />
-                  <el-table-column prop="priority" label="优先级" width="100" />
-                  <el-table-column label="操作" width="100">
-                    <template #default="{ row: caseRow }">
+                <div class="plan-case-expand-list">
+                  <div class="plan-case-expand-head">
+                    <span>用例名称</span>
+                    <span>接口</span>
+                    <span>优先级</span>
+                    <span>操作</span>
+                  </div>
+                  <div v-for="caseRow in row.cases || []" :key="caseRow.id" class="plan-case-expand-row">
+                    <span class="plan-case-expand-name">{{ caseRow.name || '-' }}</span>
+                    <span class="plan-case-expand-api">{{ caseRow.api_name || '-' }}</span>
+                    <span class="plan-case-expand-priority">{{ caseRow.priority || '-' }}</span>
+                    <span class="plan-case-expand-action">
                       <el-button size="small" @click="openCaseDetailDialog(caseRow, row.environment_id, row.last_execution_id)">查看</el-button>
-                    </template>
-                  </el-table-column>
-                </el-table>
+                    </span>
+                  </div>
+                  <el-empty v-if="!(row.cases || []).length" description="暂无用例" :image-size="48" />
+                </div>
               </template>
             </el-table-column>
             <el-table-column prop="name" label="计划名称" min-width="150" />
@@ -797,7 +804,7 @@
             <el-table-column label="操作" width="190" fixed="right">
               <template #default="{ row }">
                 <div class="table-actions">
-                  <el-link :href="`/api/executions/${row.id}/report`" target="_blank">查看报告</el-link>
+                  <el-button size="small" @click="openReport(row)">查看报告</el-button>
                   <el-button size="small" type="danger" @click="deleteReport(row)">删除</el-button>
                 </div>
               </template>
@@ -855,7 +862,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, type User } from './api'
 
@@ -962,6 +969,7 @@ const planSearch = reactive({ project_id: undefined as number | undefined, api_i
 const planPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const reportSearch = reactive({ name: '', status: '' })
 const reportPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const planExecutionPollers = new Map<number, number>()
 const createUserDialogVisible = ref(false)
 const editUserDialogVisible = ref(false)
 const createProjectDialogVisible = ref(false)
@@ -2531,10 +2539,74 @@ async function deletePlan(row: any) {
   await loadPlans()
 }
 
+function clearPlanExecutionPoller(planId: number) {
+  const timer = planExecutionPollers.get(planId)
+  if (timer) {
+    window.clearInterval(timer)
+    planExecutionPollers.delete(planId)
+  }
+}
+
+function updatePlanExecutionState(planId: number, taskId: number, status: string, row?: any) {
+  if (row) {
+    row.last_execution_id = taskId
+    row.last_status = status
+  }
+  const target = planList.value.find(item => item.id === planId)
+  if (target) {
+    target.last_execution_id = taskId
+    target.last_status = status
+  }
+}
+
+async function refreshExecutionViews() {
+  await Promise.all([
+    loadReports(),
+    api.get('/executions').then(r => executions.value = r.data)
+  ])
+}
+
+function pollPlanExecution(planId: number, taskId: number, row?: any) {
+  clearPlanExecutionPoller(planId)
+  let attempts = 0
+  let polling = false
+  const terminalStatuses = new Set(['passed', 'failed', 'error'])
+  const poll = async () => {
+    if (polling) return
+    polling = true
+    attempts += 1
+    try {
+      const { data } = await api.get(`/executions/${taskId}`)
+      const status = data?.task?.status || ''
+      if (status) {
+        updatePlanExecutionState(planId, taskId, status, row)
+      }
+      if (terminalStatuses.has(status) || attempts >= 30) {
+        clearPlanExecutionPoller(planId)
+        await Promise.all([loadPlans(), refreshExecutionViews()])
+      }
+    } catch {
+      if (attempts >= 30) {
+        clearPlanExecutionPoller(planId)
+      }
+    } finally {
+      polling = false
+    }
+  }
+  const timer = window.setInterval(poll, 1000)
+  planExecutionPollers.set(planId, timer)
+  void poll()
+}
+
 async function executePlan(row: any) {
-  await api.post(`/plans/${row.id}/execute`)
+  clearPlanExecutionPoller(row.id)
+  const { data } = await api.post(`/plans/${row.id}/execute`)
+  const taskId = data.id
+  const status = data.status || 'queued'
+  updatePlanExecutionState(row.id, taskId, status, row)
   ElMessage.success('执行任务已提交')
-  await Promise.all([loadPlans(), loadReports(), api.get('/executions').then(r => executions.value = r.data)])
+  await refreshExecutionViews()
+  pollPlanExecution(row.id, taskId, row)
 }
 
 function findCaseApi(row: any) {
@@ -2620,6 +2692,26 @@ async function openExecutionDetail(row: any) {
   executionDetailDialogVisible.value = true
 }
 
+async function openReport(row: any) {
+  const reportWindow = window.open('', '_blank')
+  if (!reportWindow) {
+    ElMessage.warning('浏览器已拦截报告窗口，请允许弹窗后重试')
+    return
+  }
+  reportWindow.document.write('<p style="font-family: Arial, sans-serif; padding: 24px;">报告加载中...</p>')
+  try {
+    const { data } = await api.get(`/executions/${row.id}/report`, { responseType: 'text' })
+    reportWindow.document.open()
+    reportWindow.document.write(data || '<h1>报告尚未生成</h1>')
+    reportWindow.document.close()
+  } catch (error: any) {
+    reportWindow.document.open()
+    reportWindow.document.write('<h1>报告加载失败</h1><p>请确认报告存在且当前账号仍处于登录状态。</p>')
+    reportWindow.document.close()
+    ElMessage.error(error?.response?.data?.detail || '报告加载失败')
+  }
+}
+
 async function deleteReport(row: any) {
   try {
     await ElMessageBox.confirm('确认删除该报告吗？删除后报告中心将不再展示。', '删除报告', {
@@ -2647,5 +2739,9 @@ onMounted(async () => {
     me.value = data
     await loadAll()
   } catch {}
+})
+
+onUnmounted(() => {
+  Array.from(planExecutionPollers.keys()).forEach(clearPlanExecutionPoller)
 })
 </script>

@@ -308,6 +308,49 @@ body {
   margin: 4px 0;
 }
 
+.el-table__expanded-cell {
+  max-width: 0;
+}
+
+.plan-case-expand-list {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.plan-case-expand-head,
+.plan-case-expand-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.2fr) minmax(120px, 1fr) 76px 72px;
+  gap: 10px;
+  align-items: center;
+}
+
+.plan-case-expand-head {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 10px 4px;
+}
+
+.plan-case-expand-row {
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.plan-case-expand-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.plan-case-expand-priority,
+.plan-case-expand-action {
+  white-space: nowrap;
+}
+
 .plan-queue {
   display: grid;
   gap: 8px;
@@ -377,5 +420,33 @@ body {
 
   .wide {
     grid-column: auto;
+  }
+
+  .plan-case-expand-head {
+    display: none;
+  }
+
+  .plan-case-expand-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 10px;
+  }
+
+  .plan-case-expand-name,
+  .plan-case-expand-api {
+    grid-column: 1;
+  }
+
+  .plan-case-expand-priority,
+  .plan-case-expand-action {
+    grid-column: 2;
+    justify-self: end;
+  }
+
+  .plan-case-expand-priority {
+    grid-row: 1;
+  }
+
+  .plan-case-expand-action {
+    grid-row: 2;
   }
 }
