@@ -24,6 +24,8 @@ env/
 logs/
 *.log
 backend/logs/
+backend/keys/*.pem
+backend/keys/*.pem
 
 # Frontend dependencies and build output
 frontend/node_modules/

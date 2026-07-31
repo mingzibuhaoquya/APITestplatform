@@ -83,6 +83,13 @@ class EnvironmentUpdate(BaseModel):
     port: int | None = None
 
 
+class EncryptionConfigIn(BaseModel):
+    mode: Literal["none", "rsa_aes_sm3"] = "none"
+    encrypt_request: bool = False
+    decrypt_response: bool = False
+    client_header: str = "appKey"
+
+
 class ApiDefinitionIn(BaseModel):
     project_id: int
     environment_id: int = 0
@@ -94,6 +101,8 @@ class ApiDefinitionIn(BaseModel):
     query: dict[str, Any] = {}
     body: Any = {}
     description: str = ""
+    pre_script: str = ""
+    encryption: EncryptionConfigIn | None = None
 
 
 class ApiDefinitionUpdate(BaseModel):
@@ -106,6 +115,8 @@ class ApiDefinitionUpdate(BaseModel):
     query: dict[str, Any] = {}
     body: Any = {}
     description: str = ""
+    pre_script: str = ""
+    encryption: EncryptionConfigIn | None = None
 
 
 class AssertionRule(BaseModel):

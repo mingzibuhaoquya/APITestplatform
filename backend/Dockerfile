@@ -12,6 +12,7 @@ RUN python -m pip install --upgrade pip \
 
 COPY app ./app
 COPY tests ./tests
+COPY keys ./keys
 
 RUN mkdir -p /app/logs \
     && addgroup --system app \

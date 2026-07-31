@@ -60,6 +60,8 @@ class ApiDefinition(Base, TimestampMixin):
     query_json: Mapped[str] = mapped_column(Text, default="{}")
     body_json: Mapped[str] = mapped_column(Text, default="{}")
     description: Mapped[str] = mapped_column(Text, default="")
+    pre_script: Mapped[str] = mapped_column(Text, default="")
+    encryption_config_json: Mapped[str] = mapped_column(Text, default="{}")
 
 
 class TestCase(Base, TimestampMixin):

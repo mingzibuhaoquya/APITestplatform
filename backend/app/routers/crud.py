@@ -4,6 +4,7 @@ from ..database import get_db
 from ..deps import current_user
 from ..models import ApiDefinition, Environment, ExecutionTask, OperationLog, Project, ScenarioCase, TestCase, TestSuite, User
 from ..schemas import ApiDefinitionIn, ApiDefinitionUpdate, EnvironmentIn, EnvironmentUpdate, ProjectIn, ProjectUpdate, ScenarioCaseIn, TestCaseIn, TestCaseUpdate, TestPlanIn, TestPlanUpdate
+from ..services.crypto_envelope import normalize_config, public_config
 from ..utils import dump_json, fmt_time, parse_json
 
 
@@ -44,6 +45,8 @@ def _api_out(row: ApiDefinition, db: Session):
         "headers": parse_json(row.headers_json, {}),
         "query": parse_json(row.query_json, {}),
         "body": parse_json(row.body_json, {}),
+        "pre_script": row.pre_script or "",
+        "encryption": public_config(parse_json(row.encryption_config_json, {})),
     }
 
 
@@ -408,6 +411,8 @@ def create_api(payload: ApiDefinitionIn, _: User = Depends(current_user), db: Se
         query_json=dump_json(payload.query),
         body_json=dump_json(payload.body),
         description=description,
+        pre_script=payload.pre_script,
+        encryption_config_json=dump_json(normalize_config(payload.encryption.model_dump() if payload.encryption else {})),
     )
     db.add(row)
     db.commit()
@@ -439,6 +444,9 @@ def update_api(api_id: int, payload: ApiDefinitionUpdate, _: User = Depends(curr
     row.query_json = dump_json(payload.query)
     row.body_json = dump_json(payload.body)
     row.description = description
+    row.pre_script = payload.pre_script
+    requested_config = normalize_config(payload.encryption.model_dump() if payload.encryption else {})
+    row.encryption_config_json = dump_json(requested_config)
     db.commit()
     db.refresh(row)
     return _api_out(row, db)
@@ -455,8 +463,6 @@ def delete_api(api_id: int, _: User = Depends(current_user), db: Session = Depen
     db.delete(row)
     db.commit()
     return data
-
-
 @router.get("/cases")
 def list_cases(
     project_id: int | None = None,

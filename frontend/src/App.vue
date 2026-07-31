@@ -450,6 +450,38 @@
                   </el-radio-group>
                 </div>
               </el-tab-pane>
+              <el-tab-pane label="Pre-script" name="pre-script">
+                <el-input
+                  v-model="activeApiEditor.preScript"
+                  type="textarea"
+                  :rows="14"
+                  class="pre-script-input"
+                  placeholder="pm.environment.set('timestamp', Date.now());&#10;pm.environment.set('sign', CryptoJS.MD5(pm.environment.get('timestamp')).toString());"
+                  @input="markApiEditorDirty(activeApiEditor)"
+                />
+                <p class="pre-script-hint">
+                  支持 pm.environment.get/set、Date、Math、JSON、CryptoJS.MD5/SHA256 和 console.log/info/warn；不支持 require、网络请求、文件或数据库访问。
+                </p>
+              </el-tab-pane>
+              <el-tab-pane label="加密配置" name="encryption">
+                <el-form label-position="top">
+                  <el-form-item label="启用接口加密">
+                    <el-switch v-model="activeApiEditor.encryption.enabled" @change="markApiEditorDirty(activeApiEditor)" />
+                  </el-form-item>
+                  <template v-if="activeApiEditor.encryption.enabled">
+                    <el-form-item label="加密方式">
+                      <el-select v-model="activeApiEditor.encryption.mode" @change="markApiEditorDirty(activeApiEditor)">
+                        <el-option label="RSA-AES-SM3" value="rsa_aes_sm3" />
+                      </el-select>
+                    </el-form-item>
+                    <el-form-item label="处理方式">
+                      <el-checkbox v-model="activeApiEditor.encryption.encryptRequest" @change="markApiEditorDirty(activeApiEditor)">请求 Body 加密</el-checkbox>
+                      <el-checkbox v-model="activeApiEditor.encryption.decryptResponse" @change="markApiEditorDirty(activeApiEditor)">响应 Body 解密</el-checkbox>
+                    </el-form-item>
+                    <p class="pre-script-hint">平台使用服务器预置的固定 RSA 密钥，无需上传 PEM 文件。</p>
+                  </template>
+                </el-form>
+              </el-tab-pane>
             </el-tabs>
           </div>
         </section>
@@ -739,9 +771,21 @@
             <strong>请求方法</strong><span>{{ caseDetail.method || '-' }}</span>
             <strong>URL</strong><span>{{ caseDetail.url || '-' }}</span>
             <strong>请求头</strong><pre>{{ formatJson(caseDetail.request_headers) }}</pre>
-            <strong>请求体</strong><pre>{{ formatJson(caseDetail.request_body) }}</pre>
+            <template v-if="caseDetail.request_body_original !== undefined">
+              <strong>请求原文</strong><pre>{{ formatJson(caseDetail.request_body_original) }}</pre>
+              <strong>实际请求密文</strong><pre>{{ formatJson(caseDetail.request_body) }}</pre>
+            </template>
+            <template v-else>
+              <strong>请求体</strong><pre>{{ formatJson(caseDetail.request_body) }}</pre>
+            </template>
             <strong>断言信息</strong><pre>{{ formatJson(caseDetail.assertions) }}</pre>
-            <strong>返回报文</strong><pre>{{ formatJson(caseDetail.response_snapshot) }}</pre>
+            <template v-if="caseDetail.response_snapshot?.decrypted_text !== undefined">
+              <strong>响应密文</strong><pre>{{ formatJson(caseDetail.response_snapshot.encrypted_json) }}</pre>
+              <strong>响应解密内容</strong><pre>{{ caseDetail.response_snapshot.decrypted_text }}</pre>
+            </template>
+            <template v-else>
+              <strong>返回报文</strong><pre>{{ formatJson(caseDetail.response_snapshot) }}</pre>
+            </template>
           </div>
           <template #footer>
             <el-button type="primary" @click="caseDetailDialogVisible = false">关闭</el-button>
@@ -862,6 +906,12 @@ import { api, type User } from './api'
 type AppTab = { name: string; label: string; closable: boolean }
 type KeyValueRow = { id: number; key: string; value: string }
 type CaseAssertionRow = { id: number; type: string; path: string; operator: string; expected: string }
+type ApiEncryption = {
+  enabled: boolean
+  mode: 'none' | 'rsa_aes_sm3'
+  encryptRequest: boolean
+  decryptResponse: boolean
+}
 type ApiEditor = {
   tabName: string
   label: string
@@ -873,9 +923,11 @@ type ApiEditor = {
   method: string
   path: string
   bodyFormat: 'json' | 'xml' | 'x-www-form-data'
-  activePanel: '' | 'query' | 'headers' | 'body'
+  activePanel: '' | 'query' | 'headers' | 'body' | 'pre-script' | 'encryption'
   queryRows: KeyValueRow[]
   headerRows: KeyValueRow[]
+  preScript: string
+  encryption: ApiEncryption
   dirty: boolean
 }
 type PlanEditor = {
@@ -1888,9 +1940,27 @@ function createEmptyApiEditor(): ApiEditor {
     activePanel: '',
     queryRows: [],
     headerRows: defaultHeaderRows(),
+    preScript: '',
+    encryption: {
+      enabled: false,
+      mode: 'none',
+      encryptRequest: false,
+      decryptResponse: false,
+    },
     dirty: false
   }
   return editor
+}
+
+function encryptionFromApi(row: any): ApiEncryption {
+  const encryption = row.encryption || {}
+  const enabled = encryption.mode === 'rsa_aes_sm3'
+  return {
+    enabled,
+    mode: enabled ? 'rsa_aes_sm3' : 'none',
+    encryptRequest: Boolean(encryption.encrypt_request),
+    decryptResponse: Boolean(encryption.decrypt_response),
+  }
 }
 
 function createEditApiEditor(row: any): ApiEditor {
@@ -1909,6 +1979,8 @@ function createEditApiEditor(row: any): ApiEditor {
     activePanel: '',
     queryRows: objectToRows(row.query),
     headerRows: mergeDefaultHeaders(savedHeaderRows),
+    preScript: row.pre_script || '',
+    encryption: encryptionFromApi(row),
     dirty: false
   }
   syncApiEditorContentType(editor, false)
@@ -1986,7 +2058,14 @@ function apiPayload(editor: ApiEditor) {
     path: editor.path.trim(),
     headers,
     query: rowsToObject(editor.queryRows),
-    body: { format: editor.bodyFormat }
+    body: { format: editor.bodyFormat },
+    pre_script: editor.preScript,
+    encryption: {
+      mode: editor.encryption.enabled ? editor.encryption.mode : 'none',
+      encrypt_request: editor.encryption.enabled && editor.encryption.encryptRequest,
+      decrypt_response: editor.encryption.enabled && editor.encryption.decryptResponse,
+      client_header: 'appKey'
+    }
   }
 }
 
@@ -2574,12 +2653,14 @@ async function openCaseDetailDialog(row: any, environmentId?: number, executionI
   const environment = findCaseEnvironment(row, environmentId)
   const requestQuery = { ...(apiRow?.query || {}), ...(row.request_query || {}) }
   const requestHeaders = { ...(environment?.headers || {}), ...(apiRow?.headers || {}), ...(row.request_headers || {}) }
-  let responseSnapshot = {}
+  let responseSnapshot: any = {}
+  let requestSnapshot: any = {}
   if (executionId && row.id) {
     try {
       const { data } = await api.get(`/executions/${executionId}`)
       const result = (data.results || []).find((item: any) => item.case_id === row.id)
       responseSnapshot = result?.response_snapshot || {}
+      requestSnapshot = result?.request_snapshot || {}
     } catch {}
   }
   Object.keys(caseDetail).forEach(key => delete caseDetail[key])
@@ -2587,7 +2668,8 @@ async function openCaseDetailDialog(row: any, environmentId?: number, executionI
     method: row.method || apiRow?.method || '',
     url: buildFullRequestUrl(environment, apiRow || row, requestQuery),
     request_headers: requestHeaders,
-    request_body: row.request_body || {},
+    request_body: requestSnapshot.body ?? row.request_body ?? {},
+    request_body_original: requestSnapshot.body_original,
     assertions: row.assertions || [],
     response_snapshot: responseSnapshot
   })

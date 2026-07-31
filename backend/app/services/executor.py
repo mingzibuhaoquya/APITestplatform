@@ -8,7 +8,9 @@ from ..config import get_settings
 from ..models import ApiDefinition, Environment, ExecutionResult, ExecutionTask, ScenarioCase, TestCase, TestSuite
 from ..utils import dump_json, parse_json
 from .assertions import all_passed, run_assertions
+from .crypto_envelope import CryptoEnvelopeError, decrypt_body, encrypt_body, normalize_config
 from .jsonpath import find_jsonpath
+from .pre_scripts import PreScriptError, run_pre_script
 from .report import build_html_report
 from .variables import render_variables, response_json_or_text
 
@@ -121,13 +123,44 @@ def _execute_case(db: Session, task: ExecutionTask, case_id: int, variables: dic
     query = {**parse_json(api.query_json, {}), **parse_json(case.request_query_json, {})}
     body = parse_json(case.request_body_json, {})
     url = _build_request_url(env, api.path)
+    try:
+        script_logs = run_pre_script(api.pre_script, variables, headers)
+    except PreScriptError as exc:
+        return _save_result(
+            db,
+            task.id,
+            case_id,
+            "error",
+            {"pre_script_logs": [], "pre_script_error": str(exc)},
+            {},
+            [],
+            0,
+            f"Pre-script execution failed: {exc}",
+        )
+    rendered_headers = render_variables(headers, variables)
+    rendered_query = render_variables(query, variables)
+    rendered_body = render_variables(body, variables)
+    encryption = normalize_config(parse_json(api.encryption_config_json, {}))
+    sent_body = rendered_body
+    try:
+        if encryption["encrypt_request"]:
+            sent_body = encrypt_body(rendered_body, rendered_headers, encryption)
+    except CryptoEnvelopeError as exc:
+        return _save_result(
+            db, task.id, case_id, "error",
+            {"method": api.method, "url": render_variables(url, variables), "headers": rendered_headers, "body_original": rendered_body, "encryption_error": str(exc)},
+            {}, [], 0, f"Request encryption failed: {exc}",
+        )
     request_snapshot = {
         "method": api.method,
         "url": render_variables(url, variables),
-        "headers": render_variables(headers, variables),
-        "query": render_variables(query, variables),
-        "body": render_variables(body, variables),
+        "headers": rendered_headers,
+        "query": rendered_query,
+        "body": sent_body,
+        "pre_script_logs": script_logs,
     }
+    if encryption["encrypt_request"]:
+        request_snapshot["body_original"] = rendered_body
 
     started = time.perf_counter()
     try:
@@ -149,6 +182,16 @@ def _execute_case(db: Session, task: ExecutionTask, case_id: int, variables: dic
             "json": parsed if not isinstance(parsed, str) else None,
             "duration_ms": duration_ms,
         }
+        if encryption["decrypt_response"]:
+            try:
+                decrypted_text, decrypted_json = decrypt_body(parsed, encryption)
+            except CryptoEnvelopeError as exc:
+                response_snapshot["decryption_error"] = str(exc)
+                return _save_result(db, task.id, case_id, "error", request_snapshot, response_snapshot, [], duration_ms, f"Response decryption failed: {exc}")
+            response_snapshot["encrypted_json"] = parsed
+            response_snapshot["decrypted_text"] = decrypted_text
+            response_snapshot["decrypted_json"] = decrypted_json
+            response_snapshot["json"] = decrypted_json
         assertion_results = run_assertions(response_snapshot, parse_json(case.assertions_json, []))
         _extract_variables(variables, response_snapshot, parse_json(case.extractors_json, []))
         status = "passed" if all_passed(assertion_results) else "failed"

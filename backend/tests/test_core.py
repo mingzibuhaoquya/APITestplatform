@@ -1,4 +1,6 @@
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -16,6 +18,8 @@ from app.schemas import ApiDefinitionIn, ApiDefinitionUpdate, ChangePasswordIn, 
 from app.services.assertions import all_passed, run_assertions
 from app.services.executor import _build_request_url, _initial_variables
 from app.services.jsonpath import find_jsonpath
+from app.services.pre_scripts import PreScriptError, run_pre_script
+from app.services import crypto_envelope
 from app.services.variables import render_variables
 from app.security import create_session_token, hash_password
 
@@ -56,6 +60,94 @@ def test_render_variables_nested():
         "headers": {"Authorization": "Bearer abc"},
         "ids": ["12"],
     }
+
+
+def test_pre_script_sets_task_variables_and_generates_hashes():
+    variables = {"appKey": "secret"}
+
+    logs = run_pre_script(
+        """
+const reqTime = Date.now();
+const content = pm.environment.get('appKey') + reqTime;
+pm.environment.set('reqTime', reqTime);
+pm.environment.set('appSign', CryptoJS.MD5(content).toString());
+pm.environment.set('shaSign', CryptoJS.SHA256(content).toString());
+console.info('signature generated', reqTime);
+""",
+        variables,
+    )
+
+    assert variables["reqTime"].isdigit()
+    assert len(variables["appSign"]) == 32
+    assert len(variables["shaSign"]) == 64
+    assert render_variables({"sign": "${appSign}"}, variables)["sign"] == variables["appSign"]
+    assert logs == [{"level": "info", "message": f"signature generated {variables['reqTime']}"}]
+
+
+def test_pre_script_reads_and_updates_request_headers():
+    variables = {}
+    headers = {"AppSecret": "secret", "appKey": "cms001", "reqTime": "${reqTime}"}
+
+    run_pre_script(
+        """
+const now = Date.now();
+const data = pm.request.headers.get('appsecret') + now + pm.request.headers.get('APPKEY');
+pm.request.headers.set('reqTime', now);
+pm.request.headers.set('appSign', CryptoJS.MD5(data).toString().toUpperCase());
+""",
+        variables,
+        headers,
+    )
+
+    assert headers["reqTime"].isdigit()
+    assert len(headers["appSign"]) == 32
+    assert "ReqTime" not in headers
+
+
+def test_rsa_aes_sm3_envelope_round_trip_uses_pem_files(tmp_path, monkeypatch):
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_pem = private_key.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    private_pem = private_key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    public_path = tmp_path / "request_public.pem"
+    private_path = tmp_path / "response_private.pem"
+    public_path.write_bytes(public_pem)
+    private_path.write_bytes(private_pem)
+    monkeypatch.setattr(crypto_envelope, "FIXED_PUBLIC_KEY_PATH", public_path)
+    monkeypatch.setattr(crypto_envelope, "FIXED_PRIVATE_KEY_PATH", private_path)
+    config = {"mode": "rsa_aes_sm3", "encrypt_request": True, "decrypt_response": True}
+
+    envelope = crypto_envelope.encrypt_body({"message": "hello", "id": 123}, {"appKey": "flap001"}, config)
+    text, decoded = crypto_envelope.decrypt_body(envelope, config)
+
+    assert decoded == {"message": "hello", "id": 123}
+    assert text == '{"message":"hello","id":123}'
+    assert envelope["client"] == "flap001"
+    public = crypto_envelope.public_config(config)
+    assert public["public_key_configured"] is True
+    assert public["private_key_configured"] is True
+    assert "public_key_file" not in public
+    assert "private_key_file" not in public
+
+
+def test_pre_script_failure_does_not_mutate_variables():
+    variables = {"token": "original"}
+
+    with pytest.raises(PreScriptError):
+        run_pre_script("pm.environment.set('token', 'changed'); throw new Error('broken script');", variables)
+
+    assert variables == {"token": "original"}
+
+
+def test_pre_script_limits_execution_time():
+    with pytest.raises(PreScriptError):
+        run_pre_script("while (true) {}", {})
 
 
 def test_build_request_url_uses_environment_protocol_and_port():
@@ -569,7 +661,7 @@ def test_create_api_validates_required_project_name_path_and_duplicate_name(db_s
     other_project = create_project(ProjectIn(name="api_required_other", description="other project"), admin, db)
     environment = create_test_environment(project["id"], admin, db)
     other_environment = create_test_environment(other_project["id"], admin, db)
-    created = create_api(ApiDefinitionIn(project_id=project["id"], name="login", method="POST", path="/login", module="legacy", headers={"A": "B"}, query={"q": 1}, body={"x": 1}, description="login api"), admin, db)
+    created = create_api(ApiDefinitionIn(project_id=project["id"], name="login", method="POST", path="/login", module="legacy", headers={"A": "B"}, query={"q": 1}, body={"x": 1}, description="login api", pre_script="pm.environment.set('requestId', Date.now());"), admin, db)
 
     assert created["environment_id"] == 0
     assert created["environment_name"] == ""
@@ -578,6 +670,7 @@ def test_create_api_validates_required_project_name_path_and_duplicate_name(db_s
     assert created["query"] == {"q": 1}
     assert created["body"] == {"x": 1}
     assert created["description"] == "login api"
+    assert created["pre_script"] == "pm.environment.set('requestId', Date.now());"
 
     with pytest.raises(HTTPException) as project_error:
         create_api(ApiDefinitionIn(project_id=99999, environment_id=environment["id"], name="missing", method="GET", path="/missing"), admin, db)
@@ -622,6 +715,7 @@ def test_update_api_and_reject_duplicate_name(db_session):
             query={"page": "1"},
             body={"format": "json"},
             description="new description",
+            pre_script="pm.environment.set('signature', CryptoJS.MD5('payload').toString());",
         ),
         admin,
         db,
@@ -637,6 +731,7 @@ def test_update_api_and_reject_duplicate_name(db_session):
     assert updated["query"] == {"page": "1"}
     assert updated["body"] == {"format": "json"}
     assert updated["description"] == "new description"
+    assert updated["pre_script"] == "pm.environment.set('signature', CryptoJS.MD5('payload').toString());"
 
     with pytest.raises(HTTPException) as duplicate_error:
         update_api(first["id"], ApiDefinitionUpdate(project_id=second_project["id"], environment_id=second_environment["id"], name="duplicate_api", method="GET", path="/dup2"), admin, db)

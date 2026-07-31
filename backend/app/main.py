@@ -69,11 +69,17 @@ def _ensure_environment_deleted_column() -> None:
 
 def _ensure_api_definition_columns() -> None:
     inspector = inspect(engine)
-    columns = {column["name"] for column in inspector.get_columns("api_definition")}
-    if "environment_id" in columns:
-        return
+    ordered_columns = [column["name"] for column in inspector.get_columns("api_definition")]
+    columns = set(ordered_columns)
     with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE api_definition ADD COLUMN environment_id INT NOT NULL DEFAULT 0"))
+        if "environment_id" not in columns:
+            conn.execute(text("ALTER TABLE api_definition ADD COLUMN environment_id INT NOT NULL DEFAULT 0 AFTER description"))
+        elif ordered_columns.index("environment_id") > ordered_columns.index("create_date"):
+            conn.execute(text("ALTER TABLE api_definition MODIFY COLUMN environment_id INT NOT NULL DEFAULT 0 AFTER description"))
+        if "pre_script" not in columns:
+            conn.execute(text("ALTER TABLE api_definition ADD COLUMN pre_script TEXT NOT NULL AFTER environment_id"))
+        if "encryption_config_json" not in columns:
+            conn.execute(text("ALTER TABLE api_definition ADD COLUMN encryption_config_json TEXT NOT NULL AFTER pre_script"))
 
 
 def _ensure_test_case_columns() -> None:
