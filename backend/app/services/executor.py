@@ -16,8 +16,12 @@ from .variables import render_variables, response_json_or_text
 
 
 class ResultView:
-    def __init__(self, row: ExecutionResult):
+    def __init__(self, row: ExecutionResult, db: Session):
+        case = db.get(TestCase, row.case_id) if row.case_id else None
+        api = db.get(ApiDefinition, case.api_id) if case else None
         self.case_id = row.case_id
+        self.case_name = case.name if case else ""
+        self.api_name = api.name if api else ""
         self.status = row.status
         self.duration_ms = row.duration_ms
         self.request_snapshot = parse_json(row.request_snapshot_json, {})
@@ -43,7 +47,7 @@ def execute_task(task_id: int) -> None:
         task.status = "passed" if failed == 0 else "failed"
         task.ended_at = datetime.now()
         task.summary_json = dump_json({"total": len(rows), "passed": passed, "failed": failed})
-        task.report_html = build_html_report(task, [ResultView(row) for row in rows])
+        task.report_html = build_html_report(task, [ResultView(row, db) for row in rows], _execution_target_name(db, task))
         _sync_plan_execution(db, task)
         db.commit()
     except Exception as exc:
@@ -88,6 +92,17 @@ def _sync_plan_execution(db: Session, task: ExecutionTask) -> None:
     plan.last_execution_id = task.id
     plan.last_status = task.status
     plan.last_executed_at = task.ended_at or datetime.now()
+
+
+def _execution_target_name(db: Session, task: ExecutionTask) -> str:
+    if task.target_type == "plan":
+        plan = db.get(TestSuite, task.target_id)
+        return plan.name if plan else ""
+    if task.target_type == "case":
+        case = db.get(TestCase, task.target_id)
+        return case.name if case else ""
+    scenario = db.get(ScenarioCase, task.target_id)
+    return scenario.name if scenario else ""
 
 
 def _initial_variables(db: Session, environment_id: int) -> dict:
