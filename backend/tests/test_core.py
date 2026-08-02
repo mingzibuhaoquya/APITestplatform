@@ -782,7 +782,6 @@ def test_create_and_filter_cases_by_project_and_api(db_session):
             api_id=first_api["id"],
             name="first_case",
             request_body={"username": "tester"},
-            priority="P1",
         ),
         admin,
         db,
@@ -794,7 +793,6 @@ def test_create_and_filter_cases_by_project_and_api(db_session):
             name="second_case",
             request_body={"page": 1},
             assertions=[{"type": "body_contains", "expected": "ok"}],
-            priority="P2",
         ),
         admin,
         db,
@@ -803,7 +801,7 @@ def test_create_and_filter_cases_by_project_and_api(db_session):
     assert created["project_name"] == "case_project_first"
     assert created["api_name"] == "case_api_first"
     assert created["request_body"] == {"username": "tester"}
-    assert created["priority"] == "P1"
+    assert "priority" not in created
     assert "status" not in created
     assert created["is_deleted"] is False
     assert created["assertions"] == []
@@ -850,7 +848,6 @@ def test_update_and_logically_delete_case(db_session):
             request_body={"updated": True},
             assertions=[{"type": "jsonpath_equal", "path": "$.code", "operator": "==", "expected": 0}],
             tags="updated description",
-            priority="P0",
         ),
         admin,
         db,
@@ -863,7 +860,7 @@ def test_update_and_logically_delete_case(db_session):
     assert updated["request_body"] == {"updated": True}
     assert updated["assertions"] == [{"type": "jsonpath_equal", "path": "$.code", "operator": "==", "expected": 0}]
     assert updated["tags"] == "updated description"
-    assert updated["priority"] == "P0"
+    assert "priority" not in updated
     assert "status" not in updated
 
     with pytest.raises(HTTPException) as mismatch_error:
@@ -902,9 +899,9 @@ def test_plan_crud_paginates_searches_and_validates_relations(db_session):
     api_row = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="plan_api", method="POST", path="/plan"), admin, db)
     same_project_other_api = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="plan_token_api", method="POST", path="/token"), admin, db)
     other_api = create_api(ApiDefinitionIn(project_id=other_project["id"], environment_id=other_environment["id"], name="other_plan_api", method="GET", path="/other"), admin, db)
-    first_case = create_case(TestCaseIn(project_id=project["id"], api_id=api_row["id"], name="first_plan_case", priority="P0"), admin, db)
-    second_case = create_case(TestCaseIn(project_id=project["id"], api_id=api_row["id"], name="second_plan_case", priority="P2"), admin, db)
-    token_case = create_case(TestCaseIn(project_id=project["id"], api_id=same_project_other_api["id"], name="token_plan_case", priority="P1"), admin, db)
+    first_case = create_case(TestCaseIn(project_id=project["id"], api_id=api_row["id"], name="first_plan_case"), admin, db)
+    second_case = create_case(TestCaseIn(project_id=project["id"], api_id=api_row["id"], name="second_plan_case"), admin, db)
+    token_case = create_case(TestCaseIn(project_id=project["id"], api_id=same_project_other_api["id"], name="token_plan_case"), admin, db)
     other_case = create_case(TestCaseIn(project_id=other_project["id"], api_id=other_api["id"], name="other_plan_case"), admin, db)
 
     created = create_plan(

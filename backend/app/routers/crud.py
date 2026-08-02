@@ -70,7 +70,6 @@ def _plan_case_out(case: TestCase, db: Session):
     return {
         "id": case.id,
         "name": case.name,
-        "priority": case.priority,
         "api_id": case.api_id,
         "api_name": api.name if api else "",
         "method": api.method if api else "",
@@ -510,7 +509,6 @@ def create_case(payload: TestCaseIn, user: User = Depends(current_user), db: Ses
         assertions_json=dump_json([item.model_dump() for item in payload.assertions]),
         extractors_json=dump_json([item.model_dump() for item in payload.extractors]),
         tags=payload.tags,
-        priority=payload.priority,
         is_deleted=False,
         maintainer_id=user.id,
     )
@@ -540,7 +538,6 @@ def update_case(case_id: int, payload: TestCaseUpdate, _: User = Depends(current
     row.assertions_json = dump_json([item.model_dump() for item in payload.assertions])
     row.extractors_json = dump_json([item.model_dump() for item in payload.extractors])
     row.tags = payload.tags
-    row.priority = payload.priority
     db.commit()
     db.refresh(row)
     return _case_out(row, db)

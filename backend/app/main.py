@@ -90,6 +90,8 @@ def _ensure_test_case_columns() -> None:
             conn.execute(text("ALTER TABLE test_case ADD COLUMN is_deleted BOOL NOT NULL DEFAULT 0"))
         if "status" in columns:
             conn.execute(text("ALTER TABLE test_case DROP COLUMN status"))
+        if "priority" in columns:
+            conn.execute(text("ALTER TABLE test_case DROP COLUMN priority"))
 
 
 def _ensure_test_suite_columns() -> None:

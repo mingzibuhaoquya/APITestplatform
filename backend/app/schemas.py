@@ -141,7 +141,6 @@ class TestCaseIn(BaseModel):
     assertions: list[AssertionRule] = []
     extractors: list[ExtractorRule] = []
     tags: str = ""
-    priority: str = "P2"
 
 
 class TestCaseUpdate(BaseModel):
@@ -154,7 +153,6 @@ class TestCaseUpdate(BaseModel):
     assertions: list[AssertionRule] = []
     extractors: list[ExtractorRule] = []
     tags: str = ""
-    priority: str = "P2"
 
 
 class ScenarioCaseIn(BaseModel):

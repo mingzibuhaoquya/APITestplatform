@@ -54,7 +54,8 @@ C:\Users\Lenovo\Documents\Codex\2026-07-26\wge
 - Vue 3
 - TypeScript
 - Vite
-- Element Plus
+- Ant Design Vue
+- @ant-design/icons-vue
 - axios
 
 数据库：
@@ -370,7 +371,9 @@ Docker Compose 默认值应与这些配置保持一致，除非用户通过 `.en
 - 修改范围要聚焦用户当前需求，不做无关重构。
 - 对请求体、断言配置、响应提取等结构化数据，优先使用 JSON/结构化解析，不要用脆弱的字符串拼接和截取。
 - 前端是内部测试平台，界面应偏实用、清晰、信息密度合理，不要做成营销页。
-- 前端组件优先使用 Element Plus。
+- 前端组件统一使用 Ant Design Vue，图标统一使用 @ant-design/icons-vue；不要重新引入 Element Plus。
+- 页面视觉遵循 Ant Design Pro 的组件语义和 Vben Admin 的后台布局组织：深色侧栏、清晰操作层级、紧凑查询表单、表格工具栏和克制的内容分区。
+- 不引入完整 Vben Admin、Pinia、Vue Router 或 Tailwind，除非用户后续明确要求进行工程架构重构。
 - API 行为要明确、稳定、方便前端调用。
 - 未经用户确认，不要新增额外基础设施依赖。
 

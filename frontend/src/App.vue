@@ -1,364 +1,442 @@
 <template>
-  <div v-if="!me" class="login-page">
-    <el-card class="login-card">
-      <h1>接口自动化测试平台</h1>
-      <el-form label-position="top" @submit.prevent="login">
-        <el-form-item label="用户名"><el-input v-model="loginForm.username" /></el-form-item>
-        <el-form-item label="密码"><el-input v-model="loginForm.password" type="password" show-password /></el-form-item>
-        <el-button type="primary" native-type="submit" class="full">登录</el-button>
-      </el-form>
-    </el-card>
-  </div>
+  <a-config-provider :locale="zhCN" :theme="appTheme">
+    <div v-if="!me" class="login-page">
+      <a-card class="login-card" :bordered="false">
+        <div class="login-brand">
+          <div class="login-logo"><img src="/company-logo.png" alt="接口测试平台" /></div>
+          <div>
+            <h1>接口自动化测试平台</h1>
+            <p>面向测试团队的接口回归与质量协作平台</p>
+          </div>
+        </div>
+        <a-form layout="vertical" @submit.prevent="login">
+          <a-form-item label="用户名">
+            <a-input v-model:value="loginForm.username" size="large" placeholder="请输入用户名">
+              <template #prefix><UserOutlined /></template>
+            </a-input>
+          </a-form-item>
+          <a-form-item label="密码">
+            <a-input-password v-model:value="loginForm.password" size="large" placeholder="请输入密码">
+              <template #prefix><LockOutlined /></template>
+            </a-input-password>
+          </a-form-item>
+          <a-button type="primary" html-type="submit" size="large" class="full" :loading="loginLoading">
+            <template #icon><LoginOutlined /></template>
+            登录
+          </a-button>
+        </a-form>
+      </a-card>
+    </div>
 
-  <el-container v-else class="shell">
-    <el-aside width="220px">
-      <div class="brand">接口测试平台</div>
-      <el-menu :default-active="active" @select="selectMenu">
-        <el-menu-item index="dashboard">数据概览</el-menu-item>
-        <el-sub-menu index="project-env">
-          <template #title>项目环境</template>
-          <el-menu-item index="projects">项目管理</el-menu-item>
-          <el-menu-item index="environments">环境管理</el-menu-item>
-        </el-sub-menu>
-        <el-menu-item index="apis">接口管理</el-menu-item>
-        <el-menu-item index="cases">用例管理</el-menu-item>
-        <el-menu-item index="execute">测试计划</el-menu-item>
-        <el-menu-item index="reports">报告中心</el-menu-item>
-        <el-menu-item index="logs">日志中心</el-menu-item>
-        <el-sub-menu index="system">
-          <template #title>系统管理</template>
-          <el-menu-item index="accounts">用户管理</el-menu-item>
-        </el-sub-menu>
-      </el-menu>
-    </el-aside>
-    <el-container>
-      <el-header>
-        <div class="header-spacer"></div>
-        <el-dropdown trigger="click" @command="handleUserCommand">
-          <button class="user-menu-trigger">
-            <el-avatar :size="32">{{ avatarText }}</el-avatar>
-            <span>{{ me.username }}</span>
-            <span class="user-menu-arrow">▾</span>
-          </button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="changePassword">修改密码</el-dropdown-item>
-              <el-dropdown-item command="logout">退出登录</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-      </el-header>
+    <a-layout v-else class="shell">
+      <a-layout-sider
+        v-if="!isMobile"
+        v-model:collapsed="sidebarCollapsed"
+        :trigger="null"
+        :collapsed-width="72"
+        breakpoint="lg"
+        width="232"
+        class="app-sider"
+        @breakpoint="handleSidebarBreakpoint"
+      >
+        <div class="brand" :class="{ 'brand-collapsed': sidebarCollapsed }">
+          <img src="/company-logo.png" alt="接口测试平台" />
+          <span v-if="!sidebarCollapsed">接口测试平台</span>
+        </div>
+        <a-menu :selected-keys="[active]" mode="inline" @select="handleMenuSelect">
+          <a-menu-item key="dashboard"><template #icon><DashboardOutlined /></template>数据概览</a-menu-item>
+          <a-sub-menu key="project-env">
+            <template #icon><FolderOpenOutlined /></template>
+            <template #title>项目环境</template>
+            <a-menu-item key="projects"><template #icon><ProjectOutlined /></template>项目管理</a-menu-item>
+            <a-menu-item key="environments"><template #icon><CloudServerOutlined /></template>环境管理</a-menu-item>
+          </a-sub-menu>
+          <a-menu-item key="apis"><template #icon><ApiOutlined /></template>接口管理</a-menu-item>
+          <a-menu-item key="cases"><template #icon><FileTextOutlined /></template>用例管理</a-menu-item>
+          <a-menu-item key="execute"><template #icon><PlayCircleOutlined /></template>测试计划</a-menu-item>
+          <a-menu-item key="reports"><template #icon><BarChartOutlined /></template>报告中心</a-menu-item>
+          <a-menu-item key="logs"><template #icon><ProfileOutlined /></template>日志中心</a-menu-item>
+          <a-sub-menu key="system">
+            <template #icon><SettingOutlined /></template>
+            <template #title>系统管理</template>
+            <a-menu-item key="accounts"><template #icon><TeamOutlined /></template>用户管理</a-menu-item>
+          </a-sub-menu>
+        </a-menu>
+      </a-layout-sider>
+      <a-drawer v-else v-model:open="mobileSidebarOpen" placement="left" :closable="false" :width="232" class="mobile-nav-drawer">
+        <div class="brand"><img src="/company-logo.png" alt="接口测试平台" /><span>接口测试平台</span></div>
+        <a-menu :selected-keys="[active]" mode="inline" @select="handleMenuSelect">
+          <a-menu-item key="dashboard"><template #icon><DashboardOutlined /></template>数据概览</a-menu-item>
+          <a-sub-menu key="project-env">
+            <template #icon><FolderOpenOutlined /></template>
+            <template #title>项目环境</template>
+            <a-menu-item key="projects"><template #icon><ProjectOutlined /></template>项目管理</a-menu-item>
+            <a-menu-item key="environments"><template #icon><CloudServerOutlined /></template>环境管理</a-menu-item>
+          </a-sub-menu>
+          <a-menu-item key="apis"><template #icon><ApiOutlined /></template>接口管理</a-menu-item>
+          <a-menu-item key="cases"><template #icon><FileTextOutlined /></template>用例管理</a-menu-item>
+          <a-menu-item key="execute"><template #icon><PlayCircleOutlined /></template>测试计划</a-menu-item>
+          <a-menu-item key="reports"><template #icon><BarChartOutlined /></template>报告中心</a-menu-item>
+          <a-menu-item key="logs"><template #icon><ProfileOutlined /></template>日志中心</a-menu-item>
+          <a-sub-menu key="system">
+            <template #icon><SettingOutlined /></template>
+            <template #title>系统管理</template>
+            <a-menu-item key="accounts"><template #icon><TeamOutlined /></template>用户管理</a-menu-item>
+          </a-sub-menu>
+        </a-menu>
+      </a-drawer>
+      <a-layout>
+        <a-layout-header class="app-header">
+          <div class="header-left">
+            <a-button type="text" class="sidebar-trigger" @click="toggleSidebar">
+              <template #icon><MenuUnfoldOutlined v-if="sidebarCollapsed || isMobile" /><MenuFoldOutlined v-else /></template>
+            </a-button>
+            <a-divider type="vertical" />
+            <div class="header-page-title">
+              <span class="header-eyebrow">测试工作台</span>
+              <strong>{{ currentPageTitle }}</strong>
+            </div>
+          </div>
+          <a-dropdown trigger="click">
+            <button class="user-menu-trigger">
+              <a-avatar :size="32" class="user-avatar">{{ avatarText }}</a-avatar>
+              <span class="user-menu-name">{{ me.username }}</span>
+              <DownOutlined class="user-menu-arrow" />
+            </button>
+            <template #overlay>
+              <a-menu class="user-dropdown-menu">
+                <a-menu-item key="changePassword" @click="handleUserCommand('changePassword')"><template #icon><LockOutlined /></template>修改密码</a-menu-item>
+                <a-menu-divider />
+                <a-menu-item key="logout" @click="handleUserCommand('logout')"><template #icon><LogoutOutlined /></template>退出登录</a-menu-item>
+              </a-menu>
+            </template>
+          </a-dropdown>
+        </a-layout-header>
       <div class="tabs-bar">
-        <el-tabs
-          v-model="active"
-          type="card"
-          @tab-change="switchTab"
-          @tab-remove="closeTab"
+        <a-tabs
+          v-model:active-key="active"
+          type="editable-card"
+          hide-add
+          @edit="handleTabEdit"
         >
-          <el-tab-pane
+          <a-tab-pane
             v-for="tab in openedTabs"
             :key="tab.name"
-            :label="tab.label"
-            :name="tab.name"
+            :tab="tab.label"
             :closable="tab.closable"
           />
-        </el-tabs>
+        </a-tabs>
       </div>
-      <el-main>
-        <section v-if="active === 'dashboard'" class="grid">
-          <el-card><h3>项目数</h3><strong>{{ projects.length }}</strong></el-card>
-          <el-card><h3>接口数</h3><strong>{{ apis.length }}</strong></el-card>
-          <el-card><h3>用例数</h3><strong>{{ cases.length }}</strong></el-card>
-          <el-card><h3>执行任务</h3><strong>{{ executions.length }}</strong></el-card>
+      <a-layout-content>
+        <section v-if="active === 'dashboard'" class="dashboard-page">
+          <div class="page-heading dashboard-heading">
+            <div><h1>数据概览</h1><p>掌握平台配置规模与最近执行概况</p></div>
+            <a-button type="default" @click="loadAll"><template #icon><ReloadOutlined /></template>刷新数据</a-button>
+          </div>
+          <div class="grid">
+            <a-card v-for="stat in dashboardStats" :key="stat.label" class="stat-card" :class="`stat-${stat.tone}`" :bordered="false">
+              <div class="stat-card-icon"><component :is="stat.icon" /></div>
+              <a-statistic :title="stat.label" :value="stat.value" />
+              <div class="stat-card-meta">{{ stat.description }}</div>
+            </a-card>
+          </div>
         </section>
 
-        <section v-if="active === 'accounts'">
-          <div class="toolbar"><h2>用户管理</h2><el-button v-if="me.role === 'admin'" type="primary" @click="openCreateUserDialog">创建测试人员</el-button></div>
-          <el-form class="search-form" label-position="top">
-            <el-form-item label="用户名">
-              <el-input v-model="userSearch.username" placeholder="请输入用户名" clearable @keyup.enter="searchUsers" />
-            </el-form-item>
-            <el-form-item label="状态">
-              <el-select v-model="userSearch.status" placeholder="请选择状态" clearable>
-                <el-option label="启用" value="active" />
-                <el-option label="禁用" value="disabled" />
-              </el-select>
-            </el-form-item>
+        <section v-if="active === 'accounts'" class="page-view">
+          <div class="toolbar"><h2>用户管理</h2><a-button v-if="me.role === 'admin'" type="primary" @click="openCreateUserDialog"><template #icon><UserAddOutlined /></template>创建测试人员</a-button></div>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="用户名">
+              <a-input v-model:value="userSearch.username" placeholder="请输入用户名" allow-clear @keyup.enter="searchUsers" />
+            </a-form-item>
+            <a-form-item label="状态">
+              <a-select v-model:value="userSearch.status" placeholder="请选择状态" allow-clear>
+                <a-select-option value="active">启用</a-select-option>
+                <a-select-option value="disabled">禁用</a-select-option>
+              </a-select>
+            </a-form-item>
             <div class="search-actions">
-              <el-button type="primary" @click="searchUsers">搜索</el-button>
-              <el-button @click="resetUserSearch">重置</el-button>
+              <a-button type="primary" @click="searchUsers">搜索</a-button>
+              <a-button @click="resetUserSearch">重置</a-button>
             </div>
-          </el-form>
-          <el-table :data="users">
-            <el-table-column prop="username" label="用户名" />
-            <el-table-column prop="real_name" label="姓名" />
-            <el-table-column prop="role" label="角色" />
-            <el-table-column label="状态">
-              <template #default="{ row }">
-                <el-tag :type="row.status === 'active' ? 'success' : 'warning'" effect="dark">
+          </a-form>
+          <a-table :pagination="false" :data-source="users">
+            <a-table-column data-index="username" title="用户名" />
+            <a-table-column data-index="real_name" title="姓名" />
+            <a-table-column data-index="role" title="角色" />
+            <a-table-column title="状态">
+              <template #default="{ record: row }">
+                <a-tag :color="row.status === 'active' ? 'success' : 'warning'">
                   {{ statusText(row.status) }}
-                </el-tag>
+                </a-tag>
               </template>
-            </el-table-column>
-            <el-table-column label="操作" width="180" fixed="right">
-              <template #default="{ row }">
-                <el-button size="small" @click="openEditUserDialog(row)">编辑</el-button>
-                <el-button
-                  size="small"
-                  :type="row.status === 'active' ? 'warning' : 'success'"
-                  @click="toggleUserStatus(row)"
-                >
-                  {{ row.status === 'active' ? '禁用' : '启用' }}
-                </el-button>
+            </a-table-column>
+            <a-table-column title="操作" width="220" fixed="right">
+              <template #default="{ record: row }">
+                <div class="table-actions">
+                  <a-button size="small" @click="openEditUserDialog(row)">编辑</a-button>
+                  <a-button
+                    size="small"
+                    :type="row.status === 'active' ? 'default' : 'primary'"
+                    @click="toggleUserStatus(row)"
+                  >
+                    {{ row.status === 'active' ? '禁用' : '启用' }}
+                  </a-button>
+                </div>
               </template>
-            </el-table-column>
-          </el-table>
+            </a-table-column>
+          </a-table>
           <div class="pagination">
-            <el-pagination
-              background
-              layout="total, prev, pager, next"
-              :current-page="userPagination.page"
+            <a-pagination
+              :show-total="paginationTotal"
+              show-less-items
+              :current="userPagination.page"
               :page-size="userPagination.pageSize"
               :total="userPagination.total"
-              @current-change="changeUserPage"
+              @change="changeUserPage"
             />
           </div>
 
-          <el-dialog v-model="createUserDialogVisible" title="创建账号" width="420px" @closed="resetUserForm">
-            <el-form label-position="top" @submit.prevent="createUser">
-              <el-form-item label="用户名">
-                <el-input v-model="userForm.username" placeholder="请输入用户名" />
-              </el-form-item>
-              <el-form-item label="姓名">
-                <el-input v-model="userForm.real_name" placeholder="请输入姓名" />
-              </el-form-item>
-            </el-form>
+          <a-modal v-model:open="createUserDialogVisible" title="创建账号" width="420px" @after-close="resetUserForm">
+            <a-form layout="vertical" @submit.prevent="createUser">
+              <a-form-item label="用户名">
+                <a-input v-model:value="userForm.username" placeholder="请输入用户名" />
+              </a-form-item>
+              <a-form-item label="姓名">
+                <a-input v-model:value="userForm.real_name" placeholder="请输入姓名" />
+              </a-form-item>
+            </a-form>
             <template #footer>
-              <el-button @click="cancelCreateUser">取消</el-button>
-              <el-button type="primary" @click="createUser">确认</el-button>
+              <a-button @click="cancelCreateUser">取消</a-button>
+              <a-button type="primary" @click="createUser">确认</a-button>
             </template>
-          </el-dialog>
+          </a-modal>
 
-          <el-dialog v-model="editUserDialogVisible" title="编辑账号" width="420px" @closed="resetEditUserForm">
-            <el-form label-position="top" @submit.prevent="updateUser">
-              <el-form-item label="用户名">
-                <el-input v-model="editUserForm.username" placeholder="请输入用户名" />
-              </el-form-item>
-              <el-form-item label="姓名">
-                <el-input v-model="editUserForm.real_name" placeholder="请输入姓名" />
-              </el-form-item>
-            </el-form>
+          <a-modal v-model:open="editUserDialogVisible" title="编辑账号" width="420px" @after-close="resetEditUserForm">
+            <a-form layout="vertical" @submit.prevent="updateUser">
+              <a-form-item label="用户名">
+                <a-input v-model:value="editUserForm.username" placeholder="请输入用户名" />
+              </a-form-item>
+              <a-form-item label="姓名">
+                <a-input v-model:value="editUserForm.real_name" placeholder="请输入姓名" />
+              </a-form-item>
+            </a-form>
             <template #footer>
-              <el-button @click="cancelEditUser">取消</el-button>
-              <el-button type="primary" @click="updateUser">确认</el-button>
+              <a-button @click="cancelEditUser">取消</a-button>
+              <a-button type="primary" @click="updateUser">确认</a-button>
             </template>
-          </el-dialog>
+          </a-modal>
         </section>
 
-        <section v-if="active === 'projects'">
-          <div class="toolbar"><h2>项目管理</h2><el-button type="primary" @click="openCreateProjectDialog">创建项目</el-button></div>
-          <el-form class="search-form" label-position="top">
-            <el-form-item label="项目名称">
-              <el-input v-model="projectSearch.name" placeholder="请输入项目名称" clearable @keyup.enter="searchProjects" />
-            </el-form-item>
+        <section v-if="active === 'projects'" class="page-view">
+          <div class="toolbar"><h2>项目管理</h2><a-button type="primary" @click="openCreateProjectDialog"><template #icon><PlusOutlined /></template>创建项目</a-button></div>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="项目名称">
+              <a-input v-model:value="projectSearch.name" placeholder="请输入项目名称" allow-clear @keyup.enter="searchProjects" />
+            </a-form-item>
             <div class="search-actions">
-              <el-button type="primary" @click="searchProjects">搜索</el-button>
-              <el-button @click="resetProjectSearch">重置</el-button>
+              <a-button type="primary" @click="searchProjects">搜索</a-button>
+              <a-button @click="resetProjectSearch">重置</a-button>
             </div>
-          </el-form>
-          <el-table :data="projectList">
-            <el-table-column prop="name" label="项目" />
-            <el-table-column prop="description" label="描述" />
-            <el-table-column label="操作" width="160" fixed="right">
-              <template #default="{ row }">
-                <el-button size="small" @click="openEditProjectDialog(row)">编辑</el-button>
-                <el-button size="small" type="danger" @click="deleteProject(row)">删除</el-button>
+          </a-form>
+          <a-table :pagination="false" :data-source="projectList">
+            <a-table-column data-index="name" title="项目" />
+            <a-table-column data-index="description" title="描述" />
+            <a-table-column title="操作" width="190" fixed="right">
+              <template #default="{ record: row }">
+                <div class="table-actions">
+                  <a-button size="small" @click="openEditProjectDialog(row)">编辑</a-button>
+                  <a-button size="small" danger @click="deleteProject(row)">删除</a-button>
+                </div>
               </template>
-            </el-table-column>
-          </el-table>
+            </a-table-column>
+          </a-table>
           <div class="pagination">
-            <el-pagination
-              background
-              layout="total, prev, pager, next"
-              :current-page="projectPagination.page"
+            <a-pagination
+              :show-total="paginationTotal"
+              show-less-items
+              :current="projectPagination.page"
               :page-size="projectPagination.pageSize"
               :total="projectPagination.total"
-              @current-change="changeProjectPage"
+              @change="changeProjectPage"
             />
           </div>
 
-          <el-dialog v-model="createProjectDialogVisible" title="创建项目" width="420px" @closed="resetProjectForm">
-            <el-form label-position="top" @submit.prevent="createProject">
-              <el-form-item label="项目名称">
-                <el-input v-model="projectForm.name" placeholder="请输入项目名称" />
-              </el-form-item>
-              <el-form-item label="描述">
-                <el-input v-model="projectForm.description" placeholder="请输入描述" />
-              </el-form-item>
-            </el-form>
+          <a-modal v-model:open="createProjectDialogVisible" title="创建项目" width="420px" @after-close="resetProjectForm">
+            <a-form layout="vertical" @submit.prevent="createProject">
+              <a-form-item label="项目名称">
+                <a-input v-model:value="projectForm.name" placeholder="请输入项目名称" />
+              </a-form-item>
+              <a-form-item label="描述">
+                <a-input v-model:value="projectForm.description" placeholder="请输入描述" />
+              </a-form-item>
+            </a-form>
             <template #footer>
-              <el-button @click="cancelCreateProject">取消</el-button>
-              <el-button type="primary" @click="createProject">确认</el-button>
+              <a-button @click="cancelCreateProject">取消</a-button>
+              <a-button type="primary" @click="createProject">确认</a-button>
             </template>
-          </el-dialog>
+          </a-modal>
 
-          <el-dialog v-model="editProjectDialogVisible" title="编辑项目" width="420px" @closed="resetEditProjectForm">
-            <el-form label-position="top" @submit.prevent="updateProject">
-              <el-form-item label="项目名称">
-                <el-input v-model="editProjectForm.name" placeholder="请输入项目名称" />
-              </el-form-item>
-              <el-form-item label="描述">
-                <el-input v-model="editProjectForm.description" placeholder="请输入描述" />
-              </el-form-item>
-            </el-form>
+          <a-modal v-model:open="editProjectDialogVisible" title="编辑项目" width="420px" @after-close="resetEditProjectForm">
+            <a-form layout="vertical" @submit.prevent="updateProject">
+              <a-form-item label="项目名称">
+                <a-input v-model:value="editProjectForm.name" placeholder="请输入项目名称" />
+              </a-form-item>
+              <a-form-item label="描述">
+                <a-input v-model:value="editProjectForm.description" placeholder="请输入描述" />
+              </a-form-item>
+            </a-form>
             <template #footer>
-              <el-button @click="cancelEditProject">取消</el-button>
-              <el-button type="primary" @click="updateProject">确认</el-button>
+              <a-button @click="cancelEditProject">取消</a-button>
+              <a-button type="primary" @click="updateProject">确认</a-button>
             </template>
-          </el-dialog>
+          </a-modal>
         </section>
 
-        <section v-if="active === 'environments'">
-          <div class="toolbar"><h2>环境管理</h2><el-button type="primary" @click="openCreateEnvironmentDialog">新增环境</el-button></div>
-          <el-form class="search-form" label-position="top">
-            <el-form-item label="项目">
-              <el-select v-model="environmentSearch.project_id" placeholder="请选择项目" clearable>
-                <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="环境名称">
-              <el-input v-model="environmentSearch.name" placeholder="请输入环境名称" clearable @keyup.enter="searchEnvironments" />
-            </el-form-item>
+        <section v-if="active === 'environments'" class="page-view">
+          <div class="toolbar"><h2>环境管理</h2><a-button type="primary" @click="openCreateEnvironmentDialog"><template #icon><PlusOutlined /></template>新增环境</a-button></div>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="项目">
+              <a-select v-model:value="environmentSearch.project_id" placeholder="请选择项目" allow-clear>
+                <a-select-option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item label="环境名称">
+              <a-input v-model:value="environmentSearch.name" placeholder="请输入环境名称" allow-clear @keyup.enter="searchEnvironments" />
+            </a-form-item>
             <div class="search-actions">
-              <el-button type="primary" @click="searchEnvironments">搜索</el-button>
-              <el-button @click="resetEnvironmentSearch">重置</el-button>
+              <a-button type="primary" @click="searchEnvironments">搜索</a-button>
+              <a-button @click="resetEnvironmentSearch">重置</a-button>
             </div>
-          </el-form>
-          <el-table :data="environmentList">
-            <el-table-column prop="project_name" label="项目" />
-            <el-table-column prop="name" label="环境名称" />
-            <el-table-column prop="protocol" label="协议" />
-            <el-table-column prop="base_url" label="Base URL" />
-            <el-table-column prop="port" label="端口号" />
-            <el-table-column label="操作" width="160" fixed="right">
-              <template #default="{ row }">
-                <el-button size="small" @click="openEditEnvironmentDialog(row)">编辑</el-button>
-                <el-button size="small" type="danger" @click="deleteEnvironment(row)">删除</el-button>
+          </a-form>
+          <a-table :pagination="false" :data-source="environmentList">
+            <a-table-column data-index="project_name" title="项目" />
+            <a-table-column data-index="name" title="环境名称" />
+            <a-table-column data-index="protocol" title="协议" />
+            <a-table-column data-index="base_url" title="Base URL" />
+            <a-table-column data-index="port" title="端口号" />
+            <a-table-column title="操作" width="190" fixed="right">
+              <template #default="{ record: row }">
+                <div class="table-actions">
+                  <a-button size="small" @click="openEditEnvironmentDialog(row)">编辑</a-button>
+                  <a-button size="small" danger @click="deleteEnvironment(row)">删除</a-button>
+                </div>
               </template>
-            </el-table-column>
-          </el-table>
+            </a-table-column>
+          </a-table>
           <div class="pagination">
-            <el-pagination
-              background
-              layout="total, prev, pager, next"
-              :current-page="environmentPagination.page"
+            <a-pagination
+              :show-total="paginationTotal"
+              show-less-items
+              :current="environmentPagination.page"
               :page-size="environmentPagination.pageSize"
               :total="environmentPagination.total"
-              @current-change="changeEnvironmentPage"
+              @change="changeEnvironmentPage"
             />
           </div>
 
-          <el-dialog v-model="createEnvironmentDialogVisible" title="新增环境" width="420px" @closed="resetEnvironmentForm">
-            <el-form label-position="top" @submit.prevent="createEnvironment">
-              <el-form-item label="项目">
-                <el-select v-model="envForm.project_id" placeholder="请选择项目">
-                  <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="环境名称">
-                <el-input v-model="envForm.name" placeholder="请输入环境名称" />
-              </el-form-item>
-              <el-form-item label="协议">
-                <el-select v-model="envForm.protocol" placeholder="请选择协议" @blur="validateEnvironmentProtocol(envForm.protocol)">
-                  <el-option label="http" value="http" />
-                  <el-option label="https" value="https" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="Base URL">
-                <el-input v-model="envForm.base_url" placeholder="请输入 Base URL" />
-              </el-form-item>
-              <el-form-item label="端口号">
-                <el-input v-model="envForm.port" placeholder="请输入端口号" @input="envForm.port = digitsOnly(envForm.port)" />
-              </el-form-item>
-            </el-form>
+          <a-modal v-model:open="createEnvironmentDialogVisible" title="新增环境" width="420px" @after-close="resetEnvironmentForm">
+            <a-form layout="vertical" @submit.prevent="createEnvironment">
+              <a-form-item label="项目">
+                <a-select v-model:value="envForm.project_id" placeholder="请选择项目">
+                  <a-select-option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item label="环境名称">
+                <a-input v-model:value="envForm.name" placeholder="请输入环境名称" />
+              </a-form-item>
+              <a-form-item label="协议">
+                <a-select v-model:value="envForm.protocol" placeholder="请选择协议" @blur="validateEnvironmentProtocol(envForm.protocol)">
+                <a-select-option value="http">http</a-select-option>
+                <a-select-option value="https">https</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item label="Base URL">
+                <a-input v-model:value="envForm.base_url" placeholder="请输入 Base URL" />
+              </a-form-item>
+              <a-form-item label="端口号">
+                <a-input v-model:value="envForm.port" placeholder="请输入端口号" @input="envForm.port = digitsOnly(envForm.port)" />
+              </a-form-item>
+            </a-form>
             <template #footer>
-              <el-button @click="cancelCreateEnvironment">取消</el-button>
-              <el-button type="primary" @click="createEnvironment">确认</el-button>
+              <a-button @click="cancelCreateEnvironment">取消</a-button>
+              <a-button type="primary" @click="createEnvironment">确认</a-button>
             </template>
-          </el-dialog>
+          </a-modal>
 
-          <el-dialog v-model="editEnvironmentDialogVisible" title="编辑环境" width="420px" @closed="resetEditEnvironmentForm">
-            <el-form label-position="top" @submit.prevent="updateEnvironment">
-              <el-form-item label="项目">
-                <el-select v-model="editEnvironmentForm.project_id" placeholder="请选择项目">
-                  <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="环境名称">
-                <el-input v-model="editEnvironmentForm.name" placeholder="请输入环境名称" />
-              </el-form-item>
-              <el-form-item label="协议">
-                <el-select v-model="editEnvironmentForm.protocol" placeholder="请选择协议" @blur="validateEnvironmentProtocol(editEnvironmentForm.protocol)">
-                  <el-option label="http" value="http" />
-                  <el-option label="https" value="https" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="Base URL">
-                <el-input v-model="editEnvironmentForm.base_url" placeholder="请输入 Base URL" />
-              </el-form-item>
-              <el-form-item label="端口号">
-                <el-input v-model="editEnvironmentForm.port" placeholder="请输入端口号" @input="editEnvironmentForm.port = digitsOnly(editEnvironmentForm.port)" />
-              </el-form-item>
-            </el-form>
+          <a-modal v-model:open="editEnvironmentDialogVisible" title="编辑环境" width="420px" @after-close="resetEditEnvironmentForm">
+            <a-form layout="vertical" @submit.prevent="updateEnvironment">
+              <a-form-item label="项目">
+                <a-select v-model:value="editEnvironmentForm.project_id" placeholder="请选择项目">
+                  <a-select-option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item label="环境名称">
+                <a-input v-model:value="editEnvironmentForm.name" placeholder="请输入环境名称" />
+              </a-form-item>
+              <a-form-item label="协议">
+                <a-select v-model:value="editEnvironmentForm.protocol" placeholder="请选择协议" @blur="validateEnvironmentProtocol(editEnvironmentForm.protocol)">
+                  <a-select-option value="http">http</a-select-option>
+                  <a-select-option value="https">https</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item label="Base URL">
+                <a-input v-model:value="editEnvironmentForm.base_url" placeholder="请输入 Base URL" />
+              </a-form-item>
+              <a-form-item label="端口号">
+                <a-input v-model:value="editEnvironmentForm.port" placeholder="请输入端口号" @input="editEnvironmentForm.port = digitsOnly(editEnvironmentForm.port)" />
+              </a-form-item>
+            </a-form>
             <template #footer>
-              <el-button @click="cancelEditEnvironment">取消</el-button>
-              <el-button type="primary" @click="updateEnvironment">确认</el-button>
+              <a-button @click="cancelEditEnvironment">取消</a-button>
+              <a-button type="primary" @click="updateEnvironment">确认</a-button>
             </template>
-          </el-dialog>
+          </a-modal>
         </section>
 
-        <section v-if="active === 'apis'">
-          <div class="toolbar"><h2>接口管理</h2><el-button type="primary" @click="openCreateApiDialog">新增接口</el-button></div>
-          <el-form class="search-form" label-position="top">
-            <el-form-item label="项目">
-              <el-select v-model="apiSearch.project_id" placeholder="请选择项目" clearable>
-                <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="名称">
-              <el-input v-model="apiSearch.name" placeholder="请输入接口名称" clearable @keyup.enter="searchApis" />
-            </el-form-item>
-            <el-form-item label="URL名称">
-              <el-input v-model="apiSearch.url" placeholder="请输入接口路径" clearable @keyup.enter="searchApis" />
-            </el-form-item>
+        <section v-if="active === 'apis'" class="page-view">
+          <div class="toolbar"><h2>接口管理</h2><a-button type="primary" @click="openCreateApiDialog"><template #icon><PlusOutlined /></template>新增接口</a-button></div>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="项目">
+              <a-select v-model:value="apiSearch.project_id" placeholder="请选择项目" allow-clear>
+                <a-select-option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item label="名称">
+              <a-input v-model:value="apiSearch.name" placeholder="请输入接口名称" allow-clear @keyup.enter="searchApis" />
+            </a-form-item>
+            <a-form-item label="URL名称">
+              <a-input v-model:value="apiSearch.url" placeholder="请输入接口路径" allow-clear @keyup.enter="searchApis" />
+            </a-form-item>
             <div class="search-actions">
-              <el-button type="primary" @click="searchApis">搜索</el-button>
-              <el-button @click="resetApiSearch">重置</el-button>
+              <a-button type="primary" @click="searchApis">搜索</a-button>
+              <a-button @click="resetApiSearch">重置</a-button>
             </div>
-          </el-form>
-          <el-table :data="apiList">
-            <el-table-column prop="project_name" label="项目" />
-            <el-table-column prop="name" label="名称" />
-            <el-table-column prop="description" label="接口描述" />
-            <el-table-column prop="method" label="方法" width="100" />
-            <el-table-column prop="path" label="路径" />
-            <el-table-column prop="create_date" label="创建时间" width="170" />
-            <el-table-column prop="update_date" label="更新时间" width="170" />
-            <el-table-column label="操作" width="160" fixed="right">
-              <template #default="{ row }">
-                <el-button size="small" @click="openEditApiDialog(row)">编辑</el-button>
-                <el-button size="small" type="danger" @click="deleteApi(row)">删除</el-button>
+          </a-form>
+          <a-table :pagination="false" :data-source="apiList">
+            <a-table-column data-index="project_name" title="项目" />
+            <a-table-column data-index="name" title="名称" />
+            <a-table-column data-index="description" title="接口描述" />
+            <a-table-column data-index="method" title="方法" width="100" />
+            <a-table-column data-index="path" title="路径" />
+            <a-table-column data-index="create_date" title="创建时间" width="170" />
+            <a-table-column data-index="update_date" title="更新时间" width="170" />
+            <a-table-column title="操作" width="190" fixed="right">
+              <template #default="{ record: row }">
+                <div class="table-actions">
+                  <a-button size="small" @click="openEditApiDialog(row)">编辑</a-button>
+                  <a-button size="small" danger @click="deleteApi(row)">删除</a-button>
+                </div>
               </template>
-            </el-table-column>
-          </el-table>
+            </a-table-column>
+          </a-table>
           <div class="pagination">
-            <el-pagination
-              background
-              layout="total, prev, pager, next"
-              :current-page="apiPagination.page"
+            <a-pagination
+              :show-total="paginationTotal"
+              show-less-items
+              :current="apiPagination.page"
               :page-size="apiPagination.pageSize"
               :total="apiPagination.total"
-              @current-change="changeApiPage"
+              @change="changeApiPage"
             />
           </div>
 
@@ -368,92 +446,91 @@
           <div class="toolbar">
             <h2>{{ activeApiEditor.label }}</h2>
             <div class="toolbar-actions">
-              <el-button @click="closeApiEditorFromPage(activeApiEditor)">关闭</el-button>
-              <el-button type="primary" @click="saveApiEditor(activeApiEditor)">保存</el-button>
+              <a-button @click="closeApiEditorFromPage(activeApiEditor)">关闭</a-button>
+              <a-button type="primary" @click="saveApiEditor(activeApiEditor)">保存</a-button>
             </div>
           </div>
 
           <div class="editor-section">
             <h3>基础信息</h3>
-            <el-form label-position="top" class="form-grid">
-              <el-form-item label="项目">
-                <el-select
-                  v-model="activeApiEditor.project_id"
+            <a-form layout="vertical" class="form-grid">
+              <a-form-item label="项目">
+                <a-select
+                  v-model:value="activeApiEditor.project_id"
                   placeholder="请选择项目"
                   @change="changeApiEditorProject(activeApiEditor)"
                 >
-                  <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="名称">
-                <el-input v-model="activeApiEditor.name" placeholder="请输入接口名称" @input="markApiEditorDirty(activeApiEditor)" />
-              </el-form-item>
-              <el-form-item label="接口描述" class="wide">
-                <el-input v-model="activeApiEditor.description" type="textarea" :rows="3" placeholder="请输入接口描述" @input="markApiEditorDirty(activeApiEditor)" />
-              </el-form-item>
-            </el-form>
+                <a-select-option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item label="名称">
+                <a-input v-model:value="activeApiEditor.name" placeholder="请输入接口名称" @input="markApiEditorDirty(activeApiEditor)" />
+              </a-form-item>
+              <a-form-item label="接口描述" class="wide">
+                <a-textarea v-model:value="activeApiEditor.description" :rows="3" placeholder="请输入接口描述" @input="markApiEditorDirty(activeApiEditor)" />
+              </a-form-item>
+            </a-form>
           </div>
 
           <div class="editor-section">
             <h3>接口信息</h3>
             <div class="request-line">
-              <el-select v-model="activeApiEditor.method" placeholder="方法" class="method-select" @change="markApiEditorDirty(activeApiEditor)">
-                <el-option v-for="m in methods" :key="m" :label="m" :value="m" />
-              </el-select>
-              <el-input v-model="activeApiEditor.path" placeholder="请输入接口路径 URL，例如 /users" @input="markApiEditorDirty(activeApiEditor)" />
+              <a-select v-model:value="activeApiEditor.method" placeholder="方法" class="method-select" @change="markApiEditorDirty(activeApiEditor)">
+                <a-select-option v-for="m in methods" :key="m" :value="m">{{ m }}</a-select-option>
+              </a-select>
+              <a-input v-model:value="activeApiEditor.path" placeholder="请输入接口路径 URL，例如 /users" @input="markApiEditorDirty(activeApiEditor)" />
             </div>
 
-            <el-tabs v-model="activeApiEditor.activePanel" class="api-info-tabs">
-              <el-tab-pane label="URL参数" name="query">
+            <a-tabs v-model:active-key="activeApiEditor.activePanel" class="api-info-tabs">
+              <a-tab-pane tab="URL参数" key="query">
                 <div class="kv-title">
                   <h4>URL参数</h4>
-                  <el-button size="small" @click="addApiEditorRow(activeApiEditor.queryRows)">添加</el-button>
+                  <a-button size="small" @click="addApiEditorRow(activeApiEditor.queryRows)">添加</a-button>
                 </div>
-                <el-table :data="activeApiEditor.queryRows">
-                  <el-table-column label="Key">
-                    <template #default="{ row }"><el-input v-model="row.key" placeholder="key" @input="markApiEditorDirty(activeApiEditor)" /></template>
-                  </el-table-column>
-                  <el-table-column label="Value">
-                    <template #default="{ row }"><el-input v-model="row.value" placeholder="value" @input="markApiEditorDirty(activeApiEditor)" /></template>
-                  </el-table-column>
-                  <el-table-column label="操作" width="90">
-                    <template #default="{ $index }"><el-button size="small" type="danger" @click="removeApiEditorRow(activeApiEditor.queryRows, $index, activeApiEditor)">删除</el-button></template>
-                  </el-table-column>
-                </el-table>
-              </el-tab-pane>
+                <a-table :pagination="false" :data-source="activeApiEditor.queryRows">
+                  <a-table-column title="Key">
+                    <template #default="{ record: row }"><a-input v-model:value="row.key" placeholder="key" @input="markApiEditorDirty(activeApiEditor)" /></template>
+                  </a-table-column>
+                  <a-table-column title="Value">
+                    <template #default="{ record: row }"><a-input v-model:value="row.value" placeholder="value" @input="markApiEditorDirty(activeApiEditor)" /></template>
+                  </a-table-column>
+                  <a-table-column title="操作" width="90">
+                    <template #default="{ index: $index }"><a-button size="small" danger @click="removeApiEditorRow(activeApiEditor.queryRows, $index, activeApiEditor)">删除</a-button></template>
+                  </a-table-column>
+                </a-table>
+              </a-tab-pane>
 
-              <el-tab-pane label="请求头Header" name="headers">
+              <a-tab-pane tab="请求头Header" key="headers">
                 <div class="kv-title">
                   <h4>请求头Header</h4>
-                  <el-button size="small" @click="addApiEditorRow(activeApiEditor.headerRows)">添加</el-button>
+                  <a-button size="small" @click="addApiEditorRow(activeApiEditor.headerRows)">添加</a-button>
                 </div>
-                <el-table :data="activeApiEditor.headerRows">
-                  <el-table-column label="Key">
-                    <template #default="{ row }"><el-input v-model="row.key" placeholder="Authorization / Content-Type" @input="markApiEditorDirty(activeApiEditor)" /></template>
-                  </el-table-column>
-                  <el-table-column label="Value">
-                    <template #default="{ row }"><el-input v-model="row.value" placeholder="value" @input="markApiEditorDirty(activeApiEditor)" /></template>
-                  </el-table-column>
-                  <el-table-column label="操作" width="90">
-                    <template #default="{ $index }"><el-button size="small" type="danger" @click="removeApiEditorRow(activeApiEditor.headerRows, $index, activeApiEditor)">删除</el-button></template>
-                  </el-table-column>
-                </el-table>
-              </el-tab-pane>
+                <a-table :pagination="false" :data-source="activeApiEditor.headerRows">
+                  <a-table-column title="Key">
+                    <template #default="{ record: row }"><a-input v-model:value="row.key" placeholder="Authorization / Content-Type" @input="markApiEditorDirty(activeApiEditor)" /></template>
+                  </a-table-column>
+                  <a-table-column title="Value">
+                    <template #default="{ record: row }"><a-input v-model:value="row.value" placeholder="value" @input="markApiEditorDirty(activeApiEditor)" /></template>
+                  </a-table-column>
+                  <a-table-column title="操作" width="90">
+                    <template #default="{ index: $index }"><a-button size="small" danger @click="removeApiEditorRow(activeApiEditor.headerRows, $index, activeApiEditor)">删除</a-button></template>
+                  </a-table-column>
+                </a-table>
+              </a-tab-pane>
 
-              <el-tab-pane label="请求Body" name="body">
+              <a-tab-pane tab="请求Body" key="body">
                 <div class="body-format-row">
                   <span>Body格式</span>
-                  <el-radio-group v-model="activeApiEditor.bodyFormat" @change="changeApiEditorBodyFormat(activeApiEditor)">
-                    <el-radio-button label="json">json</el-radio-button>
-                    <el-radio-button label="xml">xml</el-radio-button>
-                    <el-radio-button label="x-www-form-data">x-www-form-data</el-radio-button>
-                  </el-radio-group>
+                  <a-radio-group v-model:value="activeApiEditor.bodyFormat" @change="changeApiEditorBodyFormat(activeApiEditor)">
+                    <a-radio-button value="json">json</a-radio-button>
+                    <a-radio-button value="xml">xml</a-radio-button>
+                    <a-radio-button value="x-www-form-data">x-www-form-data</a-radio-button>
+                  </a-radio-group>
                 </div>
-              </el-tab-pane>
-              <el-tab-pane label="Pre-script" name="pre-script">
-                <el-input
-                  v-model="activeApiEditor.preScript"
-                  type="textarea"
+              </a-tab-pane>
+              <a-tab-pane tab="Pre-script" key="pre-script">
+                <a-textarea
+                  v-model:value="activeApiEditor.preScript"
                   :rows="14"
                   class="pre-script-input"
                   placeholder="pm.environment.set('timestamp', Date.now());&#10;pm.environment.set('sign', CryptoJS.MD5(pm.environment.get('timestamp')).toString());"
@@ -462,72 +539,73 @@
                 <p class="pre-script-hint">
                   支持 pm.environment.get/set、Date、Math、JSON、CryptoJS.MD5/SHA256 和 console.log/info/warn；不支持 require、网络请求、文件或数据库访问。
                 </p>
-              </el-tab-pane>
-              <el-tab-pane label="加密配置" name="encryption">
-                <el-form label-position="top">
-                  <el-form-item label="启用接口加密">
-                    <el-switch v-model="activeApiEditor.encryption.enabled" @change="markApiEditorDirty(activeApiEditor)" />
-                  </el-form-item>
+              </a-tab-pane>
+              <a-tab-pane tab="加密配置" key="encryption">
+                <a-form layout="vertical">
+                  <a-form-item label="启用接口加密">
+                    <a-switch v-model:checked="activeApiEditor.encryption.enabled" @change="markApiEditorDirty(activeApiEditor)" />
+                  </a-form-item>
                   <template v-if="activeApiEditor.encryption.enabled">
-                    <el-form-item label="加密方式">
-                      <el-select v-model="activeApiEditor.encryption.mode" @change="markApiEditorDirty(activeApiEditor)">
-                        <el-option label="RSA-AES-SM3" value="rsa_aes_sm3" />
-                      </el-select>
-                    </el-form-item>
-                    <el-form-item label="处理方式">
-                      <el-checkbox v-model="activeApiEditor.encryption.encryptRequest" @change="markApiEditorDirty(activeApiEditor)">请求 Body 加密</el-checkbox>
-                      <el-checkbox v-model="activeApiEditor.encryption.decryptResponse" @change="markApiEditorDirty(activeApiEditor)">响应 Body 解密</el-checkbox>
-                    </el-form-item>
+                    <a-form-item label="加密方式">
+                      <a-select v-model:value="activeApiEditor.encryption.mode" @change="markApiEditorDirty(activeApiEditor)">
+                        <a-select-option value="rsa_aes_sm3">RSA-AES-SM3</a-select-option>
+                      </a-select>
+                    </a-form-item>
+                    <a-form-item label="处理方式">
+                      <a-checkbox v-model:checked="activeApiEditor.encryption.encryptRequest" @change="markApiEditorDirty(activeApiEditor)">请求 Body 加密</a-checkbox>
+                      <a-checkbox v-model:checked="activeApiEditor.encryption.decryptResponse" @change="markApiEditorDirty(activeApiEditor)">响应 Body 解密</a-checkbox>
+                    </a-form-item>
                     <p class="pre-script-hint">平台使用服务器预置的固定 RSA 密钥，无需上传 PEM 文件。</p>
                   </template>
-                </el-form>
-              </el-tab-pane>
-            </el-tabs>
+                </a-form>
+              </a-tab-pane>
+            </a-tabs>
           </div>
         </section>
 
-        <section v-if="active === 'cases'">
-          <div class="toolbar"><h2>用例管理</h2><el-button type="primary" @click="openCreateCasePage">新增用例</el-button></div>
-          <el-form class="search-form" label-position="top">
-            <el-form-item label="项目">
-              <el-select v-model="caseSearch.project_id" placeholder="请选择项目" clearable @change="changeCaseSearchProject">
-                <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="接口">
-              <el-select v-model="caseSearch.api_id" placeholder="请先选择项目" clearable :disabled="!caseSearch.project_id">
-                <el-option v-for="a in caseSearchApis" :key="a.id" :label="a.name" :value="a.id" />
-              </el-select>
-            </el-form-item>
+        <section v-if="active === 'cases'" class="page-view">
+          <div class="toolbar"><h2>用例管理</h2><a-button type="primary" @click="openCreateCasePage"><template #icon><PlusOutlined /></template>新增用例</a-button></div>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="项目">
+              <a-select v-model:value="caseSearch.project_id" placeholder="请选择项目" allow-clear @change="changeCaseSearchProject">
+                <a-select-option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item label="接口">
+              <a-select v-model:value="caseSearch.api_id" placeholder="请先选择项目" allow-clear :disabled="!caseSearch.project_id">
+                <a-select-option v-for="a in caseSearchApis" :key="a.id" :value="a.id">{{ a.name }}</a-select-option>
+              </a-select>
+            </a-form-item>
             <div class="search-actions">
-              <el-button type="primary" @click="searchCases">搜索</el-button>
-              <el-button @click="resetCaseSearch">重置</el-button>
+              <a-button type="primary" @click="searchCases">搜索</a-button>
+              <a-button @click="resetCaseSearch">重置</a-button>
             </div>
-          </el-form>
-          <el-table :data="caseList">
-            <el-table-column label="编号" width="80">
-              <template #default="{ $index }">{{ caseSerialNumber($index) }}</template>
-            </el-table-column>
-            <el-table-column prop="project_name" label="项目" />
-            <el-table-column prop="api_name" label="接口" />
-            <el-table-column prop="name" label="用例名称" />
-            <el-table-column prop="priority" label="优先级" width="100" />
-            <el-table-column label="操作" width="220" fixed="right">
-              <template #default="{ row }">
-                <el-button size="small" @click="openCaseDetailDialog(row)">查看</el-button>
-                <el-button size="small" @click="openEditCasePage(row)">编辑</el-button>
-                <el-button size="small" type="danger" @click="deleteCase(row)">删除</el-button>
+          </a-form>
+          <a-table :pagination="false" :data-source="caseList">
+            <a-table-column title="编号" width="80">
+              <template #default="{ index: $index }">{{ caseSerialNumber($index) }}</template>
+            </a-table-column>
+            <a-table-column data-index="project_name" title="项目" />
+            <a-table-column data-index="api_name" title="接口" />
+            <a-table-column data-index="name" title="用例名称" />
+            <a-table-column title="操作" width="270" fixed="right">
+              <template #default="{ record: row }">
+                <div class="table-actions">
+                  <a-button size="small" @click="openCaseDetailDialog(row)">查看</a-button>
+                  <a-button size="small" @click="openEditCasePage(row)">编辑</a-button>
+                  <a-button size="small" danger @click="deleteCase(row)">删除</a-button>
+                </div>
               </template>
-            </el-table-column>
-          </el-table>
+            </a-table-column>
+          </a-table>
           <div class="pagination">
-            <el-pagination
-              background
-              layout="total, prev, pager, next"
-              :current-page="casePagination.page"
+            <a-pagination
+              :show-total="paginationTotal"
+              show-less-items
+              :current="casePagination.page"
               :page-size="casePagination.pageSize"
               :total="casePagination.total"
-              @current-change="changeCasePage"
+              @change="changeCasePage"
             />
           </div>
         </section>
@@ -536,241 +614,273 @@
           <div class="toolbar">
             <h2>{{ caseForm.id ? '编辑用例' : '新增用例' }}</h2>
             <div class="toolbar-actions">
-              <el-button @click="closeCaseEditorPage">关闭</el-button>
-              <el-button type="primary" @click="saveCase">保存</el-button>
+              <a-button @click="closeCaseEditorPage">关闭</a-button>
+              <a-button type="primary" @click="saveCase">保存</a-button>
             </div>
           </div>
-          <el-form label-position="top" class="form-grid">
-            <el-form-item label="项目">
-              <el-select v-model="caseForm.project_id" placeholder="请选择项目" @change="changeCaseFormProject">
-                <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="接口">
-              <el-select v-model="caseForm.api_id" placeholder="请先选择项目" :disabled="!caseForm.project_id">
-                <el-option v-for="a in caseFormApis" :key="a.id" :label="a.name" :value="a.id" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="用例名称">
-              <el-input v-model="caseForm.name" placeholder="请输入用例名称" />
-            </el-form-item>
-            <el-form-item label="优先级">
-              <el-select v-model="caseForm.priority">
-                <el-option label="P0" value="P0" />
-                <el-option label="P1" value="P1" />
-                <el-option label="P2" value="P2" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="用例描述" class="wide">
-              <el-input v-model="caseForm.description" type="textarea" :rows="3" placeholder="请输入用例描述" />
-            </el-form-item>
-            <el-form-item label="Body" class="wide">
-              <el-input v-model="caseForm.bodyText" type="textarea" :rows="8" placeholder="请输入 JSON Body" />
-            </el-form-item>
+          <a-form layout="vertical" class="form-grid">
+            <a-form-item label="项目">
+              <a-select v-model:value="caseForm.project_id" placeholder="请选择项目" @change="changeCaseFormProject">
+                <a-select-option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item label="接口">
+              <a-select v-model:value="caseForm.api_id" placeholder="请先选择项目" :disabled="!caseForm.project_id">
+                <a-select-option v-for="a in caseFormApis" :key="a.id" :value="a.id">{{ a.name }}</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item label="用例名称">
+              <a-input v-model:value="caseForm.name" placeholder="请输入用例名称" />
+            </a-form-item>
+            <a-form-item label="用例描述" class="wide">
+              <a-textarea v-model:value="caseForm.description" :rows="3" placeholder="请输入用例描述" />
+            </a-form-item>
+            <a-form-item label="Body" class="wide">
+              <a-textarea v-model:value="caseForm.bodyText" :rows="8" placeholder="请输入 JSON Body" />
+            </a-form-item>
             <div class="wide">
               <div class="kv-title">
                 <h4>断言</h4>
-                <el-button size="small" @click="addCaseAssertionRow">添加</el-button>
+                <a-button size="small" @click="addCaseAssertionRow">添加</a-button>
               </div>
-              <el-table :data="caseForm.assertionRows">
-                <el-table-column label="断言类型" width="190">
-                  <template #default="{ row }">
-                    <el-select v-model="row.type">
-                      <el-option v-for="option in assertionTypes" :key="option.value" :label="option.label" :value="option.value" />
-                    </el-select>
+              <a-table :pagination="false" :data-source="caseForm.assertionRows">
+                <a-table-column title="断言类型" width="190">
+                  <template #default="{ record: row }">
+                    <a-select v-model:value="row.type">
+                      <a-select-option v-for="option in assertionTypes" :key="option.value" :value="option.value">{{ option.label }}</a-select-option>
+                    </a-select>
                   </template>
-                </el-table-column>
-                <el-table-column label="JSONPath/路径">
-                  <template #default="{ row }"><el-input v-model="row.path" placeholder="$.data.id / status_code" /></template>
-                </el-table-column>
-                <el-table-column label="操作符" width="120">
-                  <template #default="{ row }"><el-input v-model="row.operator" placeholder="==" /></template>
-                </el-table-column>
-                <el-table-column label="期望值">
-                  <template #default="{ row }"><el-input v-model="row.expected" placeholder="200 / success" /></template>
-                </el-table-column>
-                <el-table-column label="操作" width="90">
-                  <template #default="{ $index }"><el-button size="small" type="danger" @click="removeCaseAssertionRow($index)">删除</el-button></template>
-                </el-table-column>
-              </el-table>
+                </a-table-column>
+                <a-table-column title="JSONPath/路径">
+                  <template #default="{ record: row }"><a-input v-model:value="row.path" placeholder="$.data.id / status_code" /></template>
+                </a-table-column>
+                <a-table-column title="操作符" width="120">
+                  <template #default="{ record: row }"><a-input v-model:value="row.operator" placeholder="==" /></template>
+                </a-table-column>
+                <a-table-column title="期望值">
+                  <template #default="{ record: row }"><a-input v-model:value="row.expected" placeholder="200 / success" /></template>
+                </a-table-column>
+                <a-table-column title="操作" width="90">
+                  <template #default="{ index: $index }"><a-button size="small" danger @click="removeCaseAssertionRow($index)">删除</a-button></template>
+                </a-table-column>
+              </a-table>
             </div>
-          </el-form>
+          </a-form>
         </section>
 
-        <el-dialog v-model="caseBodyDialogVisible" title="请求 Body" width="640px">
-          <el-input v-model="caseBodyPreview" type="textarea" :rows="16" readonly />
+        <a-modal v-model:open="caseBodyDialogVisible" title="请求 Body" width="640px">
+          <a-textarea v-model:value="caseBodyPreview" :rows="16" readonly />
           <template #footer>
-            <el-button type="primary" @click="caseBodyDialogVisible = false">关闭</el-button>
+            <a-button type="primary" @click="caseBodyDialogVisible = false">关闭</a-button>
           </template>
-        </el-dialog>
+        </a-modal>
 
-        <section v-if="active === 'execute'">
-          <div class="toolbar">
-            <h2>测试计划</h2>
-            <el-button type="primary" @click="openCreatePlanPage">添加测试计划</el-button>
-          </div>
-          <el-form class="search-form" label-position="top">
-            <el-form-item label="计划名称">
-              <el-input v-model="planSearch.name" placeholder="请输入计划名称" clearable @keyup.enter="searchPlans" />
-            </el-form-item>
-            <el-form-item label="项目">
-              <el-select v-model="planSearch.project_id" placeholder="请选择项目" clearable @change="changePlanSearchProject">
-                <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="包含接口">
-              <el-select v-model="planSearch.api_id" placeholder="请先选择项目" clearable :disabled="!planSearch.project_id">
-                <el-option v-for="a in planSearchApis" :key="a.id" :label="a.name" :value="a.id" />
-              </el-select>
-            </el-form-item>
-            <div class="search-actions">
-              <el-button type="primary" @click="searchPlans">搜索</el-button>
-              <el-button @click="resetPlanSearch">重置</el-button>
+        <section v-if="active === 'execute'" class="plan-page">
+          <div class="plan-page-header plan-workbench-header">
+            <div>
+              <h2>测试计划</h2>
+              <p>编排回归范围，统一查看执行状态与最新结果。</p>
             </div>
-          </el-form>
-          <el-table :data="planList" row-key="id" class="plan-list-table">
-            <el-table-column type="expand">
-              <template #default="{ row }">
-                <div class="plan-case-expand-list">
-                  <div class="plan-case-expand-head">
-                    <span>用例名称</span>
-                    <span>接口</span>
-                    <span>优先级</span>
-                    <span>操作</span>
-                  </div>
-                  <div v-for="caseRow in row.cases || []" :key="caseRow.id" class="plan-case-expand-row">
-                    <span class="plan-case-expand-name">{{ caseRow.name || '-' }}</span>
-                    <span class="plan-case-expand-api">{{ caseRow.api_name || '-' }}</span>
-                    <span class="plan-case-expand-priority">{{ caseRow.priority || '-' }}</span>
-                    <span class="plan-case-expand-action">
-                      <el-button size="small" @click="openCaseDetailDialog(caseRow, row.environment_id, row.last_execution_id)">查看</el-button>
-                    </span>
-                  </div>
-                  <el-empty v-if="!(row.cases || []).length" description="暂无用例" :image-size="48" />
+              <a-button type="primary" @click="openCreatePlanPage"><template #icon><PlusOutlined /></template>新建测试计划</a-button>
+          </div>
+          <div class="plan-search-panel plan-filter-bar">
+            <a-form class="search-form plan-search-form" layout="inline">
+              <a-form-item label="计划名称">
+                <a-input v-model:value="planSearch.name" placeholder="请输入计划名称" allow-clear @keyup.enter="searchPlans" />
+              </a-form-item>
+              <a-form-item label="项目">
+                <a-select v-model:value="planSearch.project_id" placeholder="请选择项目" allow-clear @change="changePlanSearchProject">
+                  <a-select-option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item label="包含接口">
+                <a-select v-model:value="planSearch.api_id" placeholder="请先选择项目" allow-clear :disabled="!planSearch.project_id">
+                <a-select-option v-for="a in planSearchApis" :key="a.id" :value="a.id">{{ a.name }}</a-select-option>
+                </a-select>
+              </a-form-item>
+              <div class="search-actions">
+                <a-button type="primary" @click="searchPlans">查询</a-button>
+                <a-button @click="resetPlanSearch">重置</a-button>
+              </div>
+            </a-form>
+          </div>
+          <div class="plan-table-panel plan-data-surface">
+            <div class="plan-table-heading plan-list-toolbar">
+              <div>
+                <h3>全部计划</h3>
+                <span>共 {{ planPagination.total }} 条记录</span>
+              </div>
+              <span class="plan-list-hint">点击计划名称可查看执行范围</span>
+            </div>
+          <a-table :pagination="false" :data-source="planList" row-key="id" :scroll="{ x: 1220 }" class="plan-list-table">
+            <template #expandedRowRender="{ record: row }">
+              <div class="plan-case-expand-list">
+                <div class="plan-case-expand-head">
+                  <span>用例名称</span>
+                  <span>接口</span>
+                  <span>操作</span>
                 </div>
+                <div v-for="caseRow in row.cases || []" :key="caseRow.id" class="plan-case-expand-row">
+                  <span class="plan-case-expand-name">{{ caseRow.name || '-' }}</span>
+                  <span class="plan-case-expand-api">{{ caseRow.api_name || '-' }}</span>
+                  <span class="plan-case-expand-action">
+                    <a-button size="small" @click="openCaseDetailDialog(caseRow, row.environment_id, row.last_execution_id)">查看</a-button>
+                  </span>
+                </div>
+                <a-empty v-if="!(row.cases || []).length" description="暂无用例" :image-style="{ width: '48px', height: '48px' }" />
+              </div>
+            </template>
+            <a-table-column data-index="name" title="计划名称" width="260" ellipsis />
+            <a-table-column data-index="project_name" title="项目" width="150" ellipsis />
+            <a-table-column data-index="environment_name" title="环境" width="160" ellipsis />
+            <a-table-column data-index="api_name" title="包含接口" width="180" ellipsis />
+            <a-table-column title="状态" width="88">
+              <template #default="{ record: row }">
+                <a-tag :color="executionStatusColor(row.last_status)">{{ executionStatusText(row.last_status) }}</a-tag>
               </template>
-            </el-table-column>
-            <el-table-column prop="name" label="计划名称" min-width="128" />
-            <el-table-column prop="project_name" label="项目" min-width="88" />
-            <el-table-column prop="environment_name" label="环境" min-width="96" />
-            <el-table-column prop="api_name" label="包含接口" min-width="110" />
-            <el-table-column label="状态" width="88">
-              <template #default="{ row }">
-                <el-tag :type="executionStatusType(row.last_status)">{{ row.last_status || '未执行' }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="executor_name" label="执行用户" width="104" />
-            <el-table-column prop="creator_name" label="创建用户" width="104" />
-            <el-table-column label="执行时间" width="136">
-              <template #default="{ row }">{{ formatMinute(row.last_executed_at) }}</template>
-            </el-table-column>
-            <el-table-column label="操作" width="280" fixed="right">
-              <template #default="{ row }">
+            </a-table-column>
+            <a-table-column title="执行时间" width="136">
+              <template #default="{ record: row }">{{ formatMinute(row.last_executed_at) }}</template>
+            </a-table-column>
+            <a-table-column title="操作" width="330" fixed="right">
+              <template #default="{ record: row }">
                 <div class="table-actions">
-                  <el-button size="small" type="primary" @click="executePlan(row)">执行</el-button>
-                  <el-button size="small" @click="openEditPlanPage(row)">编辑</el-button>
-                  <el-button size="small" @click="openExecutionDetail(row)">查看进度</el-button>
-                  <el-button size="small" type="danger" @click="deletePlan(row)">删除</el-button>
+                  <a-button size="small" type="primary" @click="executePlan(row)">执行</a-button>
+                  <a-button size="small" type="link" @click="openEditPlanPage(row)">编辑</a-button>
+                  <a-button size="small" type="link" @click="openExecutionDetail(row)">进度</a-button>
+                  <a-button size="small" type="link" danger @click="deletePlan(row)">删除</a-button>
                 </div>
               </template>
-            </el-table-column>
-          </el-table>
+            </a-table-column>
+          </a-table>
           <div class="pagination">
-            <el-pagination
-              background
-              layout="total, prev, pager, next"
-              :current-page="planPagination.page"
+            <a-pagination
+              :show-total="paginationTotal"
+              show-less-items
+              :current="planPagination.page"
               :page-size="planPagination.pageSize"
               :total="planPagination.total"
-              @current-change="changePlanPage"
+              @change="changePlanPage"
             />
+          </div>
           </div>
         </section>
 
         <section v-if="activePlanEditor" class="plan-editor-page">
-          <div class="toolbar">
-            <h2>{{ activePlanEditor.label }}</h2>
+          <div class="plan-editor-header plan-editor-titlebar">
+            <div>
+              <h2>{{ activePlanEditor.label }}</h2>
+              <p>{{ activePlanEditor.dirty ? '存在未保存的更改' : '所有更改已保存' }}</p>
+            </div>
+          </div>
+
+          <div class="plan-editor-workspace">
+            <aside class="plan-editor-rail" aria-label="计划配置步骤">
+              <div class="plan-editor-rail-title">配置步骤</div>
+              <div class="plan-editor-step is-active"><span>01</span><div><strong>基础配置</strong><small>项目、环境与接口</small></div></div>
+              <div class="plan-editor-step"><span>02</span><div><strong>选择用例</strong><small>筛选并加入执行范围</small></div></div>
+              <div class="plan-editor-step"><span>03</span><div><strong>执行编排</strong><small>调整用例执行顺序</small></div></div>
+            </aside>
+
+            <div class="plan-editor-content">
+              <div class="editor-section plan-editor-section">
+                <div class="plan-section-heading">
+                  <div>
+                    <span class="plan-section-index">01</span>
+                    <h3>基础配置</h3>
+                    <p>选择目标项目、执行环境和需要覆盖的接口。</p>
+                  </div>
+                </div>
+                <a-form layout="vertical" class="form-grid">
+                  <a-form-item label="项目">
+                    <a-select v-model:value="activePlanEditor.project_id" placeholder="请选择项目" @change="changePlanEditorProject(activePlanEditor)">
+                      <a-select-option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
+                    </a-select>
+                  </a-form-item>
+                  <a-form-item label="环境">
+                    <a-select v-model:value="activePlanEditor.environment_id" placeholder="请先选择项目" :disabled="!activePlanEditor.project_id" @change="markPlanEditorDirty(activePlanEditor)">
+                      <a-select-option v-for="e in planEditorEnvironments(activePlanEditor)" :key="e.id" :value="e.id">{{ e.name }}</a-select-option>
+                    </a-select>
+                  </a-form-item>
+                  <a-form-item label="接口">
+                    <a-select v-model:value="activePlanEditor.api_id" placeholder="请先选择项目" :disabled="!activePlanEditor.project_id" @change="changePlanEditorApi(activePlanEditor)">
+                      <a-select-option v-for="a in planEditorApis(activePlanEditor)" :key="a.id" :value="a.id">{{ a.name }}</a-select-option>
+                    </a-select>
+                  </a-form-item>
+                  <a-form-item label="测试计划名称">
+                    <a-input v-model:value="activePlanEditor.name" placeholder="请输入测试计划名称" @input="markPlanEditorDirty(activePlanEditor)" />
+                  </a-form-item>
+                </a-form>
+              </div>
+
+              <div class="editor-section plan-editor-section">
+                <div class="plan-section-heading plan-section-heading-actions">
+                  <div>
+                    <span class="plan-section-index">02</span>
+                    <h3>选择测试用例</h3>
+                    <p>查询后勾选用例，并添加到下方执行队列。</p>
+                  </div>
+                  <div class="toolbar-actions">
+                    <a-button @click="loadPlanCandidateCases(activePlanEditor)">刷新列表</a-button>
+                    <a-button type="primary" @click="addSelectedPlanCases(activePlanEditor)">加入队列</a-button>
+                  </div>
+                </div>
+                <a-table :pagination="false"
+                  :data-source="activePlanEditor.candidateCases"
+                  size="small"
+                  row-key="id"
+                  :row-selection="{ onChange: (_keys: any[], rows: any[]) => changePlanCandidateSelection(activePlanEditor, rows) }"
+                >
+                  <a-table-column data-index="name" title="用例名称" />
+                  <a-table-column data-index="api_name" title="接口" />
+                  <a-table-column title="操作" width="100">
+                    <template #default="{ record: row }">
+                      <a-button size="small" type="link" @click="openCaseDetailDialog(row, activePlanEditor.environment_id)">查看</a-button>
+                    </template>
+                  </a-table-column>
+                </a-table>
+              </div>
+
+              <div class="editor-section plan-editor-section">
+                <div class="plan-section-heading">
+                  <div>
+                    <span class="plan-section-index">03</span>
+                    <h3>执行队列</h3>
+                    <p>拖动用例调整执行顺序。</p>
+                  </div>
+                  <span class="plan-queue-count">{{ activePlanEditor.queue.length }} 个用例</span>
+                </div>
+                <div class="plan-queue">
+                  <div
+                    v-for="(item, index) in activePlanEditor.queue"
+                    :key="item.id"
+                    class="plan-queue-row"
+                    draggable="true"
+                    @dragstart="startPlanQueueDrag(activePlanEditor, index)"
+                    @dragover.prevent
+                    @drop="dropPlanQueueRow(activePlanEditor, index)"
+                  >
+                    <span class="drag-handle">⋮⋮</span>
+                    <span class="queue-name">{{ item.name }}</span>
+                    <span class="queue-api">{{ item.api_name || '-' }}</span>
+                    <a-button size="small" type="link" @click="openCaseDetailDialog(item, activePlanEditor.environment_id)">查看</a-button>
+                    <a-button size="small" type="link" danger @click="removePlanQueueCase(activePlanEditor, index)">移除</a-button>
+                  </div>
+                  <a-empty v-if="activePlanEditor.queue.length === 0" description="暂无用例" />
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="plan-editor-footer">
+            <span>{{ activePlanEditor.dirty ? '当前内容尚未保存' : '已保存' }}</span>
             <div class="toolbar-actions">
-              <el-button @click="closePlanEditorFromPage(activePlanEditor)">关闭</el-button>
-              <el-button type="primary" @click="savePlanEditor(activePlanEditor, true)">保存</el-button>
-            </div>
-          </div>
-
-          <div class="editor-section">
-            <h3>基础信息</h3>
-            <el-form label-position="top" class="form-grid">
-              <el-form-item label="项目">
-                <el-select v-model="activePlanEditor.project_id" placeholder="请选择项目" @change="changePlanEditorProject(activePlanEditor)">
-                  <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="环境">
-                <el-select v-model="activePlanEditor.environment_id" placeholder="请先选择项目" :disabled="!activePlanEditor.project_id" @change="markPlanEditorDirty(activePlanEditor)">
-                  <el-option v-for="e in planEditorEnvironments(activePlanEditor)" :key="e.id" :label="e.name" :value="e.id" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="接口">
-                <el-select v-model="activePlanEditor.api_id" placeholder="请先选择项目" :disabled="!activePlanEditor.project_id" @change="changePlanEditorApi(activePlanEditor)">
-                  <el-option v-for="a in planEditorApis(activePlanEditor)" :key="a.id" :label="a.name" :value="a.id" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="测试计划名称">
-                <el-input v-model="activePlanEditor.name" placeholder="请输入测试计划名称" @input="markPlanEditorDirty(activePlanEditor)" />
-              </el-form-item>
-            </el-form>
-          </div>
-
-          <div class="editor-section">
-            <div class="toolbar compact-toolbar">
-              <h3>测试用例</h3>
-              <div class="toolbar-actions">
-                <el-button type="primary" @click="loadPlanCandidateCases(activePlanEditor)">搜索</el-button>
-                <el-button @click="addSelectedPlanCases(activePlanEditor)">添加</el-button>
-              </div>
-            </div>
-            <el-table
-              :data="activePlanEditor.candidateCases"
-              size="small"
-              row-key="id"
-              @selection-change="changePlanCandidateSelection(activePlanEditor, $event)"
-            >
-              <el-table-column type="selection" width="48" />
-              <el-table-column prop="name" label="用例名称" />
-              <el-table-column prop="api_name" label="接口" />
-              <el-table-column prop="priority" label="优先级" width="100" />
-              <el-table-column label="操作" width="100">
-                <template #default="{ row }">
-                  <el-button size="small" @click="openCaseDetailDialog(row, activePlanEditor.environment_id)">查看</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-          </div>
-
-          <div class="editor-section">
-            <h3>测试计划</h3>
-            <div class="plan-queue">
-              <div
-                v-for="(item, index) in activePlanEditor.queue"
-                :key="item.id"
-                class="plan-queue-row"
-                draggable="true"
-                @dragstart="startPlanQueueDrag(activePlanEditor, index)"
-                @dragover.prevent
-                @drop="dropPlanQueueRow(activePlanEditor, index)"
-              >
-                <span class="drag-handle">⋮⋮</span>
-                <span class="queue-name">{{ item.name }}</span>
-                <span class="queue-api">{{ item.api_name || '-' }}</span>
-                <el-tag size="small">{{ item.priority }}</el-tag>
-                <el-button size="small" @click="openCaseDetailDialog(item, activePlanEditor.environment_id)">查看</el-button>
-                <el-button size="small" type="danger" @click="removePlanQueueCase(activePlanEditor, index)">移除</el-button>
-              </div>
-              <el-empty v-if="activePlanEditor.queue.length === 0" description="暂无用例" />
+              <a-button @click="closePlanEditorFromPage(activePlanEditor)">取消</a-button>
+              <a-button type="primary" @click="savePlanEditor(activePlanEditor, true)">保存测试计划</a-button>
             </div>
           </div>
         </section>
 
-        <el-dialog v-model="caseDetailDialogVisible" title="用例详情" width="760px">
+        <a-modal v-model:open="caseDetailDialogVisible" title="用例详情" width="760px">
           <div class="detail-grid">
             <strong>请求方法</strong><span>{{ caseDetail.method || '-' }}</span>
             <strong>URL</strong><span>{{ caseDetail.url || '-' }}</span>
@@ -792,124 +902,200 @@
             </template>
           </div>
           <template #footer>
-            <el-button type="primary" @click="caseDetailDialogVisible = false">关闭</el-button>
+            <a-button type="primary" @click="caseDetailDialogVisible = false">关闭</a-button>
           </template>
-        </el-dialog>
+        </a-modal>
 
-        <el-dialog v-model="executionDetailDialogVisible" title="执行进度" width="820px">
-          <el-descriptions v-if="executionDetail.task" :column="3" border>
-            <el-descriptions-item label="状态">{{ executionDetail.task.status }}</el-descriptions-item>
-            <el-descriptions-item label="汇总">{{ formatJson(executionDetail.task.summary) }}</el-descriptions-item>
-          </el-descriptions>
-          <el-table :data="executionDetail.results" size="small" class="sub">
-            <el-table-column prop="case_name" label="用例名称" min-width="140" />
-            <el-table-column prop="api_name" label="接口" min-width="140" />
-            <el-table-column prop="status" label="状态" width="100" />
-            <el-table-column prop="duration_ms" label="耗时(ms)" width="110" />
-            <el-table-column prop="error_message" label="错误信息" />
-          </el-table>
+        <a-modal v-model:open="executionDetailDialogVisible" title="执行进度" width="820px">
+          <a-descriptions v-if="executionDetail.task" :column="3" border>
+            <a-descriptions-item label="状态">{{ executionDetail.task.status }}</a-descriptions-item>
+            <a-descriptions-item label="汇总">{{ formatJson(executionDetail.task.summary) }}</a-descriptions-item>
+          </a-descriptions>
+          <a-table :pagination="false" :data-source="executionDetail.results" size="small" class="sub">
+            <a-table-column data-index="case_name" title="用例名称" width="180" />
+            <a-table-column data-index="api_name" title="接口" width="180" />
+            <a-table-column title="状态" width="100">
+              <template #default="{ record: row }">
+                <a-tag :color="executionStatusColor(row.status)">{{ executionStatusText(row.status) }}</a-tag>
+              </template>
+            </a-table-column>
+            <a-table-column data-index="duration_ms" title="耗时(ms)" width="110" />
+            <a-table-column data-index="error_message" title="错误信息" />
+          </a-table>
           <template #footer>
-            <el-button type="primary" @click="executionDetailDialogVisible = false">关闭</el-button>
+            <a-button type="primary" @click="executionDetailDialogVisible = false">关闭</a-button>
           </template>
-        </el-dialog>
+        </a-modal>
 
-        <section v-if="active === 'reports'">
+        <section v-if="active === 'reports'" class="page-view">
           <div class="toolbar"><h2>报告中心</h2></div>
-          <el-form class="search-form" label-position="top">
-            <el-form-item label="测试计划名称">
-              <el-input v-model="reportSearch.name" placeholder="请输入测试计划名称" clearable @keyup.enter="searchReports" />
-            </el-form-item>
-            <el-form-item label="状态">
-              <el-select v-model="reportSearch.status" placeholder="请选择状态" clearable>
-                <el-option label="queued" value="queued" />
-                <el-option label="running" value="running" />
-                <el-option label="passed" value="passed" />
-                <el-option label="failed" value="failed" />
-                <el-option label="error" value="error" />
-              </el-select>
-            </el-form-item>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="测试计划名称">
+              <a-input v-model:value="reportSearch.name" placeholder="请输入测试计划名称" allow-clear @keyup.enter="searchReports" />
+            </a-form-item>
+            <a-form-item label="状态">
+              <a-select v-model:value="reportSearch.status" placeholder="请选择状态" allow-clear>
+                <a-select-option value="queued">排队中</a-select-option>
+                <a-select-option value="running">执行中</a-select-option>
+                <a-select-option value="passed">已通过</a-select-option>
+                <a-select-option value="failed">失败</a-select-option>
+                <a-select-option value="error">异常</a-select-option>
+              </a-select>
+            </a-form-item>
             <div class="search-actions">
-              <el-button type="primary" @click="searchReports">搜索</el-button>
-              <el-button @click="resetReportSearch">重置</el-button>
+              <a-button type="primary" @click="searchReports">搜索</a-button>
+              <a-button @click="resetReportSearch">重置</a-button>
             </div>
-          </el-form>
-          <el-table :data="reportList">
-            <el-table-column prop="target_name" label="测试计划名称" min-width="160" />
-            <el-table-column prop="project_name" label="项目" />
-            <el-table-column prop="environment_name" label="环境" />
-            <el-table-column prop="status" label="状态" width="100" />
-            <el-table-column label="执行时间" width="150">
-              <template #default="{ row }">{{ formatMinute(row.ended_at || row.started_at || row.create_date) }}</template>
-            </el-table-column>
-            <el-table-column prop="executor_name" label="执行用户" width="120" />
-            <el-table-column label="操作" width="190" fixed="right">
-              <template #default="{ row }">
+          </a-form>
+          <a-table :pagination="false" :data-source="reportList">
+            <a-table-column data-index="target_name" title="测试计划名称" width="180" />
+            <a-table-column data-index="project_name" title="项目" />
+            <a-table-column data-index="environment_name" title="环境" />
+            <a-table-column title="状态" width="100">
+              <template #default="{ record: row }">
+                <a-tag :color="executionStatusColor(row.status)">{{ executionStatusText(row.status) }}</a-tag>
+              </template>
+            </a-table-column>
+            <a-table-column title="执行时间" width="150">
+              <template #default="{ record: row }">{{ formatMinute(row.ended_at || row.started_at || row.create_date) }}</template>
+            </a-table-column>
+            <a-table-column data-index="executor_name" title="执行用户" width="120" />
+            <a-table-column title="操作" width="230" fixed="right">
+              <template #default="{ record: row }">
                 <div class="table-actions">
-                  <el-button size="small" @click="openReport(row)">查看报告</el-button>
-                  <el-button size="small" type="danger" @click="deleteReport(row)">删除</el-button>
+                  <a-button size="small" @click="openReport(row)">查看报告</a-button>
+                  <a-button size="small" danger @click="deleteReport(row)">删除</a-button>
                 </div>
               </template>
-            </el-table-column>
-          </el-table>
+            </a-table-column>
+          </a-table>
           <div class="pagination">
-            <el-pagination
-              background
-              layout="total, prev, pager, next"
-              :current-page="reportPagination.page"
+            <a-pagination
+              :show-total="paginationTotal"
+              show-less-items
+              :current="reportPagination.page"
               :page-size="reportPagination.pageSize"
               :total="reportPagination.total"
-              @current-change="changeReportPage"
+              @change="changeReportPage"
             />
           </div>
         </section>
 
-        <section v-if="active === 'logs'">
+        <section v-if="active === 'logs'" class="page-view">
           <h2>日志中心</h2>
-          <el-table :data="logs"><el-table-column prop="module" label="模块" /><el-table-column prop="action" label="操作" /><el-table-column prop="result" label="结果" /><el-table-column prop="create_date" label="时间" /></el-table>
+          <a-table :pagination="false" :data-source="logs"><a-table-column data-index="module" title="模块" /><a-table-column data-index="action" title="操作" /><a-table-column data-index="result" title="结果" /><a-table-column data-index="create_date" title="时间" /></a-table>
         </section>
 
-        <el-dialog v-model="changePasswordDialogVisible" title="修改密码" width="420px" @closed="resetChangePasswordForm">
-          <el-form label-position="top" @submit.prevent="changePassword">
-            <el-form-item label="原密码">
-              <el-input v-model="changePasswordForm.old_password" type="password" show-password placeholder="请输入原密码" />
-            </el-form-item>
-            <el-form-item label="新密码">
-              <el-input
-                v-model="changePasswordForm.new_password"
-                type="password"
-                show-password
+        <a-modal v-model:open="changePasswordDialogVisible" title="修改密码" width="420px" @after-close="resetChangePasswordForm">
+          <a-form layout="vertical" @submit.prevent="changePassword">
+            <a-form-item label="原密码">
+              <a-input-password v-model:value="changePasswordForm.old_password" placeholder="请输入原密码" />
+            </a-form-item>
+            <a-form-item label="新密码">
+              <a-input-password
+                v-model:value="changePasswordForm.new_password"
                 placeholder="请输入新密码"
                 @blur="validatePasswordMatch"
               />
-            </el-form-item>
-            <el-form-item label="确认密码">
-              <el-input
-                v-model="changePasswordForm.confirm_password"
-                type="password"
-                show-password
+            </a-form-item>
+            <a-form-item label="确认密码">
+              <a-input-password
+                v-model:value="changePasswordForm.confirm_password"
                 placeholder="请再次输入新密码"
                 @blur="validatePasswordMatch"
               />
-            </el-form-item>
-          </el-form>
+            </a-form-item>
+          </a-form>
           <template #footer>
-            <el-button @click="cancelChangePassword">取消</el-button>
-            <el-button type="primary" @click="changePassword">确认</el-button>
+            <a-button @click="cancelChangePassword">取消</a-button>
+            <a-button type="primary" @click="changePassword">确认</a-button>
           </template>
-        </el-dialog>
-      </el-main>
-    </el-container>
-  </el-container>
+        </a-modal>
+      </a-layout-content>
+    </a-layout>
+  </a-layout>
+  </a-config-provider>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { message, Modal } from 'ant-design-vue'
+import zhCN from 'ant-design-vue/es/locale/zh_CN'
+import {
+  ApiOutlined,
+  BarChartOutlined,
+  CheckCircleOutlined,
+  CloudServerOutlined,
+  DashboardOutlined,
+  DeleteOutlined,
+  DownOutlined,
+  EditOutlined,
+  EyeOutlined,
+  FileTextOutlined,
+  FolderOpenOutlined,
+  LockOutlined,
+  LoginOutlined,
+  LogoutOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  PlusOutlined,
+  PlayCircleOutlined,
+  ProfileOutlined,
+  ProjectOutlined,
+  ReloadOutlined,
+  SaveOutlined,
+  SearchOutlined,
+  SettingOutlined,
+  TeamOutlined,
+  UserAddOutlined,
+  UserOutlined
+} from '@ant-design/icons-vue'
 import { api, type User } from './api'
+
+const appTheme = {
+  token: {
+    colorPrimary: '#1677ff',
+    colorInfo: '#1677ff',
+    colorSuccess: '#16a34a',
+    colorWarning: '#d97706',
+    colorError: '#dc2626',
+    colorBgLayout: '#f5f7fa',
+    colorText: '#1f2937',
+    colorTextSecondary: '#667085',
+    colorBorder: '#e6eaf0',
+    borderRadius: 6,
+    controlHeight: 34,
+    fontSize: 14
+  },
+  components: {
+    Button: { borderRadius: 6, controlHeightSM: 30 },
+    Card: { borderRadiusLG: 8 },
+    Input: { activeShadow: '0 0 0 2px rgba(22, 119, 255, 0.12)' },
+    Select: { optionSelectedBg: '#eef6ff' },
+    Table: { headerBg: '#f8fafc', rowHoverBg: '#f5f9ff' }
+  }
+}
 
 type AppTab = { name: string; label: string; closable: boolean }
 type KeyValueRow = { id: number; key: string; value: string }
 type CaseAssertionRow = { id: number; type: string; path: string; operator: string; expected: string }
+
+function confirmAction(
+  content: string,
+  title: string,
+  options: { confirmButtonText?: string; cancelButtonText?: string; type?: string; distinguishCancelAndClose?: boolean } = {}
+) {
+  return new Promise<void>((resolve, reject) => {
+    Modal.confirm({
+      title,
+      content,
+      okText: options.confirmButtonText || '确认',
+      cancelText: options.cancelButtonText || '取消',
+      onOk: () => resolve(),
+      onCancel: () => reject('cancel')
+    })
+  })
+}
 type ApiEncryption = {
   enabled: boolean
   mode: 'none' | 'rsa_aes_sm3'
@@ -985,6 +1171,10 @@ function restoreActive(tabs: AppTab[]) {
 
 const openedTabs = ref<AppTab[]>(restoreTabs())
 const active = ref(restoreActive(openedTabs.value))
+const sidebarCollapsed = ref(false)
+const mobileSidebarOpen = ref(false)
+const isMobile = ref(false)
+const loginLoading = ref(false)
 
 const me = ref<User | null>(null)
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
@@ -1039,13 +1229,20 @@ const projectForm = reactive({ name: '', description: '' })
 const editProjectForm = reactive({ id: undefined as number | undefined, name: '', description: '' })
 const envForm = reactive({ project_id: undefined as number | undefined, name: '', protocol: '', base_url: '', port: '' })
 const editEnvironmentForm = reactive({ id: undefined as number | undefined, project_id: undefined as number | undefined, name: '', protocol: '', base_url: '', port: '' })
-const caseForm = reactive({ id: undefined as number | undefined, project_id: undefined as number | undefined, api_id: undefined as number | undefined, name: '', description: '', priority: 'P2', bodyText: '{}', assertionRows: [] as CaseAssertionRow[] })
+const caseForm = reactive({ id: undefined as number | undefined, project_id: undefined as number | undefined, api_id: undefined as number | undefined, name: '', description: '', bodyText: '{}', assertionRows: [] as CaseAssertionRow[] })
 const execForm = reactive({ project_id: undefined as number | undefined, environment_id: undefined as number | undefined, target_id: undefined as number | undefined })
 const apiEditors = reactive<Record<string, ApiEditor>>({})
 const planEditors = reactive<Record<string, PlanEditor>>({})
 const avatarText = computed(() => me.value?.username.slice(0, 1).toUpperCase() || 'U')
 const activeApiEditor = computed(() => apiEditors[active.value])
 const activePlanEditor = computed(() => planEditors[active.value])
+const currentPageTitle = computed(() => activeApiEditor.value?.label || activePlanEditor.value?.label || menuMeta[active.value]?.label || '接口测试平台')
+const dashboardStats = computed(() => [
+  { label: '项目数', value: projects.value.length, description: '已配置项目', tone: 'blue', icon: ProjectOutlined },
+  { label: '接口数', value: apis.value.length, description: '已维护接口定义', tone: 'cyan', icon: ApiOutlined },
+  { label: '用例数', value: cases.value.length, description: '可用于回归执行', tone: 'green', icon: FileTextOutlined },
+  { label: '执行任务', value: executions.value.length, description: '历史执行任务', tone: 'orange', icon: PlayCircleOutlined }
+])
 const caseSearchApis = computed(() => apis.value.filter(item => caseSearch.project_id && item.project_id === caseSearch.project_id))
 const caseFormApis = computed(() => apis.value.filter(item => caseForm.project_id && item.project_id === caseForm.project_id))
 const planSearchApis = computed(() => apis.value.filter(item => planSearch.project_id && item.project_id === planSearch.project_id))
@@ -1057,6 +1254,7 @@ const assertionTypes = [
   { label: '响应时间小于', value: 'duration_lt' },
   { label: '响应文本包含', value: 'body_contains' }
 ]
+const paginationTotal = (total: number) => `共 ${total} 条`
 
 function parseJson(text: string, fallback: any) {
   try { return JSON.parse(text || '') } catch { return fallback }
@@ -1345,13 +1543,19 @@ async function changeReportPage(page: number) {
 }
 
 async function login() {
+  if (loginLoading.value) {
+    return
+  }
+  loginLoading.value = true
   try {
     const { data } = await api.post('/auth/login', loginForm)
     localStorage.setItem('session_token', data.token)
     me.value = data.user
     await loadAll()
   } catch {
-    ElMessage.error('用户名或密码错误')
+    message.error('用户名或密码错误')
+  } finally {
+    loginLoading.value = false
   }
 }
 
@@ -1394,6 +1598,26 @@ function selectMenu(index: string) {
   openTab(index)
 }
 
+function handleMenuSelect({ key }: { key: string }) {
+  selectMenu(key)
+  mobileSidebarOpen.value = false
+}
+
+function toggleSidebar() {
+  if (isMobile.value) {
+    mobileSidebarOpen.value = true
+    return
+  }
+  sidebarCollapsed.value = !sidebarCollapsed.value
+}
+
+function handleSidebarBreakpoint(broken: boolean) {
+  isMobile.value = broken
+  if (!broken) {
+    mobileSidebarOpen.value = false
+  }
+}
+
 function switchTab(name: string | number) {
   active.value = String(name)
   saveTabs()
@@ -1410,6 +1634,12 @@ async function closeTab(name: string | number) {
     return
   }
   removeTab(target)
+}
+
+function handleTabEdit(targetKey: string | number, action: 'add' | 'remove') {
+  if (action === 'remove') {
+    void closeTab(targetKey)
+  }
 }
 
 function removeTab(target: string) {
@@ -1458,7 +1688,7 @@ function passwordsMismatch() {
 
 function validatePasswordMatch() {
   if (passwordsMismatch()) {
-    ElMessage.warning('两次输入的新密码不一致')
+    message.warning('两次输入的新密码不一致')
     return false
   }
   return true
@@ -1466,27 +1696,27 @@ function validatePasswordMatch() {
 
 async function changePassword() {
   if (!changePasswordForm.old_password) {
-    ElMessage.warning('请输入原密码')
+    message.warning('请输入原密码')
     return
   }
   if (!changePasswordForm.new_password) {
-    ElMessage.warning('请输入新密码')
+    message.warning('请输入新密码')
     return
   }
   if (changePasswordForm.new_password.length < 6) {
-    ElMessage.warning('新密码至少6位')
+    message.warning('新密码至少6位')
     return
   }
   if (!changePasswordForm.confirm_password) {
-    ElMessage.warning('请再次输入新密码')
+    message.warning('请再次输入新密码')
     return
   }
   if (passwordsMismatch()) {
-    ElMessage.warning('两次输入的新密码不一致')
+    message.warning('两次输入的新密码不一致')
     return
   }
   if (changePasswordForm.old_password === changePasswordForm.new_password) {
-    ElMessage.warning('新密码不能与原密码一致')
+    message.warning('新密码不能与原密码一致')
     return
   }
   try {
@@ -1496,9 +1726,9 @@ async function changePassword() {
     })
     changePasswordDialogVisible.value = false
     resetChangePasswordForm()
-    ElMessage.success('密码修改成功')
+    message.success('密码修改成功')
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.detail || '原密码错误')
+    message.error(error?.response?.data?.detail || '原密码错误')
   }
 }
 
@@ -1542,11 +1772,11 @@ async function createUser() {
   const username = userForm.username.trim()
   const realName = userForm.real_name.trim()
   if (!username) {
-    ElMessage.warning('请输入用户名')
+    message.warning('请输入用户名')
     return
   }
   if (!realName) {
-    ElMessage.warning('请输入姓名')
+    message.warning('请输入姓名')
     return
   }
   await api.post('/users', {
@@ -1557,7 +1787,7 @@ async function createUser() {
   })
   createUserDialogVisible.value = false
   resetUserForm()
-  ElMessage.success('用户已创建')
+  message.success('用户已创建')
   await loadUsers()
 }
 
@@ -1565,24 +1795,24 @@ async function updateUser() {
   const username = editUserForm.username.trim()
   const realName = editUserForm.real_name.trim()
   if (!username) {
-    ElMessage.warning('请输入用户名')
+    message.warning('请输入用户名')
     return
   }
   if (!realName) {
-    ElMessage.warning('请输入姓名')
+    message.warning('请输入姓名')
     return
   }
   await api.put(`/users/${editUserForm.id}`, { username, real_name: realName })
   editUserDialogVisible.value = false
   resetEditUserForm()
-  ElMessage.success('用户已更新')
+  message.success('用户已更新')
   await loadUsers()
 }
 
 async function toggleUserStatus(user: any) {
   const nextStatus = user.status === 'active' ? 'disabled' : 'active'
   await api.patch(`/users/${user.id}/status`, { status: nextStatus })
-  ElMessage.success(nextStatus === 'active' ? '用户已启用' : '用户已禁用')
+  message.success(nextStatus === 'active' ? '用户已启用' : '用户已禁用')
   await loadUsers()
 }
 
@@ -1637,44 +1867,44 @@ async function createProject() {
   const name = projectForm.name.trim()
   const description = projectForm.description.trim()
   if (!name) {
-    ElMessage.warning('请输入项目名称')
+    message.warning('请输入项目名称')
     return
   }
   if (!description) {
-    ElMessage.warning('请输入描述')
+    message.warning('请输入描述')
     return
   }
   if (projects.value.some(project => project.name === name)) {
-    ElMessage.warning('项目名称已存在')
+    message.warning('项目名称已存在')
     return
   }
   try {
     await api.post('/projects', { name, description })
     createProjectDialogVisible.value = false
     resetProjectForm()
-    ElMessage.success('项目已创建')
+    message.success('项目已创建')
     await refreshProjectsAfterChange()
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.detail || '项目创建失败')
+    message.error(error?.response?.data?.detail || '项目创建失败')
   }
 }
 
 async function updateProject() {
   const name = editProjectForm.name.trim()
   if (!name) {
-    ElMessage.warning('请输入项目名称')
+    message.warning('请输入项目名称')
     return
   }
   await api.put(`/projects/${editProjectForm.id}`, { name, description: editProjectForm.description })
   editProjectDialogVisible.value = false
   resetEditProjectForm()
-  ElMessage.success('项目已更新')
+  message.success('项目已更新')
   await refreshProjectsAfterChange()
 }
 
 async function deleteProject(project: any) {
   try {
-    await ElMessageBox.confirm('确认删除该项目吗？', '删除项目', {
+    await confirmAction('确认删除该项目吗？', '删除项目', {
       confirmButtonText: '确认',
       cancelButtonText: '取消',
       type: 'warning'
@@ -1683,7 +1913,7 @@ async function deleteProject(project: any) {
     return
   }
   await api.delete(`/projects/${project.id}`)
-  ElMessage.success('项目已删除')
+  message.success('项目已删除')
   await refreshProjectsAfterDelete()
 }
 
@@ -1757,7 +1987,7 @@ function digitsOnly(value: string) {
 
 function validateEnvironmentProtocol(protocol: string) {
   if (!protocol) {
-    ElMessage.warning('请选择协议')
+    message.warning('请选择协议')
     return false
   }
   return true
@@ -1777,33 +2007,33 @@ async function createEnvironment() {
   const baseUrl = envForm.base_url.trim()
   const port = environmentPort(protocol, envForm.port)
   if (!projectId) {
-    ElMessage.warning('请选择项目')
+    message.warning('请选择项目')
     return
   }
   if (!name) {
-    ElMessage.warning('请输入环境名称')
+    message.warning('请输入环境名称')
     return
   }
   if (!protocol) {
-    ElMessage.warning('请选择协议')
+    message.warning('请选择协议')
     return
   }
   if (!baseUrl) {
-    ElMessage.warning('请输入 Base URL')
+    message.warning('请输入 Base URL')
     return
   }
   if (environmentNameExists(projectId, name)) {
-    ElMessage.warning('环境名称已存在')
+    message.warning('环境名称已存在')
     return
   }
   try {
     await api.post('/environments', { project_id: projectId, name, protocol, base_url: baseUrl, port, headers: {}, variables: {} })
     createEnvironmentDialogVisible.value = false
     resetEnvironmentForm()
-    ElMessage.success('环境已创建')
+    message.success('环境已创建')
     await refreshEnvironmentsAfterChange()
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.detail || '环境创建失败')
+    message.error(error?.response?.data?.detail || '环境创建失败')
   }
 }
 
@@ -1814,39 +2044,39 @@ async function updateEnvironment() {
   const baseUrl = editEnvironmentForm.base_url.trim()
   const port = environmentPort(protocol, editEnvironmentForm.port)
   if (!projectId) {
-    ElMessage.warning('请选择项目')
+    message.warning('请选择项目')
     return
   }
   if (!name) {
-    ElMessage.warning('请输入环境名称')
+    message.warning('请输入环境名称')
     return
   }
   if (!protocol) {
-    ElMessage.warning('请选择协议')
+    message.warning('请选择协议')
     return
   }
   if (!baseUrl) {
-    ElMessage.warning('请输入 Base URL')
+    message.warning('请输入 Base URL')
     return
   }
   if (environmentNameExists(projectId, name, editEnvironmentForm.id)) {
-    ElMessage.warning('环境名称已存在')
+    message.warning('环境名称已存在')
     return
   }
   try {
     await api.put(`/environments/${editEnvironmentForm.id}`, { project_id: projectId, name, protocol, base_url: baseUrl, port })
     editEnvironmentDialogVisible.value = false
     resetEditEnvironmentForm()
-    ElMessage.success('环境已更新')
+    message.success('环境已更新')
     await refreshEnvironmentsAfterChange()
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.detail || '环境更新失败')
+    message.error(error?.response?.data?.detail || '环境更新失败')
   }
 }
 
 async function deleteEnvironment(environment: any) {
   try {
-    await ElMessageBox.confirm('确认删除该环境吗？', '删除环境', {
+    await confirmAction('确认删除该环境吗？', '删除环境', {
       confirmButtonText: '确认',
       cancelButtonText: '取消',
       type: 'warning'
@@ -1855,7 +2085,7 @@ async function deleteEnvironment(environment: any) {
     return
   }
   await api.delete(`/environments/${environment.id}`)
-  ElMessage.success('环境已删除')
+  message.success('环境已删除')
   await refreshEnvironmentsAfterDelete()
 }
 
@@ -2077,19 +2307,19 @@ function apiPayload(editor: ApiEditor) {
 function validateApiEditor(editor: ApiEditor) {
   const payload = apiPayload(editor)
   if (!payload.project_id) {
-    ElMessage.warning('请选择项目')
+    message.warning('请选择项目')
     return null
   }
   if (!payload.name) {
-    ElMessage.warning('请输入接口名称')
+    message.warning('请输入接口名称')
     return null
   }
   if (!payload.path) {
-    ElMessage.warning('请输入接口路径')
+    message.warning('请输入接口路径')
     return null
   }
   if (apiNameExists(payload.project_id, payload.name, editor.apiId)) {
-    ElMessage.warning('接口名称已存在')
+    message.warning('接口名称已存在')
     return null
   }
   return payload
@@ -2103,10 +2333,10 @@ async function saveApiEditor(editor: ApiEditor, closeAfterSave = false) {
   try {
     if (editor.mode === 'edit') {
       await api.put(`/apis/${editor.apiId}`, payload)
-      ElMessage.success('接口已更新')
+      message.success('接口已更新')
     } else {
       const { data } = await api.post('/apis', payload)
-      ElMessage.success('接口已创建')
+      message.success('接口已创建')
       if (!closeAfterSave) {
         promoteCreatedApiEditor(editor, data.id)
       }
@@ -2118,7 +2348,7 @@ async function saveApiEditor(editor: ApiEditor, closeAfterSave = false) {
     }
     return true
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.detail || '接口保存失败')
+    message.error(error?.response?.data?.detail || '接口保存失败')
     return false
   }
 }
@@ -2152,7 +2382,7 @@ async function requestCloseApiEditor(editor: ApiEditor) {
     return
   }
   try {
-    await ElMessageBox.confirm('当前接口内容尚未保存，是否保存后关闭？', '关闭接口', {
+    await confirmAction('当前接口内容尚未保存，是否保存后关闭？', '关闭接口', {
       confirmButtonText: '保存并关闭',
       cancelButtonText: '不保存关闭',
       distinguishCancelAndClose: true,
@@ -2172,7 +2402,7 @@ async function closeApiEditorFromPage(editor: ApiEditor) {
 
 async function deleteApi(row: any) {
   try {
-    await ElMessageBox.confirm('确认删除该接口吗？', '删除接口', {
+    await confirmAction('确认删除该接口吗？', '删除接口', {
       confirmButtonText: '确认',
       cancelButtonText: '取消',
       type: 'warning'
@@ -2182,10 +2412,10 @@ async function deleteApi(row: any) {
   }
   try {
     await api.delete(`/apis/${row.id}`)
-    ElMessage.success('接口已删除')
+    message.success('接口已删除')
     await refreshApisAfterDelete()
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.detail || '接口删除失败')
+    message.error(error?.response?.data?.detail || '接口删除失败')
   }
 }
 
@@ -2195,7 +2425,6 @@ function resetCaseForm() {
   caseForm.api_id = undefined
   caseForm.name = ''
   caseForm.description = ''
-  caseForm.priority = 'P2'
   caseForm.bodyText = '{}'
   caseForm.assertionRows = []
 }
@@ -2211,7 +2440,6 @@ function openEditCasePage(row: any) {
   caseForm.api_id = row.api_id
   caseForm.name = row.name || ''
   caseForm.description = row.tags || ''
-  caseForm.priority = row.priority || 'P2'
   caseForm.bodyText = JSON.stringify(row.request_body ?? {}, null, 2)
   caseForm.assertionRows = caseAssertionsToRows(row.assertions)
   openRuntimeTab({ name: `case-edit-${row.id}`, label: `编辑用例-${row.id}`, closable: true })
@@ -2272,21 +2500,21 @@ function removeCaseAssertionRow(index: number) {
 
 function validateCaseForm() {
   if (!caseForm.project_id) {
-    ElMessage.warning('请选择项目')
+    message.warning('请选择项目')
     return null
   }
   if (!caseForm.api_id) {
-    ElMessage.warning('请选择接口')
+    message.warning('请选择接口')
     return null
   }
   const name = caseForm.name.trim()
   if (!name) {
-    ElMessage.warning('请输入用例名称')
+    message.warning('请输入用例名称')
     return null
   }
   const requestBody = parseJson(caseForm.bodyText, undefined)
   if (requestBody === undefined) {
-    ElMessage.warning('Body 必须是合法 JSON')
+    message.warning('Body 必须是合法 JSON')
     return null
   }
   return {
@@ -2299,7 +2527,6 @@ function validateCaseForm() {
     assertions: caseAssertionRowsToPayload(),
     extractors: [],
     tags: caseForm.description.trim(),
-    priority: caseForm.priority,
   }
 }
 
@@ -2316,10 +2543,10 @@ async function saveCase() {
   try {
     if (caseForm.id) {
       await api.put(`/cases/${caseForm.id}`, payload)
-      ElMessage.success('用例已更新')
+      message.success('用例已更新')
     } else {
       await api.post('/cases', payload)
-      ElMessage.success('用例已创建')
+      message.success('用例已创建')
     }
     caseSearch.project_id = payload.project_id
     caseSearch.api_id = payload.api_id
@@ -2328,13 +2555,13 @@ async function saveCase() {
     await refreshAllCases()
     closeCaseEditorPage()
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.detail || '用例保存失败')
+    message.error(error?.response?.data?.detail || '用例保存失败')
   }
 }
 
 async function deleteCase(row: any) {
   try {
-    await ElMessageBox.confirm('确认删除该用例吗？', '删除用例', {
+    await confirmAction('确认删除该用例吗？', '删除用例', {
       confirmButtonText: '确认',
       cancelButtonText: '取消',
       type: 'warning'
@@ -2344,7 +2571,7 @@ async function deleteCase(row: any) {
   }
   try {
     await api.delete(`/cases/${row.id}`)
-    ElMessage.success('用例已删除')
+    message.success('用例已删除')
     await loadCases()
     if (caseList.value.length === 0 && casePagination.page > 1) {
       casePagination.page -= 1
@@ -2352,7 +2579,7 @@ async function deleteCase(row: any) {
     }
     await refreshAllCases()
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.detail || '用例删除失败')
+    message.error(error?.response?.data?.detail || '用例删除失败')
   }
 }
 
@@ -2440,28 +2667,28 @@ function planNameExists(projectId: number, name: string, planId?: number) {
 
 function validatePlanEditor(editor: PlanEditor) {
   if (!editor.project_id) {
-    ElMessage.warning('请选择项目')
+    message.warning('请选择项目')
     return null
   }
   if (!editor.environment_id) {
-    ElMessage.warning('请选择环境')
+    message.warning('请选择环境')
     return null
   }
   if (!editor.api_id) {
-    ElMessage.warning('请选择接口')
+    message.warning('请选择接口')
     return null
   }
   const name = editor.name.trim()
   if (!name) {
-    ElMessage.warning('请输入测试计划名称')
+    message.warning('请输入测试计划名称')
     return null
   }
   if (planNameExists(editor.project_id, name, editor.planId)) {
-    ElMessage.warning('测试计划名称已存在')
+    message.warning('测试计划名称已存在')
     return null
   }
   if (editor.queue.length === 0) {
-    ElMessage.warning('请至少添加一条测试用例')
+    message.warning('请至少添加一条测试用例')
     return null
   }
   return {
@@ -2475,7 +2702,7 @@ function validatePlanEditor(editor: PlanEditor) {
 
 async function loadPlanCandidateCases(editor: PlanEditor) {
   if (!editor.project_id || !editor.environment_id || !editor.api_id) {
-    ElMessage.warning('请先选择项目、环境和接口')
+    message.warning('请先选择项目、环境和接口')
     return
   }
   const { data } = await api.get('/cases', {
@@ -2531,10 +2758,10 @@ async function savePlanEditor(editor: PlanEditor, closeAfterSave = false) {
   try {
     if (editor.mode === 'edit') {
       await api.put(`/plans/${editor.planId}`, payload)
-      ElMessage.success('测试计划已更新')
+      message.success('测试计划已更新')
     } else {
       const { data } = await api.post('/plans', payload)
-      ElMessage.success('测试计划已创建')
+      message.success('测试计划已创建')
       if (!closeAfterSave) {
         promoteCreatedPlanEditor(editor, data.id)
       }
@@ -2548,7 +2775,7 @@ async function savePlanEditor(editor: PlanEditor, closeAfterSave = false) {
     }
     return true
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.detail || '测试计划保存失败')
+    message.error(error?.response?.data?.detail || '测试计划保存失败')
     return false
   }
 }
@@ -2582,7 +2809,7 @@ async function requestClosePlanEditor(editor: PlanEditor) {
     return
   }
   try {
-    await ElMessageBox.confirm('当前测试计划内容尚未保存，是否保存后关闭？', '关闭测试计划', {
+    await confirmAction('当前测试计划内容尚未保存，是否保存后关闭？', '关闭测试计划', {
       confirmButtonText: '保存并关闭',
       cancelButtonText: '不保存关闭',
       distinguishCancelAndClose: true,
@@ -2602,7 +2829,7 @@ async function closePlanEditorFromPage(editor: PlanEditor) {
 
 async function deletePlan(row: any) {
   try {
-    await ElMessageBox.confirm('确认删除该测试计划吗？', '删除测试计划', {
+    await confirmAction('确认删除该测试计划吗？', '删除测试计划', {
       confirmButtonText: '确认',
       cancelButtonText: '取消',
       type: 'warning'
@@ -2611,7 +2838,7 @@ async function deletePlan(row: any) {
     return
   }
   await api.delete(`/plans/${row.id}`)
-  ElMessage.success('测试计划已删除')
+  message.success('测试计划已删除')
   await loadPlans()
 }
 
@@ -2680,7 +2907,7 @@ async function executePlan(row: any) {
   const taskId = data.id
   const status = data.status || 'queued'
   updatePlanExecutionState(row.id, taskId, status, row)
-  ElMessage.success('执行任务已提交')
+  message.success('执行任务已提交')
   await refreshExecutionViews()
   pollPlanExecution(row.id, taskId, row)
 }
@@ -2753,16 +2980,28 @@ function formatMinute(value: string) {
   return value ? value.slice(0, 16) : ''
 }
 
-function executionStatusType(status: string) {
+function executionStatusColor(status: string) {
   if (status === 'passed') return 'success'
-  if (status === 'failed' || status === 'error') return 'danger'
+  if (status === 'failed' || status === 'error') return 'error'
   if (status === 'running') return 'warning'
-  return 'info'
+  if (status === 'queued') return 'processing'
+  return 'default'
+}
+
+function executionStatusText(status: string) {
+  const labels: Record<string, string> = {
+    queued: '排队中',
+    running: '执行中',
+    passed: '已通过',
+    failed: '失败',
+    error: '异常'
+  }
+  return labels[status] || '未执行'
 }
 
 async function openExecutionDetail(row: any) {
   if (!row.last_execution_id) {
-    ElMessage.warning('该测试计划暂无执行记录')
+    message.warning('该测试计划暂无执行记录')
     return
   }
   const { data } = await api.get(`/executions/${row.last_execution_id}`)
@@ -2774,7 +3013,7 @@ async function openExecutionDetail(row: any) {
 async function openReport(row: any) {
   const reportWindow = window.open('', '_blank')
   if (!reportWindow) {
-    ElMessage.warning('浏览器已拦截报告窗口，请允许弹窗后重试')
+    message.warning('浏览器已拦截报告窗口，请允许弹窗后重试')
     return
   }
   reportWindow.document.write('<p style="font-family: Arial, sans-serif; padding: 24px;">报告加载中...</p>')
@@ -2787,13 +3026,13 @@ async function openReport(row: any) {
     reportWindow.document.open()
     reportWindow.document.write('<h1>报告加载失败</h1><p>请确认报告存在且当前账号仍处于登录状态。</p>')
     reportWindow.document.close()
-    ElMessage.error(error?.response?.data?.detail || '报告加载失败')
+    message.error(error?.response?.data?.detail || '报告加载失败')
   }
 }
 
 async function deleteReport(row: any) {
   try {
-    await ElMessageBox.confirm('确认删除该报告吗？删除后报告中心将不再展示。', '删除报告', {
+    await confirmAction('确认删除该报告吗？删除后报告中心将不再展示。', '删除报告', {
       confirmButtonText: '确认',
       cancelButtonText: '取消',
       type: 'warning'
@@ -2802,13 +3041,13 @@ async function deleteReport(row: any) {
     return
   }
   await api.delete(`/executions/${row.id}`)
-  ElMessage.success('报告已删除')
+  message.success('报告已删除')
   await loadReports()
 }
 
 async function runCase() {
   await api.post('/executions', { ...execForm, target_type: 'case' })
-  ElMessage.success('执行任务已提交')
+  message.success('执行任务已提交')
   await loadAll()
 }
 
