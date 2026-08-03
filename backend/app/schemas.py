@@ -90,6 +90,24 @@ class EncryptionConfigIn(BaseModel):
     client_header: str = "appKey"
 
 
+class AuthConfigIn(BaseModel):
+    type: Literal["none", "bearer", "basic", "api_key", "oauth2_client_credentials"] = "none"
+    add_to: Literal["headers", "query"] = "headers"
+    header_name: str = "Authorization"
+    header_prefix: str = "Bearer"
+    token: str = ""
+    username: str = ""
+    password: str = ""
+    api_key_name: str = ""
+    api_key_value: str = ""
+    token_url: str = ""
+    client_id: str = ""
+    client_secret: str = ""
+    scope: str = ""
+    audience: str = ""
+    client_authentication: Literal["body", "basic"] = "body"
+
+
 class ApiDefinitionIn(BaseModel):
     project_id: int
     environment_id: int = 0
@@ -103,6 +121,7 @@ class ApiDefinitionIn(BaseModel):
     description: str = ""
     pre_script: str = ""
     encryption: EncryptionConfigIn | None = None
+    auth: AuthConfigIn | None = None
 
 
 class ApiDefinitionUpdate(BaseModel):
@@ -117,6 +136,13 @@ class ApiDefinitionUpdate(BaseModel):
     description: str = ""
     pre_script: str = ""
     encryption: EncryptionConfigIn | None = None
+    auth: AuthConfigIn | None = None
+
+
+class AuthTokenPreviewIn(BaseModel):
+    environment_id: int = 0
+    path: str = ""
+    auth: AuthConfigIn
 
 
 class AssertionRule(BaseModel):

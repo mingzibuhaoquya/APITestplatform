@@ -2,9 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import current_user
-from ..models import ApiDefinition, Environment, ExecutionTask, OperationLog, Project, ScenarioCase, TestCase, TestSuite, User
-from ..schemas import ApiDefinitionIn, ApiDefinitionUpdate, EnvironmentIn, EnvironmentUpdate, ProjectIn, ProjectUpdate, ScenarioCaseIn, TestCaseIn, TestCaseUpdate, TestPlanIn, TestPlanUpdate
+from ..models import ApiDefinition, Environment, ExecutionResult, ExecutionTask, OperationLog, Project, ScenarioCase, TestCase, TestSuite, User
+from ..schemas import ApiDefinitionIn, ApiDefinitionUpdate, AuthTokenPreviewIn, EnvironmentIn, EnvironmentUpdate, ProjectIn, ProjectUpdate, ScenarioCaseIn, TestCaseIn, TestCaseUpdate, TestPlanIn, TestPlanUpdate
 from ..services.crypto_envelope import normalize_config, public_config
+from ..services.executor import _initial_variables, get_oauth2_preview_token
 from ..utils import dump_json, fmt_time, parse_json
 
 
@@ -47,6 +48,7 @@ def _api_out(row: ApiDefinition, db: Session):
         "body": parse_json(row.body_json, {}),
         "pre_script": row.pre_script or "",
         "encryption": public_config(parse_json(row.encryption_config_json, {})),
+        "auth": parse_json(row.auth_config_json, {"type": "none"}),
     }
 
 
@@ -65,11 +67,12 @@ def _case_out(row: TestCase, db: Session):
     }
 
 
-def _plan_case_out(case: TestCase, db: Session):
+def _plan_case_out(case: TestCase, db: Session, status: str = ""):
     api = db.get(ApiDefinition, case.api_id)
     return {
         "id": case.id,
         "name": case.name,
+        "status": status,
         "api_id": case.api_id,
         "api_name": api.name if api else "",
         "method": api.method if api else "",
@@ -90,10 +93,19 @@ def _plan_out(row: TestSuite, db: Session):
     executor = db.get(User, last_execution.executor_id) if last_execution else None
     item_ids = [int(item) for item in parse_json(row.items_json, []) if str(item).isdigit()]
     cases = []
+    result_status_map = {}
+    fallback_case_status = row.last_status if row.last_status in {"queued", "running"} else ""
+    if row.last_execution_id:
+        results = db.query(ExecutionResult).filter(ExecutionResult.task_id == row.last_execution_id).all()
+        result_status_map = {result.case_id: result.status for result in results if result.case_id}
     if item_ids:
         rows = db.query(TestCase).filter(TestCase.id.in_(item_ids), TestCase.is_deleted.is_(False)).all()
         row_map = {item.id: item for item in rows}
-        cases = [_plan_case_out(row_map[item_id], db) for item_id in item_ids if item_id in row_map]
+        cases = [
+            _plan_case_out(row_map[item_id], db, result_status_map.get(item_id, fallback_case_status))
+            for item_id in item_ids
+            if item_id in row_map
+        ]
     api_names = list(dict.fromkeys([case["api_name"] for case in cases if case["api_name"]]))
     return {
         **_base(row),
@@ -412,11 +424,24 @@ def create_api(payload: ApiDefinitionIn, _: User = Depends(current_user), db: Se
         description=description,
         pre_script=payload.pre_script,
         encryption_config_json=dump_json(normalize_config(payload.encryption.model_dump() if payload.encryption else {})),
+        auth_config_json=dump_json(payload.auth.model_dump() if payload.auth else {"type": "none"}),
     )
     db.add(row)
     db.commit()
     db.refresh(row)
     return _api_out(row, db)
+
+
+@router.post("/apis/auth/token")
+def preview_api_auth_token(payload: AuthTokenPreviewIn, _: User = Depends(current_user), db: Session = Depends(get_db)):
+    env = db.get(Environment, payload.environment_id)
+    if not env or env.is_deleted:
+        raise HTTPException(status_code=404, detail="environment does not exist")
+    auth = payload.auth.model_dump()
+    if auth.get("type") != "oauth2_client_credentials":
+        raise HTTPException(status_code=400, detail="only OAuth2 client credentials can get token")
+    token = get_oauth2_preview_token(auth, env, payload.path or "/", _initial_variables(db, env.id))
+    return {"access_token": token}
 
 
 @router.put("/apis/{api_id}")
@@ -446,6 +471,7 @@ def update_api(api_id: int, payload: ApiDefinitionUpdate, _: User = Depends(curr
     row.pre_script = payload.pre_script
     requested_config = normalize_config(payload.encryption.model_dump() if payload.encryption else {})
     row.encryption_config_json = dump_json(requested_config)
+    row.auth_config_json = dump_json(payload.auth.model_dump() if payload.auth else {"type": "none"})
     db.commit()
     db.refresh(row)
     return _api_out(row, db)

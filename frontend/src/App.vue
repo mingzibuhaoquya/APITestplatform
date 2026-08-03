@@ -85,7 +85,10 @@
           </a-sub-menu>
         </a-menu>
       </a-drawer>
-      <a-layout>
+      <a-layout
+        class="main-layout"
+        :class="{ 'main-layout-collapsed': sidebarCollapsed, 'main-layout-mobile': isMobile }"
+      >
         <a-layout-header class="app-header">
           <div class="header-left">
             <a-button type="text" class="sidebar-trigger" @click="toggleSidebar">
@@ -478,7 +481,7 @@
               <a-select v-model:value="activeApiEditor.method" placeholder="方法" class="method-select" @change="markApiEditorDirty(activeApiEditor)">
                 <a-select-option v-for="m in methods" :key="m" :value="m">{{ m }}</a-select-option>
               </a-select>
-              <a-input v-model:value="activeApiEditor.path" placeholder="请输入接口路径 URL，例如 /users" @input="markApiEditorDirty(activeApiEditor)" />
+              <a-input v-model:value="activeApiEditor.path" placeholder="请输入接口路径 URL，例如 /users" @input="changeApiEditorPath(activeApiEditor)" />
             </div>
 
             <a-tabs v-model:active-key="activeApiEditor.activePanel" class="api-info-tabs">
@@ -516,6 +519,103 @@
                     <template #default="{ index: $index }"><a-button size="small" danger @click="removeApiEditorRow(activeApiEditor.headerRows, $index, activeApiEditor)">删除</a-button></template>
                   </a-table-column>
                 </a-table>
+              </a-tab-pane>
+
+              <a-tab-pane tab="鉴权" key="auth">
+                <div class="auth-panel">
+                  <div class="auth-sidebar">
+                    <a-form layout="vertical">
+                      <a-form-item label="鉴权类型">
+                        <a-select v-model:value="activeApiEditor.auth.type" @change="changeApiAuthType(activeApiEditor)">
+                          <a-select-option value="none">无鉴权</a-select-option>
+                          <a-select-option value="bearer">Bearer Token</a-select-option>
+                          <a-select-option value="basic">Basic 鉴权</a-select-option>
+                          <a-select-option value="api_key">API Key</a-select-option>
+                          <a-select-option value="oauth2_client_credentials">OAuth 2.0</a-select-option>
+                        </a-select>
+                      </a-form-item>
+                      <a-form-item label="鉴权数据添加到">
+                        <a-select v-model:value="activeApiEditor.auth.addTo" @change="markApiEditorDirty(activeApiEditor)">
+                          <a-select-option value="headers">请求头 Header</a-select-option>
+                          <a-select-option value="query">URL 参数</a-select-option>
+                        </a-select>
+                      </a-form-item>
+                    </a-form>
+                  </div>
+                  <div class="auth-main">
+                    <a-empty v-if="activeApiEditor.auth.type === 'none'" description="当前接口不启用鉴权" />
+                    <a-form v-else layout="vertical" class="auth-form-grid">
+                      <template v-if="activeApiEditor.auth.type === 'bearer'">
+                        <a-form-item label="请求头名称">
+                          <a-input v-model:value="activeApiEditor.auth.headerName" placeholder="Authorization" @input="markApiEditorDirty(activeApiEditor)" />
+                        </a-form-item>
+                        <a-form-item label="请求头前缀">
+                          <a-input v-model:value="activeApiEditor.auth.headerPrefix" placeholder="Bearer" @input="markApiEditorDirty(activeApiEditor)" />
+                        </a-form-item>
+                        <a-form-item label="Token" class="wide">
+                          <a-input-password v-model:value="activeApiEditor.auth.token" placeholder="${token} / token" @input="markApiEditorDirty(activeApiEditor)" />
+                        </a-form-item>
+                      </template>
+                      <template v-else-if="activeApiEditor.auth.type === 'basic'">
+                        <a-form-item label="用户名">
+                          <a-input v-model:value="activeApiEditor.auth.username" placeholder="${username}" @input="markApiEditorDirty(activeApiEditor)" />
+                        </a-form-item>
+                        <a-form-item label="密码">
+                          <a-input-password v-model:value="activeApiEditor.auth.password" placeholder="${password}" @input="markApiEditorDirty(activeApiEditor)" />
+                        </a-form-item>
+                      </template>
+                      <template v-else-if="activeApiEditor.auth.type === 'api_key'">
+                        <a-form-item label="Key">
+                          <a-input v-model:value="activeApiEditor.auth.apiKeyName" placeholder="x-api-key" @input="markApiEditorDirty(activeApiEditor)" />
+                        </a-form-item>
+                        <a-form-item label="Value">
+                          <a-input-password v-model:value="activeApiEditor.auth.apiKeyValue" placeholder="${api_key}" @input="markApiEditorDirty(activeApiEditor)" />
+                        </a-form-item>
+                      </template>
+                      <template v-else>
+                        <div class="wide auth-token-box">
+                          <h4>当前 Token</h4>
+                          <a-form-item label="Access Token">
+                            <a-input v-model:value="activeApiEditor.auth.currentToken" readonly placeholder="获取后显示 Access Token" />
+                          </a-form-item>
+                          <a-form-item label="请求头前缀">
+                            <a-input v-model:value="activeApiEditor.auth.headerPrefix" placeholder="Bearer" @input="markApiEditorDirty(activeApiEditor)" />
+                          </a-form-item>
+                        </div>
+                        <div class="wide auth-section-title">
+                          <h4>配置新 Token</h4>
+                          <a-button size="small" @click="generateApiAuthUrls(activeApiEditor, true)">一键生成 URL/Scope</a-button>
+                        </div>
+                        <a-form-item label="授权模式">
+                          <a-select value="client_credentials" disabled>
+                            <a-select-option value="client_credentials">Client Credentials</a-select-option>
+                          </a-select>
+                        </a-form-item>
+                        <a-form-item label="Access Token URL" class="wide">
+                          <a-input v-model:value="activeApiEditor.auth.tokenUrl" placeholder="环境地址 + /OAuth/Oauth/Token" @input="markApiEditorDirty(activeApiEditor)" />
+                        </a-form-item>
+                        <a-form-item label="Client ID">
+                          <a-input v-model:value="activeApiEditor.auth.clientId" placeholder="KSTAPI / ${client_id}" @input="markApiEditorDirty(activeApiEditor)" />
+                        </a-form-item>
+                        <a-form-item label="Client Secret">
+                          <a-input-password v-model:value="activeApiEditor.auth.clientSecret" placeholder="1234 / ${client_secret}" @input="markApiEditorDirty(activeApiEditor)" />
+                        </a-form-item>
+                        <a-form-item label="Scope" class="wide">
+                          <a-input v-model:value="activeApiEditor.auth.scope" placeholder="默认当前环境地址 + 接口路径" @input="markApiEditorDirty(activeApiEditor)" />
+                        </a-form-item>
+                        <a-form-item label="客户端认证方式" class="wide">
+                          <a-select v-model:value="activeApiEditor.auth.clientAuthentication" @change="markApiEditorDirty(activeApiEditor)">
+                            <a-select-option value="body">在请求体中发送 Client ID/Secret</a-select-option>
+                            <a-select-option value="basic">通过 Basic Auth 请求头发送</a-select-option>
+                          </a-select>
+                        </a-form-item>
+                        <div class="wide">
+                          <a-button type="primary" :loading="activeApiEditor.auth.loading" @click="getApiEditorAccessToken(activeApiEditor)">获取 Access Token</a-button>
+                        </div>
+                      </template>
+                    </a-form>
+                  </div>
+                </div>
               </a-tab-pane>
 
               <a-tab-pane tab="请求Body" key="body">
@@ -637,7 +737,26 @@
             </a-form-item>
             <a-form-item label="Body" class="wide">
               <a-textarea v-model:value="caseForm.bodyText" :rows="8" placeholder="请输入 JSON Body" />
+              <p class="form-help-text">可直接引用上游提取变量，例如 ${token}、${userId}，测试计划按队列顺序执行时会自动替换。</p>
             </a-form-item>
+            <div class="wide">
+              <div class="kv-title">
+                <h4>响应提取 / 参数关联</h4>
+                <a-button size="small" @click="addCaseExtractorRow">添加</a-button>
+              </div>
+              <a-table :pagination="false" :data-source="caseForm.extractorRows">
+                <a-table-column title="变量名" width="220">
+                  <template #default="{ record: row }"><a-input v-model:value="row.name" placeholder="token" /></template>
+                </a-table-column>
+                <a-table-column title="JSONPath">
+                  <template #default="{ record: row }"><a-input v-model:value="row.path" placeholder="$.data.token" /></template>
+                </a-table-column>
+                <a-table-column title="操作" width="90">
+                  <template #default="{ index: $index }"><a-button size="small" danger @click="removeCaseExtractorRow($index)">删除</a-button></template>
+                </a-table-column>
+              </a-table>
+              <p class="form-help-text">提取成功后，后续用例可在 Body 中使用 ${变量名} 引用。</p>
+            </div>
             <div class="wide">
               <div class="kv-title">
                 <h4>断言</h4>
@@ -712,17 +831,19 @@
               </div>
               <span class="plan-list-hint">点击计划名称可查看执行范围</span>
             </div>
-          <a-table :pagination="false" :data-source="planList" row-key="id" :scroll="{ x: 1220 }" class="plan-list-table">
+          <a-table :pagination="false" :data-source="planList" row-key="id" :scroll="{ x: 1360 }" class="plan-list-table">
             <template #expandedRowRender="{ record: row }">
               <div class="plan-case-expand-list">
                 <div class="plan-case-expand-head">
                   <span>用例名称</span>
                   <span>接口</span>
+                  <span>状态</span>
                   <span>操作</span>
                 </div>
                 <div v-for="caseRow in row.cases || []" :key="caseRow.id" class="plan-case-expand-row">
                   <span class="plan-case-expand-name">{{ caseRow.name || '-' }}</span>
                   <span class="plan-case-expand-api">{{ caseRow.api_name || '-' }}</span>
+                  <span><a-tag :color="executionStatusColor(caseRow.status)">{{ executionStatusText(caseRow.status) }}</a-tag></span>
                   <span class="plan-case-expand-action">
                     <a-button size="small" @click="openCaseDetailDialog(caseRow, row.environment_id, row.last_execution_id)">查看</a-button>
                   </span>
@@ -730,19 +851,19 @@
                 <a-empty v-if="!(row.cases || []).length" description="暂无用例" :image-style="{ width: '48px', height: '48px' }" />
               </div>
             </template>
-            <a-table-column data-index="name" title="计划名称" width="260" ellipsis />
-            <a-table-column data-index="project_name" title="项目" width="150" ellipsis />
-            <a-table-column data-index="environment_name" title="环境" width="160" ellipsis />
-            <a-table-column data-index="api_name" title="包含接口" width="180" ellipsis />
-            <a-table-column title="状态" width="88">
+            <a-table-column data-index="name" title="计划名称" width="280" class-name="plan-wrap-cell" />
+            <a-table-column data-index="project_name" title="项目" width="220" class-name="plan-wrap-cell" />
+            <a-table-column data-index="environment_name" title="环境" width="220" class-name="plan-wrap-cell" />
+            <a-table-column data-index="api_name" title="包含接口" width="260" class-name="plan-wrap-cell" />
+            <a-table-column title="状态" width="96" align="center">
               <template #default="{ record: row }">
                 <a-tag :color="executionStatusColor(row.last_status)">{{ executionStatusText(row.last_status) }}</a-tag>
               </template>
             </a-table-column>
-            <a-table-column title="执行时间" width="136">
+            <a-table-column title="执行时间" width="150">
               <template #default="{ record: row }">{{ formatMinute(row.last_executed_at) }}</template>
             </a-table-column>
-            <a-table-column title="操作" width="330" fixed="right">
+            <a-table-column title="操作" width="240" fixed="right">
               <template #default="{ record: row }">
                 <div class="table-actions">
                   <a-button size="small" type="primary" @click="executePlan(row)">执行</a-button>
@@ -893,6 +1014,10 @@
               <strong>请求体</strong><pre>{{ formatJson(caseDetail.request_body) }}</pre>
             </template>
             <strong>断言信息</strong><pre>{{ formatJson(caseDetail.assertions) }}</pre>
+            <strong>提取规则</strong><pre>{{ formatJson(caseDetail.extractors) }}</pre>
+            <template v-if="caseDetail.extracted_variables?.length">
+              <strong>本次提取值</strong><pre>{{ formatJson(caseDetail.extracted_variables) }}</pre>
+            </template>
             <template v-if="caseDetail.response_snapshot?.decrypted_text !== undefined">
               <strong>响应密文</strong><pre>{{ formatJson(caseDetail.response_snapshot.encrypted_json) }}</pre>
               <strong>响应解密内容</strong><pre>{{ caseDetail.response_snapshot.decrypted_text }}</pre>
@@ -912,6 +1037,16 @@
             <a-descriptions-item label="汇总">{{ formatJson(executionDetail.task.summary) }}</a-descriptions-item>
           </a-descriptions>
           <a-table :pagination="false" :data-source="executionDetail.results" size="small" class="sub">
+            <template #expandedRowRender="{ record: row }">
+              <div class="execution-result-expand">
+                <strong>参数提取结果</strong>
+                <pre>{{ formatJson(row.response_snapshot?.extracted_variables || []) }}</pre>
+                <strong>请求快照</strong>
+                <pre>{{ formatJson(row.request_snapshot) }}</pre>
+                <strong>响应快照</strong>
+                <pre>{{ formatJson(row.response_snapshot) }}</pre>
+              </div>
+            </template>
             <a-table-column data-index="case_name" title="用例名称" width="180" />
             <a-table-column data-index="api_name" title="接口" width="180" />
             <a-table-column title="状态" width="100">
@@ -1079,6 +1214,7 @@ const appTheme = {
 type AppTab = { name: string; label: string; closable: boolean }
 type KeyValueRow = { id: number; key: string; value: string }
 type CaseAssertionRow = { id: number; type: string; path: string; operator: string; expected: string }
+type CaseExtractorRow = { id: number; name: string; path: string }
 
 function confirmAction(
   content: string,
@@ -1102,6 +1238,25 @@ type ApiEncryption = {
   encryptRequest: boolean
   decryptResponse: boolean
 }
+type ApiAuth = {
+  type: 'none' | 'bearer' | 'basic' | 'api_key' | 'oauth2_client_credentials'
+  addTo: 'headers' | 'query'
+  headerName: string
+  headerPrefix: string
+  token: string
+  username: string
+  password: string
+  apiKeyName: string
+  apiKeyValue: string
+  tokenUrl: string
+  clientId: string
+  clientSecret: string
+  scope: string
+  audience: string
+  clientAuthentication: 'body' | 'basic'
+  currentToken: string
+  loading: boolean
+}
 type ApiEditor = {
   tabName: string
   label: string
@@ -1113,11 +1268,12 @@ type ApiEditor = {
   method: string
   path: string
   bodyFormat: 'json' | 'xml' | 'x-www-form-data'
-  activePanel: '' | 'query' | 'headers' | 'body' | 'pre-script' | 'encryption'
+  activePanel: '' | 'query' | 'headers' | 'auth' | 'body' | 'pre-script' | 'encryption'
   queryRows: KeyValueRow[]
   headerRows: KeyValueRow[]
   preScript: string
   encryption: ApiEncryption
+  auth: ApiAuth
   dirty: boolean
 }
 type PlanEditor = {
@@ -1229,7 +1385,16 @@ const projectForm = reactive({ name: '', description: '' })
 const editProjectForm = reactive({ id: undefined as number | undefined, name: '', description: '' })
 const envForm = reactive({ project_id: undefined as number | undefined, name: '', protocol: '', base_url: '', port: '' })
 const editEnvironmentForm = reactive({ id: undefined as number | undefined, project_id: undefined as number | undefined, name: '', protocol: '', base_url: '', port: '' })
-const caseForm = reactive({ id: undefined as number | undefined, project_id: undefined as number | undefined, api_id: undefined as number | undefined, name: '', description: '', bodyText: '{}', assertionRows: [] as CaseAssertionRow[] })
+const caseForm = reactive({
+  id: undefined as number | undefined,
+  project_id: undefined as number | undefined,
+  api_id: undefined as number | undefined,
+  name: '',
+  description: '',
+  bodyText: '{}',
+  assertionRows: [] as CaseAssertionRow[],
+  extractorRows: [] as CaseExtractorRow[]
+})
 const execForm = reactive({ project_id: undefined as number | undefined, environment_id: undefined as number | undefined, target_id: undefined as number | undefined })
 const apiEditors = reactive<Record<string, ApiEditor>>({})
 const planEditors = reactive<Record<string, PlanEditor>>({})
@@ -2114,6 +2279,7 @@ function apiNameExists(projectId: number, name: string, apiId?: number) {
 
 let apiRowId = 1
 let caseAssertionRowId = 1
+let caseExtractorRowId = 1
 const contentTypes: Record<ApiEditor['bodyFormat'], string> = {
   json: 'application/json',
   xml: 'application/xml',
@@ -2126,6 +2292,10 @@ function nextApiRow(key = '', value = ''): KeyValueRow {
 
 function nextCaseAssertionRow(type = 'status_code', path = '', operator = '==', expected = ''): CaseAssertionRow {
   return { id: caseAssertionRowId++, type, path, operator, expected }
+}
+
+function nextCaseExtractorRow(name = '', path = ''): CaseExtractorRow {
+  return { id: caseExtractorRowId++, name, path }
 }
 
 function defaultHeaderRows() {
@@ -2182,9 +2352,32 @@ function createEmptyApiEditor(): ApiEditor {
       encryptRequest: false,
       decryptResponse: false,
     },
+    auth: defaultApiAuth(),
     dirty: false
   }
   return editor
+}
+
+function defaultApiAuth(): ApiAuth {
+  return {
+    type: 'none',
+    addTo: 'headers',
+    headerName: 'Authorization',
+    headerPrefix: 'Bearer',
+    token: '',
+    username: '',
+    password: '',
+    apiKeyName: '',
+    apiKeyValue: '',
+    tokenUrl: '',
+    clientId: '',
+    clientSecret: '',
+    scope: '',
+    audience: '',
+    clientAuthentication: 'body',
+    currentToken: '',
+    loading: false,
+  }
 }
 
 function encryptionFromApi(row: any): ApiEncryption {
@@ -2195,6 +2388,28 @@ function encryptionFromApi(row: any): ApiEncryption {
     mode: enabled ? 'rsa_aes_sm3' : 'none',
     encryptRequest: Boolean(encryption.encrypt_request),
     decryptResponse: Boolean(encryption.decrypt_response),
+  }
+}
+
+function authFromApi(row: any): ApiAuth {
+  const auth = row.auth || {}
+  return {
+    ...defaultApiAuth(),
+    type: auth.type || 'none',
+    addTo: auth.add_to || 'headers',
+    headerName: auth.header_name || 'Authorization',
+    headerPrefix: auth.header_prefix || 'Bearer',
+    token: auth.token || '',
+    username: auth.username || '',
+    password: auth.password || '',
+    apiKeyName: auth.api_key_name || '',
+    apiKeyValue: auth.api_key_value || '',
+    tokenUrl: auth.token_url || '',
+    clientId: auth.client_id || '',
+    clientSecret: auth.client_secret || '',
+    scope: auth.scope || '',
+    audience: auth.audience || '',
+    clientAuthentication: auth.client_authentication || 'body',
   }
 }
 
@@ -2216,6 +2431,7 @@ function createEditApiEditor(row: any): ApiEditor {
     headerRows: mergeDefaultHeaders(savedHeaderRows),
     preScript: row.pre_script || '',
     encryption: encryptionFromApi(row),
+    auth: authFromApi(row),
     dirty: false
   }
   syncApiEditorContentType(editor, false)
@@ -2242,6 +2458,86 @@ function markApiEditorDirty(editor: ApiEditor) {
 }
 
 function changeApiEditorProject(editor: ApiEditor) {
+  applyApiAuthDefaults(editor)
+  markApiEditorDirty(editor)
+}
+
+function apiEditorEnvironment(editor: ApiEditor) {
+  return environments.value.find(item => item.project_id === editor.project_id)
+}
+
+function environmentBaseUrl(environment: any) {
+  if (!environment) return ''
+  const baseUrl = String(environment.base_url || '').trim().replace(/\/+$/, '')
+  const protocol = environment.protocol || 'http'
+  const defaultPort = protocol === 'http' ? 80 : 443
+  const port = environment.port && Number(environment.port) !== defaultPort ? `:${environment.port}` : ''
+  return /^https?:\/\//i.test(baseUrl) ? baseUrl : `${protocol}://${baseUrl.replace(/^\/+/, '')}${port}`
+}
+
+function joinUrl(root: string, path: string) {
+  if (!root) return ''
+  if (/^https?:\/\//i.test(String(path || '').trim())) {
+    return String(path || '').trim()
+  }
+  return `${root.replace(/\/+$/, '')}/${String(path || '').replace(/^\/+/, '')}`
+}
+
+function urlOrigin(url: string) {
+  try {
+    return new URL(url).origin
+  } catch {
+    return ''
+  }
+}
+
+function apiEditorAuthRoot(editor: ApiEditor) {
+  const path = editor.path.trim()
+  if (/^https?:\/\//i.test(path)) {
+    return urlOrigin(path)
+  }
+  return environmentBaseUrl(apiEditorEnvironment(editor))
+}
+
+function apiEditorScopeUrl(editor: ApiEditor) {
+  const path = editor.path.trim()
+  if (!path) return ''
+  if (/^https?:\/\//i.test(path)) {
+    return path
+  }
+  return joinUrl(environmentBaseUrl(apiEditorEnvironment(editor)), path)
+}
+
+function generateApiAuthUrls(editor: ApiEditor, force = false, dirty = true) {
+  if (editor.auth.type !== 'oauth2_client_credentials') return
+  const root = apiEditorAuthRoot(editor)
+  const scope = apiEditorScopeUrl(editor)
+  let changed = false
+  if ((force || !editor.auth.tokenUrl) && root) {
+    editor.auth.tokenUrl = joinUrl(root, '/OAuth/Oauth/Token')
+    changed = true
+  }
+  if ((force || !editor.auth.scope) && scope) {
+    editor.auth.scope = scope
+    changed = true
+  }
+  if (dirty && changed) {
+    markApiEditorDirty(editor)
+  }
+}
+
+function applyApiAuthDefaults(editor: ApiEditor) {
+  if (editor.auth.type !== 'oauth2_client_credentials') return
+  generateApiAuthUrls(editor, false, false)
+}
+
+function changeApiAuthType(editor: ApiEditor) {
+  applyApiAuthDefaults(editor)
+  markApiEditorDirty(editor)
+}
+
+function changeApiEditorPath(editor: ApiEditor) {
+  applyApiAuthDefaults(editor)
   markApiEditorDirty(editor)
 }
 
@@ -2283,7 +2579,32 @@ function rowsToObject(rows: KeyValueRow[]) {
   }, {})
 }
 
+function upsertApiEditorHeader(editor: ApiEditor, key: string, value: string) {
+  const headerKey = key.trim()
+  if (!headerKey) return
+  const row = editor.headerRows.find(item => item.key.trim().toLowerCase() === headerKey.toLowerCase())
+  if (row) {
+    row.value = value
+  } else {
+    editor.headerRows.push(nextApiRow(headerKey, value))
+  }
+  markApiEditorDirty(editor)
+}
+
+function upsertApiEditorQuery(editor: ApiEditor, key: string, value: string) {
+  const queryKey = key.trim()
+  if (!queryKey) return
+  const row = editor.queryRows.find(item => item.key.trim() === queryKey)
+  if (row) {
+    row.value = value
+  } else {
+    editor.queryRows.push(nextApiRow(queryKey, value))
+  }
+  markApiEditorDirty(editor)
+}
+
 function apiPayload(editor: ApiEditor) {
+  applyApiAuthDefaults(editor)
   const headers = rowsToObject(editor.headerRows)
   return {
     project_id: editor.project_id,
@@ -2300,7 +2621,66 @@ function apiPayload(editor: ApiEditor) {
       encrypt_request: editor.encryption.enabled && editor.encryption.encryptRequest,
       decrypt_response: editor.encryption.enabled && editor.encryption.decryptResponse,
       client_header: 'appKey'
+    },
+    auth: {
+      type: editor.auth.type,
+      add_to: editor.auth.addTo,
+      header_name: editor.auth.headerName || 'Authorization',
+      header_prefix: editor.auth.headerPrefix || 'Bearer',
+      token: editor.auth.token,
+      username: editor.auth.username,
+      password: editor.auth.password,
+      api_key_name: editor.auth.apiKeyName,
+      api_key_value: editor.auth.apiKeyValue,
+      token_url: editor.auth.tokenUrl,
+      client_id: editor.auth.clientId,
+      client_secret: editor.auth.clientSecret,
+      scope: editor.auth.scope,
+      audience: editor.auth.audience,
+      client_authentication: editor.auth.clientAuthentication
     }
+  }
+}
+
+async function getApiEditorAccessToken(editor: ApiEditor) {
+  applyApiAuthDefaults(editor)
+  const environment = apiEditorEnvironment(editor)
+  if (!environment?.id) {
+    message.warning('请先选择存在环境配置的项目')
+    return
+  }
+  if (!editor.auth.tokenUrl) {
+    message.warning('请输入 Access Token URL')
+    return
+  }
+  if (!editor.auth.clientId) {
+    message.warning('请输入 Client ID')
+    return
+  }
+  editor.auth.loading = true
+  try {
+    const { data } = await api.post('/apis/auth/token', {
+      environment_id: environment.id,
+      path: editor.path.trim() || '/',
+      auth: apiPayload(editor).auth
+    })
+    editor.auth.currentToken = data.access_token || ''
+    if (editor.auth.currentToken) {
+      const headerName = editor.auth.headerName || 'Authorization'
+      const headerPrefix = editor.auth.headerPrefix || 'Bearer'
+      if (editor.auth.addTo === 'query') {
+        upsertApiEditorQuery(editor, 'access_token', editor.auth.currentToken)
+        editor.activePanel = 'query'
+      } else {
+        upsertApiEditorHeader(editor, headerName, `${headerPrefix} ${editor.auth.currentToken}`.trim())
+        editor.activePanel = 'headers'
+      }
+    }
+    message.success('Access Token 获取成功')
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || 'Access Token 获取失败')
+  } finally {
+    editor.auth.loading = false
   }
 }
 
@@ -2427,6 +2807,7 @@ function resetCaseForm() {
   caseForm.description = ''
   caseForm.bodyText = '{}'
   caseForm.assertionRows = []
+  caseForm.extractorRows = []
 }
 
 function openCreateCasePage() {
@@ -2442,7 +2823,8 @@ function openEditCasePage(row: any) {
   caseForm.description = row.tags || ''
   caseForm.bodyText = JSON.stringify(row.request_body ?? {}, null, 2)
   caseForm.assertionRows = caseAssertionsToRows(row.assertions)
-  openRuntimeTab({ name: `case-edit-${row.id}`, label: `编辑用例-${row.id}`, closable: true })
+  caseForm.extractorRows = caseExtractorsToRows(row.extractors)
+  openRuntimeTab({ name: `case-edit-${row.id}`, label: '编辑用例', closable: true })
 }
 
 function closeCaseEditorPage() {
@@ -2467,6 +2849,13 @@ function caseAssertionsToRows(assertions: any[]): CaseAssertionRow[] {
   ))
 }
 
+function caseExtractorsToRows(extractors: any[]): CaseExtractorRow[] {
+  if (!Array.isArray(extractors)) {
+    return []
+  }
+  return extractors.map(item => nextCaseExtractorRow(item?.name || '', item?.path || ''))
+}
+
 function caseAssertionRowsToPayload() {
   return caseForm.assertionRows
     .filter(row => row.type)
@@ -2476,6 +2865,12 @@ function caseAssertionRowsToPayload() {
       operator: row.operator.trim() || '==',
       expected: parseAssertionExpected(row.expected)
     }))
+}
+
+function caseExtractorRowsToPayload() {
+  return caseForm.extractorRows
+    .map(row => ({ name: row.name.trim(), path: row.path.trim() }))
+    .filter(row => row.name && row.path)
 }
 
 function parseAssertionExpected(value: string) {
@@ -2496,6 +2891,14 @@ function addCaseAssertionRow() {
 
 function removeCaseAssertionRow(index: number) {
   caseForm.assertionRows.splice(index, 1)
+}
+
+function addCaseExtractorRow() {
+  caseForm.extractorRows.push(nextCaseExtractorRow())
+}
+
+function removeCaseExtractorRow(index: number) {
+  caseForm.extractorRows.splice(index, 1)
 }
 
 function validateCaseForm() {
@@ -2525,7 +2928,7 @@ function validateCaseForm() {
     request_query: {},
     request_body: requestBody,
     assertions: caseAssertionRowsToPayload(),
-    extractors: [],
+    extractors: caseExtractorRowsToPayload(),
     tags: caseForm.description.trim(),
   }
 }
@@ -2967,6 +3370,8 @@ async function openCaseDetailDialog(row: any, environmentId?: number, executionI
     request_body: requestSnapshot.body ?? row.request_body ?? {},
     request_body_original: requestSnapshot.body_original,
     assertions: row.assertions || [],
+    extractors: row.extractors || [],
+    extracted_variables: responseSnapshot.extracted_variables || [],
     response_snapshot: responseSnapshot
   })
   caseDetailDialogVisible.value = true

@@ -1,4 +1,5 @@
 from datetime import datetime
+import base64
 import time
 from urllib.parse import urljoin, urlparse
 from uuid import uuid4
@@ -73,9 +74,10 @@ def _execute(db: Session, task: ExecutionTask) -> list[ExecutionResult]:
         scenario = db.get(ScenarioCase, task.target_id)
         case_ids = parse_json(scenario.steps_json if scenario else "[]", [])
     variables = _initial_variables(db, task.environment_id)
+    auth_token_cache: dict[str, str] = {}
     rows: list[ExecutionResult] = []
     for case_id in case_ids:
-        row = _execute_case(db, task, int(case_id), variables)
+        row = _execute_case(db, task, int(case_id), variables, auth_token_cache)
         rows.append(row)
         if row.status != "passed" and task.target_type == "scenario":
             scenario = db.get(ScenarioCase, task.target_id)
@@ -127,7 +129,7 @@ def _build_request_url(env: Environment, path: str) -> str:
     return urljoin(root.rstrip("/") + "/", path.lstrip("/"))
 
 
-def _execute_case(db: Session, task: ExecutionTask, case_id: int, variables: dict) -> ExecutionResult:
+def _execute_case(db: Session, task: ExecutionTask, case_id: int, variables: dict, auth_token_cache: dict[str, str] | None = None) -> ExecutionResult:
     case = db.get(TestCase, case_id)
     env = db.get(Environment, task.environment_id)
     api = db.get(ApiDefinition, case.api_id) if case else None
@@ -156,6 +158,29 @@ def _execute_case(db: Session, task: ExecutionTask, case_id: int, variables: dic
     rendered_headers = render_variables(headers, variables)
     rendered_query = render_variables(query, variables)
     rendered_body = render_variables(body, variables)
+    auth_config = parse_json(api.auth_config_json, {"type": "none"})
+    try:
+        _apply_auth_config(
+            auth_config,
+            env,
+            api.path,
+            rendered_headers,
+            rendered_query,
+            variables,
+            auth_token_cache if auth_token_cache is not None else {},
+        )
+    except Exception as exc:
+        return _save_result(
+            db,
+            task.id,
+            case_id,
+            "error",
+            {"method": api.method, "url": render_variables(url, variables), "headers": rendered_headers, "query": rendered_query, "auth_error": str(exc)},
+            {},
+            [],
+            0,
+            f"Authorization failed: {exc}",
+        )
     encryption = normalize_config(parse_json(api.encryption_config_json, {}))
     sent_body = rendered_body
     try:
@@ -209,7 +234,7 @@ def _execute_case(db: Session, task: ExecutionTask, case_id: int, variables: dic
             response_snapshot["decrypted_json"] = decrypted_json
             response_snapshot["json"] = decrypted_json
         assertion_results = run_assertions(response_snapshot, parse_json(case.assertions_json, []))
-        _extract_variables(variables, response_snapshot, parse_json(case.extractors_json, []))
+        response_snapshot["extracted_variables"] = _extract_variables(variables, response_snapshot, parse_json(case.extractors_json, []))
         status = "passed" if all_passed(assertion_results) else "failed"
         return _save_result(db, task.id, case_id, status, request_snapshot, response_snapshot, assertion_results, duration_ms, "")
     except Exception as exc:
@@ -217,12 +242,19 @@ def _execute_case(db: Session, task: ExecutionTask, case_id: int, variables: dic
         return _save_result(db, task.id, case_id, "error", request_snapshot, {}, [], duration_ms, str(exc))
 
 
-def _extract_variables(variables: dict, response_snapshot: dict, extractors: list[dict]) -> None:
+def _extract_variables(variables: dict, response_snapshot: dict, extractors: list[dict]) -> list[dict]:
     body = response_snapshot.get("json") or response_snapshot.get("text")
+    results = []
     for item in extractors:
-        values = find_jsonpath(body, item.get("path", ""))
-        if values:
-            variables[item["name"]] = values[0]
+        name = str(item.get("name") or "").strip()
+        path = str(item.get("path") or "").strip()
+        values = find_jsonpath(body, path)
+        success = bool(name and path and values)
+        value = values[0] if success else None
+        if success:
+            variables[name] = value
+        results.append({"name": name, "path": path, "value": value, "success": success})
+    return results
 
 
 def _save_result(
@@ -250,3 +282,100 @@ def _save_result(
     db.commit()
     db.refresh(row)
     return row
+
+
+def _auth_header_exists(headers: dict, header_name: str) -> bool:
+    return any(str(key).lower() == header_name.lower() for key in headers)
+
+
+def _default_token_url(env: Environment) -> str:
+    return urljoin(_build_request_url(env, "/").rstrip("/") + "/", "OAuth/Oauth/Token")
+
+
+def _token_cache_key(auth: dict, env: Environment, variables: dict) -> str:
+    key_data = {
+        "token_url": render_variables(auth.get("token_url") or _default_token_url(env), variables),
+        "client_id": render_variables(auth.get("client_id", ""), variables),
+        "scope": render_variables(auth.get("scope", ""), variables),
+        "audience": render_variables(auth.get("audience", ""), variables),
+        "client_authentication": auth.get("client_authentication", "body"),
+    }
+    return dump_json(key_data)
+
+
+def _request_oauth2_client_credentials_token(auth: dict, env: Environment, request_url: str, variables: dict) -> str:
+    token_url = render_variables(auth.get("token_url") or _default_token_url(env), variables)
+    client_id = render_variables(auth.get("client_id", ""), variables)
+    client_secret = render_variables(auth.get("client_secret", ""), variables)
+    scope = render_variables(auth.get("scope") or request_url, variables)
+    audience = render_variables(auth.get("audience", ""), variables)
+    if not token_url:
+        raise ValueError("OAuth2 token URL is required")
+    if not client_id:
+        raise ValueError("OAuth2 client ID is required")
+    data = {
+        "grant_type": "client_credentials",
+        "scope": scope,
+    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    auth_param = None
+    if auth.get("client_authentication") == "basic":
+        auth_param = (client_id, client_secret)
+    else:
+        data["client_id"] = client_id
+        data["client_secret"] = client_secret
+    if audience:
+        data["audience"] = audience
+    with httpx.Client(timeout=30) as client:
+        response = client.post(token_url, data=data, headers=headers, auth=auth_param)
+    if response.status_code >= 400:
+        raise ValueError(f"OAuth2 token request failed with status {response.status_code}")
+    payload = response_json_or_text(response.text)
+    if not isinstance(payload, dict) or not payload.get("access_token"):
+        raise ValueError("OAuth2 token response does not contain access_token")
+    return str(payload["access_token"])
+
+
+def _apply_auth_config(auth: dict, env: Environment, path: str, headers: dict, query: dict, variables: dict, token_cache: dict[str, str]) -> None:
+    auth_type = auth.get("type", "none")
+    if auth_type in ("", "none"):
+        return
+    header_name = str(auth.get("header_name") or "Authorization")
+    header_prefix = str(auth.get("header_prefix") or "Bearer").strip()
+    if auth_type == "bearer":
+        token = render_variables(auth.get("token", ""), variables)
+        if token and not _auth_header_exists(headers, header_name):
+            headers[header_name] = f"{header_prefix} {token}".strip()
+        return
+    if auth_type == "basic":
+        username = render_variables(auth.get("username", ""), variables)
+        password = render_variables(auth.get("password", ""), variables)
+        raw = f"{username}:{password}".encode("utf-8")
+        if not _auth_header_exists(headers, header_name):
+            headers[header_name] = "Basic " + base64.b64encode(raw).decode("ascii")
+        return
+    if auth_type == "api_key":
+        key = str(auth.get("api_key_name") or "").strip()
+        value = render_variables(auth.get("api_key_value", ""), variables)
+        if key and value:
+            if auth.get("add_to") == "query":
+                query.setdefault(key, value)
+            elif not _auth_header_exists(headers, key):
+                headers[key] = value
+        return
+    if auth_type == "oauth2_client_credentials":
+        request_url = render_variables(_build_request_url(env, path), variables)
+        cache_key = _token_cache_key(auth, env, variables)
+        token = token_cache.get(cache_key)
+        if not token:
+            token = _request_oauth2_client_credentials_token(auth, env, request_url, variables)
+            token_cache[cache_key] = token
+        if auth.get("add_to") == "query":
+            query.setdefault("access_token", token)
+        elif not _auth_header_exists(headers, header_name):
+            headers[header_name] = f"{header_prefix} {token}".strip()
+
+
+def get_oauth2_preview_token(auth: dict, env: Environment, path: str, variables: dict) -> str:
+    request_url = render_variables(_build_request_url(env, path), variables)
+    return _request_oauth2_client_credentials_token(auth, env, request_url, variables)

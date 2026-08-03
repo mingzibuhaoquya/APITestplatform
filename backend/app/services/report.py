@@ -60,6 +60,33 @@ def _assertions_html(assertions: list[dict]) -> str:
     return "".join(rows)
 
 
+def _extractors_html(extractors: list[dict]) -> str:
+    if not extractors:
+        return ""
+    rows = []
+    for item in extractors:
+        success = bool(item.get("success"))
+        status_class = "passed" if success else "failed"
+        status_text = "成功" if success else "未提取"
+        value = item.get("value")
+        detail = "" if value is None else _json_text(value)
+        rows.append(
+            f"""
+            <li class="{status_class}">
+              <span>{escape(str(item.get("name") or "-"))}</span>
+              <small>{escape(str(item.get("path") or ""))}</small>
+              <strong>{escape(status_text)} {escape(str(detail))}</strong>
+            </li>
+            """
+        )
+    return f"""
+      <section>
+        <h3>参数提取结果</h3>
+        <ul class="assertions">{''.join(rows)}</ul>
+      </section>
+    """
+
+
 def _snapshot(title: str, value: Any, copy_id: str) -> str:
     return f"""
       <section class="snapshot">
@@ -84,6 +111,7 @@ def build_html_report(task: Any, results: list[Any], target_name: str = "") -> s
         row_status_class = _status_class(result.status)
         method = result.request_snapshot.get("method", "-") if isinstance(result.request_snapshot, dict) else "-"
         url = result.request_snapshot.get("url", "-") if isinstance(result.request_snapshot, dict) else "-"
+        extracted_variables = result.response_snapshot.get("extracted_variables", []) if isinstance(result.response_snapshot, dict) else []
         case_name = getattr(result, "case_name", "") or f"用例 {result.case_id or '-'}"
         api_name = getattr(result, "api_name", "") or "-"
         rows.append(
@@ -105,6 +133,7 @@ def build_html_report(task: Any, results: list[Any], target_name: str = "") -> s
                   <h3>断言明细</h3>
                   <ul class="assertions">{_assertions_html(result.assertion_results)}</ul>
                 </section>
+                {_extractors_html(extracted_variables)}
                 {_snapshot("请求快照", result.request_snapshot, f"request-{index}")}
                 {_snapshot("响应快照", result.response_snapshot, f"response-{index}")}
               </div>

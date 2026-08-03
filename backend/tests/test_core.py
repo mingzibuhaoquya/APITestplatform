@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
-from app.models import Environment, ExecutionTask, Project, TestCase as TestCaseModel, TestSuite, User
+from app.models import Environment, ExecutionResult, ExecutionTask, Project, TestCase as TestCaseModel, TestSuite, User
 from app.routers.auth import change_password, login
 from app.routers.crud import create_api, create_case, create_environment, create_plan, create_project, delete_api, delete_case, delete_environment, delete_plan, delete_project, execute_plan, list_apis, list_cases, list_environments, list_plans, list_projects, update_api, update_case, update_environment, update_plan, update_project
 from app.routers.executions import delete_execution, list_executions
@@ -16,7 +16,8 @@ from app.routers.mock import router as mock_router
 from app.routers.users import create_user, list_users, router as users_router, update_user, update_user_status
 from app.schemas import ApiDefinitionIn, ApiDefinitionUpdate, ChangePasswordIn, EnvironmentIn, EnvironmentUpdate, LoginIn, ProjectIn, ProjectUpdate, TestCaseIn, TestCaseUpdate, TestPlanIn, TestPlanUpdate, UserCreate, UserStatusUpdate, UserUpdate
 from app.services.assertions import all_passed, run_assertions
-from app.services.executor import _build_request_url, _initial_variables
+from app.services import executor as executor_service
+from app.services.executor import _apply_auth_config, _build_request_url, _execute, _initial_variables
 from app.services.jsonpath import find_jsonpath
 from app.services.pre_scripts import PreScriptError, run_pre_script
 from app.services import crypto_envelope
@@ -671,6 +672,7 @@ def test_create_api_validates_required_project_name_path_and_duplicate_name(db_s
     assert created["body"] == {"x": 1}
     assert created["description"] == "login api"
     assert created["pre_script"] == "pm.environment.set('requestId', Date.now());"
+    assert created["auth"]["type"] == "none"
 
     with pytest.raises(HTTPException) as project_error:
         create_api(ApiDefinitionIn(project_id=99999, environment_id=environment["id"], name="missing", method="GET", path="/missing"), admin, db)
@@ -716,6 +718,13 @@ def test_update_api_and_reject_duplicate_name(db_session):
             body={"format": "json"},
             description="new description",
             pre_script="pm.environment.set('signature', CryptoJS.MD5('payload').toString());",
+            auth={
+                "type": "bearer",
+                "add_to": "headers",
+                "header_name": "Authorization",
+                "header_prefix": "Bearer",
+                "token": "${api_token}",
+            },
         ),
         admin,
         db,
@@ -732,6 +741,8 @@ def test_update_api_and_reject_duplicate_name(db_session):
     assert updated["body"] == {"format": "json"}
     assert updated["description"] == "new description"
     assert updated["pre_script"] == "pm.environment.set('signature', CryptoJS.MD5('payload').toString());"
+    assert updated["auth"]["type"] == "bearer"
+    assert updated["auth"]["token"] == "${api_token}"
 
     with pytest.raises(HTTPException) as duplicate_error:
         update_api(first["id"], ApiDefinitionUpdate(project_id=second_project["id"], environment_id=second_environment["id"], name="duplicate_api", method="GET", path="/dup2"), admin, db)
@@ -739,6 +750,78 @@ def test_update_api_and_reject_duplicate_name(db_session):
 
     historical_update = update_api(first["id"], ApiDefinitionUpdate(project_id=first_project["id"], environment_id=second_environment["id"], name="historical_env_update", method="GET", path="/historical-env"), admin, db)
     assert historical_update["environment_id"] == second_environment["id"]
+
+
+def test_auth_config_injects_headers_and_query(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="api_auth_project", description="api auth"), admin, db)
+    environment = create_test_environment(project["id"], admin, db)
+    env = db.get(Environment, environment["id"])
+
+    headers = {}
+    query = {}
+    _apply_auth_config(
+        {"type": "bearer", "header_name": "Authorization", "header_prefix": "Bearer", "token": "${token}"},
+        env,
+        "/users",
+        headers,
+        query,
+        {"token": "abc"},
+        {},
+    )
+    assert headers["Authorization"] == "Bearer abc"
+
+    headers = {"Authorization": "Bearer case-token"}
+    _apply_auth_config(
+        {"type": "bearer", "header_name": "Authorization", "header_prefix": "Bearer", "token": "api-token"},
+        env,
+        "/users",
+        headers,
+        {},
+        {},
+        {},
+    )
+    assert headers["Authorization"] == "Bearer case-token"
+
+    query = {}
+    _apply_auth_config(
+        {"type": "api_key", "add_to": "query", "api_key_name": "appId", "api_key_value": "${app_id}"},
+        env,
+        "/users",
+        {},
+        query,
+        {"app_id": "1001"},
+        {},
+    )
+    assert query["appId"] == "1001"
+
+
+def test_oauth2_auth_config_can_add_token_to_query(db_session, monkeypatch):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="oauth_query_project", description="api auth"), admin, db)
+    environment = create_test_environment(project["id"], admin, db)
+    env = db.get(Environment, environment["id"])
+    monkeypatch.setattr(executor_service, "_request_oauth2_client_credentials_token", lambda *args, **kwargs: "oauth-token")
+
+    headers = {}
+    query = {}
+    _apply_auth_config(
+        {
+            "type": "oauth2_client_credentials",
+            "add_to": "query",
+            "token_url": "http://example.test/OAuth/Oauth/Token",
+            "client_id": "client",
+            "client_secret": "secret",
+        },
+        env,
+        "/users",
+        headers,
+        query,
+        {},
+        {},
+    )
+    assert query["access_token"] == "oauth-token"
+    assert "Authorization" not in headers
 
 
 def test_delete_api_removes_unreferenced_and_rejects_referenced(db_session):
@@ -782,6 +865,7 @@ def test_create_and_filter_cases_by_project_and_api(db_session):
             api_id=first_api["id"],
             name="first_case",
             request_body={"username": "tester"},
+            extractors=[{"name": "token", "path": "$.data.token"}],
         ),
         admin,
         db,
@@ -801,6 +885,7 @@ def test_create_and_filter_cases_by_project_and_api(db_session):
     assert created["project_name"] == "case_project_first"
     assert created["api_name"] == "case_api_first"
     assert created["request_body"] == {"username": "tester"}
+    assert created["extractors"] == [{"name": "token", "path": "$.data.token"}]
     assert "priority" not in created
     assert "status" not in created
     assert created["is_deleted"] is False
@@ -847,6 +932,7 @@ def test_update_and_logically_delete_case(db_session):
             name="updated_case",
             request_body={"updated": True},
             assertions=[{"type": "jsonpath_equal", "path": "$.code", "operator": "==", "expected": 0}],
+            extractors=[{"name": "userId", "path": "$.data.userId"}],
             tags="updated description",
         ),
         admin,
@@ -859,6 +945,7 @@ def test_update_and_logically_delete_case(db_session):
     assert updated["name"] == "updated_case"
     assert updated["request_body"] == {"updated": True}
     assert updated["assertions"] == [{"type": "jsonpath_equal", "path": "$.code", "operator": "==", "expected": 0}]
+    assert updated["extractors"] == [{"name": "userId", "path": "$.data.userId"}]
     assert updated["tags"] == "updated description"
     assert "priority" not in updated
     assert "status" not in updated
@@ -921,7 +1008,30 @@ def test_plan_crud_paginates_searches_and_validates_relations(db_session):
     assert created["api_name"] == "plan_api"
     assert created["items"] == [first_case["id"], second_case["id"]]
     assert [item["name"] for item in created["cases"]] == ["first_plan_case", "second_plan_case"]
+    assert [item["status"] for item in created["cases"]] == ["", ""]
     assert created["creator_name"] == "Admin"
+
+    execution_task = ExecutionTask(
+        executor_id=admin.id,
+        project_id=project["id"],
+        environment_id=environment["id"],
+        target_type="plan",
+        target_id=created["id"],
+        status="failed",
+    )
+    db.add(execution_task)
+    db.commit()
+    db.refresh(execution_task)
+    db.add_all([
+        ExecutionResult(task_id=execution_task.id, case_id=first_case["id"], status="passed"),
+        ExecutionResult(task_id=execution_task.id, case_id=second_case["id"], status="failed"),
+    ])
+    stored_created_plan = db.get(TestSuite, created["id"])
+    stored_created_plan.last_execution_id = execution_task.id
+    stored_created_plan.last_status = "failed"
+    db.commit()
+    reloaded_created = list_plans(project_id=project["id"], name="daily", page=1, page_size=10, _=admin, db=db)["items"][0]
+    assert [item["status"] for item in reloaded_created["cases"]] == ["passed", "failed"]
 
     with pytest.raises(HTTPException) as duplicate_error:
         create_plan(TestPlanIn(project_id=project["id"], environment_id=environment["id"], api_id=api_row["id"], name="daily plan", items=[first_case["id"]]), admin, db)
@@ -992,6 +1102,119 @@ def test_execute_plan_creates_task_and_executor_syncs_status(db_session):
     assert stored_task.target_id == plan["id"]
     assert stored_plan.last_execution_id == task["id"]
     assert stored_plan.last_status == "queued"
+
+
+def test_execute_plan_passes_extracted_variables_to_later_case_body(db_session, monkeypatch):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="dependency_project", description="dependency project"), admin, db)
+    environment = create_test_environment(project["id"], admin, db)
+    login_api = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="login_api", method="POST", path="/login"), admin, db)
+    submit_api = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="submit_api", method="POST", path="/submit"), admin, db)
+    login_case = create_case(
+        TestCaseIn(
+            project_id=project["id"],
+            api_id=login_api["id"],
+            name="login_case",
+            extractors=[
+                {"name": "token", "path": "$.data.token"},
+                {"name": "missingValue", "path": "$.data.missing"},
+            ],
+        ),
+        admin,
+        db,
+    )
+    submit_case = create_case(
+        TestCaseIn(
+            project_id=project["id"],
+            api_id=submit_api["id"],
+            name="submit_case",
+            request_body={"authorization": "Bearer ${token}"},
+        ),
+        admin,
+        db,
+    )
+    plan = create_plan(TestPlanIn(project_id=project["id"], environment_id=environment["id"], api_id=login_api["id"], name="dependency plan", items=[login_case["id"], submit_case["id"]]), admin, db)
+    task = ExecutionTask(executor_id=admin.id, project_id=project["id"], environment_id=environment["id"], target_type="plan", target_id=plan["id"], status="running")
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    requests = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def request(self, method, url, headers=None, params=None, json=None):
+            requests.append({"method": method, "url": url, "json": json})
+            if url.endswith("/login"):
+                return executor_service.httpx.Response(200, json={"code": 0, "data": {"token": "abc123"}})
+            return executor_service.httpx.Response(200, json={"code": 0, "ok": True})
+
+    monkeypatch.setattr(executor_service.httpx, "Client", FakeClient)
+
+    rows = _execute(db, task)
+    first_response = executor_service.parse_json(rows[0].response_snapshot_json, {})
+    second_request = executor_service.parse_json(rows[1].request_snapshot_json, {})
+
+    assert len(rows) == 2
+    assert requests[1]["json"] == {"authorization": "Bearer abc123"}
+    assert second_request["body"] == {"authorization": "Bearer abc123"}
+    assert first_response["extracted_variables"] == [
+        {"name": "token", "path": "$.data.token", "value": "abc123", "success": True},
+        {"name": "missingValue", "path": "$.data.missing", "value": None, "success": False},
+    ]
+
+
+def test_execute_plan_uses_latest_upstream_value_for_duplicate_variable_names(db_session, monkeypatch):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="dependency_duplicate_project", description="dependency project"), admin, db)
+    environment = create_test_environment(project["id"], admin, db)
+    first_api = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="first_token_api", method="POST", path="/first-token"), admin, db)
+    second_api = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="second_token_api", method="POST", path="/second-token"), admin, db)
+    submit_api = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="duplicate_submit_api", method="POST", path="/submit"), admin, db)
+    first_case = create_case(TestCaseIn(project_id=project["id"], api_id=first_api["id"], name="first_token_case", extractors=[{"name": "token", "path": "$.data.token"}]), admin, db)
+    second_case = create_case(TestCaseIn(project_id=project["id"], api_id=second_api["id"], name="second_token_case", extractors=[{"name": "token", "path": "$.data.token"}]), admin, db)
+    submit_case = create_case(TestCaseIn(project_id=project["id"], api_id=submit_api["id"], name="duplicate_submit_case", request_body={"token": "${token}"}), admin, db)
+    plan = create_plan(
+        TestPlanIn(project_id=project["id"], environment_id=environment["id"], api_id=first_api["id"], name="duplicate dependency plan", items=[first_case["id"], second_case["id"], submit_case["id"]]),
+        admin,
+        db,
+    )
+    task = ExecutionTask(executor_id=admin.id, project_id=project["id"], environment_id=environment["id"], target_type="plan", target_id=plan["id"], status="running")
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    requests = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def request(self, method, url, headers=None, params=None, json=None):
+            requests.append({"url": url, "json": json})
+            if url.endswith("/first-token"):
+                return executor_service.httpx.Response(200, json={"data": {"token": "first-token"}})
+            if url.endswith("/second-token"):
+                return executor_service.httpx.Response(200, json={"data": {"token": "second-token"}})
+            return executor_service.httpx.Response(200, json={"ok": True})
+
+    monkeypatch.setattr(executor_service.httpx, "Client", FakeClient)
+
+    _execute(db, task)
+
+    assert requests[2]["json"] == {"token": "second-token"}
 
 
 def test_execution_reports_search_and_soft_delete(db_session):

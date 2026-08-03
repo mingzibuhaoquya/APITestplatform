@@ -80,6 +80,8 @@ def _ensure_api_definition_columns() -> None:
             conn.execute(text("ALTER TABLE api_definition ADD COLUMN pre_script TEXT NOT NULL AFTER environment_id"))
         if "encryption_config_json" not in columns:
             conn.execute(text("ALTER TABLE api_definition ADD COLUMN encryption_config_json TEXT NOT NULL AFTER pre_script"))
+        if "auth_config_json" not in columns:
+            conn.execute(text("ALTER TABLE api_definition ADD COLUMN auth_config_json TEXT NOT NULL AFTER encryption_config_json"))
 
 
 def _ensure_test_case_columns() -> None:
