@@ -627,6 +627,19 @@
                     <a-radio-button value="x-www-form-data">x-www-form-data</a-radio-button>
                   </a-radio-group>
                 </div>
+                <div class="body-editor-head">
+                  <span>请求体模板</span>
+                  <a-button size="small" @click="formatApiBodyTemplate(activeApiEditor)">格式化</a-button>
+                </div>
+                <a-textarea
+                  v-model:value="activeApiEditor.bodyTemplate"
+                  :rows="10"
+                  :placeholder="apiBodyTemplatePlaceholder(activeApiEditor)"
+                  class="code-input api-body-template-input"
+                  @input="markApiEditorDirty(activeApiEditor)"
+                  @keydown.tab.prevent="insertApiBodyTemplateTab($event, activeApiEditor)"
+                />
+                <p class="form-help-text">新建用例选择该接口时会自动带入模板；模板中可使用 ${变量名}。</p>
               </a-tab-pane>
               <a-tab-pane tab="Pre-script" key="pre-script">
                 <a-textarea
@@ -725,7 +738,7 @@
               </a-select>
             </a-form-item>
             <a-form-item label="接口">
-              <a-select v-model:value="caseForm.api_id" placeholder="请先选择项目" :disabled="!caseForm.project_id">
+              <a-select v-model:value="caseForm.api_id" placeholder="请先选择项目" :disabled="!caseForm.project_id" @change="changeCaseFormApi">
                 <a-select-option v-for="a in caseFormApis" :key="a.id" :value="a.id">{{ a.name }}</a-select-option>
               </a-select>
             </a-form-item>
@@ -733,11 +746,21 @@
               <a-input v-model:value="caseForm.name" placeholder="请输入用例名称" />
             </a-form-item>
             <a-form-item label="用例描述" class="wide">
-              <a-textarea v-model:value="caseForm.description" :rows="3" placeholder="请输入用例描述" />
+              <a-textarea v-model:value="caseForm.description" :rows="3" placeholder="请输入用例描述" class="case-description-input" />
             </a-form-item>
             <a-form-item label="Body" class="wide">
-              <a-textarea v-model:value="caseForm.bodyText" :rows="8" placeholder="请输入 JSON Body" />
-              <p class="form-help-text">可直接引用上游提取变量，例如 ${token}、${userId}，测试计划按队列顺序执行时会自动替换。</p>
+              <div class="body-editor-head">
+                <span>当前格式：{{ caseBodyFormatLabel }}</span>
+                <a-button size="small" @click="formatCaseBody">格式化</a-button>
+              </div>
+              <a-textarea
+                v-model:value="caseForm.bodyText"
+                :rows="8"
+                :placeholder="caseBodyPlaceholder"
+                class="code-input case-body-input"
+                @keydown.tab.prevent="insertCaseBodyTab"
+              />
+              <p class="form-help-text">{{ caseBodyHelpText }} 可直接引用上游提取变量，例如 ${token}、${userId}，测试计划按队列顺序执行时会自动替换。</p>
             </a-form-item>
             <div class="wide">
               <div class="kv-title">
@@ -745,17 +768,26 @@
                 <a-button size="small" @click="addCaseExtractorRow">添加</a-button>
               </div>
               <a-table :pagination="false" :data-source="caseForm.extractorRows">
+                <a-table-column title="提取方式" width="170">
+                  <template #default="{ record: row }">
+                    <a-select v-model:value="row.source">
+                      <a-select-option v-for="option in extractorTypes" :key="option.value" :value="option.value">{{ option.label }}</a-select-option>
+                    </a-select>
+                  </template>
+                </a-table-column>
                 <a-table-column title="变量名" width="220">
                   <template #default="{ record: row }"><a-input v-model:value="row.name" placeholder="token" /></template>
                 </a-table-column>
-                <a-table-column title="JSONPath">
-                  <template #default="{ record: row }"><a-input v-model:value="row.path" placeholder="$.data.token" /></template>
+                <a-table-column title="提取表达式">
+                  <template #default="{ record: row }">
+                    <a-input v-model:value="row.path" :placeholder="caseExtractorPlaceholder(row.source)" />
+                  </template>
                 </a-table-column>
                 <a-table-column title="操作" width="90">
                   <template #default="{ index: $index }"><a-button size="small" danger @click="removeCaseExtractorRow($index)">删除</a-button></template>
                 </a-table-column>
               </a-table>
-              <p class="form-help-text">提取成功后，后续用例可在 Body 中使用 ${变量名} 引用。</p>
+              <p class="form-help-text">提取成功后，后续用例可在 Body 中使用 ${变量名} 引用。XML 返回可用 XMLPath，例如 .//STATUS 或 /RESPONSE/STATUS。</p>
             </div>
             <div class="wide">
               <div class="kv-title">
@@ -763,21 +795,40 @@
                 <a-button size="small" @click="addCaseAssertionRow">添加</a-button>
               </div>
               <a-table :pagination="false" :data-source="caseForm.assertionRows">
-                <a-table-column title="断言类型" width="190">
+                <a-table-column title="断言对象" width="160">
                   <template #default="{ record: row }">
-                    <a-select v-model:value="row.type">
-                      <a-select-option v-for="option in assertionTypes" :key="option.value" :value="option.value">{{ option.label }}</a-select-option>
+                    <a-select v-model:value="row.target" @change="changeCaseAssertionTarget(row)">
+                      <a-select-option v-for="option in assertionTargets" :key="option.value" :value="option.value">{{ option.label }}</a-select-option>
                     </a-select>
                   </template>
                 </a-table-column>
-                <a-table-column title="JSONPath/路径">
-                  <template #default="{ record: row }"><a-input v-model:value="row.path" placeholder="$.data.id / status_code" /></template>
+                <a-table-column title="断言方式" width="150">
+                  <template #default="{ record: row }">
+                    <a-select v-model:value="row.check" @change="syncCaseAssertionType(row)">
+                      <a-select-option v-for="option in assertionCheckOptions(row.target)" :key="option.value" :value="option.value">{{ option.label }}</a-select-option>
+                    </a-select>
+                  </template>
                 </a-table-column>
-                <a-table-column title="操作符" width="120">
+                <a-table-column title="路径/表达式">
+                  <template #default="{ record: row }">
+                    <a-input v-model:value="row.path" :disabled="!assertionNeedsPath(row.target)" :placeholder="assertionPathPlaceholder(row.target)" />
+                  </template>
+                </a-table-column>
+                <a-table-column title="操作符" width="110">
                   <template #default="{ record: row }"><a-input v-model:value="row.operator" placeholder="==" /></template>
                 </a-table-column>
                 <a-table-column title="期望值">
-                  <template #default="{ record: row }"><a-input v-model:value="row.expected" placeholder="200 / success" /></template>
+                  <template #default="{ record: row }">
+                    <a-input-number
+                      v-if="isNumericAssertion(row.target)"
+                      v-model:value="row.expected"
+                      :min="0"
+                      :precision="0"
+                      :placeholder="assertionExpectedPlaceholder(row.target)"
+                      style="width: 100%"
+                    />
+                    <a-input v-else v-model:value="row.expected" :disabled="['exists', 'not_empty'].includes(row.check)" :placeholder="assertionExpectedPlaceholder(row.target)" />
+                  </template>
                 </a-table-column>
                 <a-table-column title="操作" width="90">
                   <template #default="{ index: $index }"><a-button size="small" danger @click="removeCaseAssertionRow($index)">删除</a-button></template>
@@ -1213,8 +1264,18 @@ const appTheme = {
 
 type AppTab = { name: string; label: string; closable: boolean }
 type KeyValueRow = { id: number; key: string; value: string }
-type CaseAssertionRow = { id: number; type: string; path: string; operator: string; expected: string }
-type CaseExtractorRow = { id: number; name: string; path: string }
+type AssertionTarget = 'status' | 'duration' | 'jsonpath' | 'xmlpath' | 'text'
+type AssertionCheck = 'equal' | 'exists' | 'not_empty' | 'lt' | 'contains'
+type CaseAssertionRow = {
+  id: number
+  type: string
+  target: AssertionTarget
+  check: AssertionCheck
+  path: string
+  operator: string
+  expected: string | number | null
+}
+type CaseExtractorRow = { id: number; name: string; path: string; source: 'jsonpath' | 'xmlpath' | 'regex' }
 
 function confirmAction(
   content: string,
@@ -1268,6 +1329,7 @@ type ApiEditor = {
   method: string
   path: string
   bodyFormat: 'json' | 'xml' | 'x-www-form-data'
+  bodyTemplate: string
   activePanel: '' | 'query' | 'headers' | 'auth' | 'body' | 'pre-script' | 'encryption'
   queryRows: KeyValueRow[]
   headerRows: KeyValueRow[]
@@ -1392,6 +1454,7 @@ const caseForm = reactive({
   name: '',
   description: '',
   bodyText: '{}',
+  bodyFormat: 'json' as ApiEditor['bodyFormat'],
   assertionRows: [] as CaseAssertionRow[],
   extractorRows: [] as CaseExtractorRow[]
 })
@@ -1410,14 +1473,51 @@ const dashboardStats = computed(() => [
 ])
 const caseSearchApis = computed(() => apis.value.filter(item => caseSearch.project_id && item.project_id === caseSearch.project_id))
 const caseFormApis = computed(() => apis.value.filter(item => caseForm.project_id && item.project_id === caseForm.project_id))
+const caseBodyFormatLabel = computed(() => {
+  const labels: Record<string, string> = {
+    json: 'JSON',
+    xml: 'XML',
+    'x-www-form-data': 'x-www-form-data'
+  }
+  return labels[caseForm.bodyFormat] || 'JSON'
+})
+const caseBodyPlaceholder = computed(() => {
+  if (caseForm.bodyFormat === 'xml') return '<request>\\n  <token>${token}</token>\\n</request>'
+  if (caseForm.bodyFormat === 'x-www-form-data') return '{\\n  "username": "admin",\\n  "password": "123456"\\n}'
+  return '{\\n  "token": "${token}"\\n}'
+})
+const caseBodyHelpText = computed(() => {
+  if (caseForm.bodyFormat === 'xml') return '当前接口 Body 格式为 XML，保存时会按文本发送。'
+  if (caseForm.bodyFormat === 'x-www-form-data') return '当前接口 Body 格式为表单，第一版请用 JSON 对象维护表单键值。'
+  return '当前接口 Body 格式为 JSON，保存前会校验 JSON 合法性。'
+})
 const planSearchApis = computed(() => apis.value.filter(item => planSearch.project_id && item.project_id === planSearch.project_id))
-const assertionTypes = [
-  { label: 'HTTP状态码', value: 'status_code' },
-  { label: 'JSONPath等于', value: 'jsonpath_equal' },
-  { label: 'JSONPath存在', value: 'jsonpath_exists' },
-  { label: 'JSONPath非空', value: 'jsonpath_not_empty' },
-  { label: '响应时间小于', value: 'duration_lt' },
-  { label: '响应文本包含', value: 'body_contains' }
+const assertionTargets = [
+  { label: 'HTTP状态码', value: 'status' },
+  { label: '响应时间', value: 'duration' },
+  { label: 'JSONPath', value: 'jsonpath' },
+  { label: 'XMLPath', value: 'xmlpath' },
+  { label: '响应文本', value: 'text' }
+]
+const assertionChecks = {
+  status: [{ label: '等于', value: 'equal' }],
+  duration: [{ label: '小于', value: 'lt' }],
+  jsonpath: [
+    { label: '等于', value: 'equal' },
+    { label: '存在', value: 'exists' },
+    { label: '非空', value: 'not_empty' }
+  ],
+  xmlpath: [
+    { label: '等于', value: 'equal' },
+    { label: '存在', value: 'exists' },
+    { label: '非空', value: 'not_empty' }
+  ],
+  text: [{ label: '包含', value: 'contains' }]
+} as const
+const extractorTypes = [
+  { label: 'JSONPath', value: 'jsonpath' },
+  { label: 'XMLPath', value: 'xmlpath' },
+  { label: '正则表达式', value: 'regex' }
 ]
 const paginationTotal = (total: number) => `共 ${total} 条`
 
@@ -2290,12 +2390,54 @@ function nextApiRow(key = '', value = ''): KeyValueRow {
   return { id: apiRowId++, key, value }
 }
 
-function nextCaseAssertionRow(type = 'status_code', path = '', operator = '==', expected = ''): CaseAssertionRow {
-  return { id: caseAssertionRowId++, type, path, operator, expected }
+function assertionPartsFromType(type: string): { target: AssertionTarget; check: AssertionCheck } {
+  const mapping: Record<string, { target: AssertionTarget; check: AssertionCheck }> = {
+    status_code: { target: 'status', check: 'equal' },
+    duration_lt: { target: 'duration', check: 'lt' },
+    jsonpath_equal: { target: 'jsonpath', check: 'equal' },
+    jsonpath_exists: { target: 'jsonpath', check: 'exists' },
+    jsonpath_not_empty: { target: 'jsonpath', check: 'not_empty' },
+    xmlpath_equal: { target: 'xmlpath', check: 'equal' },
+    xmlpath_exists: { target: 'xmlpath', check: 'exists' },
+    xmlpath_not_empty: { target: 'xmlpath', check: 'not_empty' },
+    body_contains: { target: 'text', check: 'contains' }
+  }
+  return mapping[type] || mapping.status_code
 }
 
-function nextCaseExtractorRow(name = '', path = ''): CaseExtractorRow {
-  return { id: caseExtractorRowId++, name, path }
+function assertionTypeFromParts(target: AssertionTarget, check: AssertionCheck) {
+  if (target === 'status') return 'status_code'
+  if (target === 'duration') return 'duration_lt'
+  if (target === 'text') return 'body_contains'
+  return `${target}_${check}`
+}
+
+function defaultAssertionCheck(target: AssertionTarget): AssertionCheck {
+  return assertionChecks[target][0].value as AssertionCheck
+}
+
+function defaultAssertionExpected(target: AssertionTarget, check: AssertionCheck) {
+  if (target === 'status') return 200
+  if (target === 'duration') return 1000
+  if (['exists', 'not_empty'].includes(check)) return ''
+  return ''
+}
+
+function nextCaseAssertionRow(type = 'status_code', path = '', operator = '==', expected?: string | number | null): CaseAssertionRow {
+  const { target, check } = assertionPartsFromType(type)
+  return {
+    id: caseAssertionRowId++,
+    type,
+    target,
+    check,
+    path,
+    operator,
+    expected: expected ?? defaultAssertionExpected(target, check)
+  }
+}
+
+function nextCaseExtractorRow(name = '', path = '', source: CaseExtractorRow['source'] = 'jsonpath'): CaseExtractorRow {
+  return { id: caseExtractorRowId++, name, path, source }
 }
 
 function defaultHeaderRows() {
@@ -2331,6 +2473,165 @@ function bodyFormatFromApi(row: any): ApiEditor['bodyFormat'] {
   return 'json'
 }
 
+function bodyTemplateFromApi(row: any) {
+  const template = row?.body?.template
+  return typeof template === 'string' ? template : ''
+}
+
+function selectedCaseApi() {
+  return apis.value.find(item => item.id === caseForm.api_id)
+}
+
+function emptyBodyForFormat(format: ApiEditor['bodyFormat']) {
+  return format === 'xml' ? '<request>\n</request>' : '{}'
+}
+
+function isCaseBodyPristine() {
+  const body = caseForm.bodyText.trim()
+  return body === '' || body === '{}' || body === '<request>\n</request>' || body === '<request>\\n</request>'
+}
+
+function syncCaseBodyFormatFromApi(resetEmptyBody = false) {
+  const api = selectedCaseApi()
+  const format = bodyFormatFromApi(api)
+  const template = bodyTemplateFromApi(api).trim()
+  caseForm.bodyFormat = format
+  if (resetEmptyBody && isCaseBodyPristine()) {
+    caseForm.bodyText = template || emptyBodyForFormat(format)
+  }
+}
+
+function formatXmlText(text: string) {
+  const source = text.trim()
+  if (!source) return ''
+  const parser = new DOMParser()
+  const document = parser.parseFromString(source, 'application/xml')
+  if (document.getElementsByTagName('parsererror').length) {
+    throw new Error('XML 解析失败')
+  }
+  return formatXmlNode(document.documentElement, 0)
+}
+
+function xmlIndent(level: number) {
+  return '    '.repeat(level)
+}
+
+function xmlAttributes(element: Element) {
+  return Array.from(element.attributes)
+    .map(attr => ` ${attr.name}="${attr.value}"`)
+    .join('')
+}
+
+function formatXmlNode(node: Node, level: number): string {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return `${xmlIndent(level)}${node.textContent?.trim() || ''}`
+  }
+  if (node.nodeType === Node.CDATA_SECTION_NODE) {
+    return `${xmlIndent(level)}<![CDATA[${node.textContent || ''}]]>`
+  }
+  if (node.nodeType === Node.COMMENT_NODE) {
+    return `${xmlIndent(level)}<!--${node.textContent || ''}-->`
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return ''
+  }
+  const element = node as Element
+  const tag = element.tagName
+  const attrs = xmlAttributes(element)
+  const children = Array.from(element.childNodes)
+    .filter(child => child.nodeType !== Node.TEXT_NODE || Boolean(child.textContent?.trim()))
+  if (children.length === 0) {
+    return `${xmlIndent(level)}<${tag}${attrs}/>`
+  }
+  if (children.length === 1 && children[0].nodeType === Node.TEXT_NODE) {
+    return `${xmlIndent(level)}<${tag}${attrs}>${children[0].textContent?.trim() || ''}</${tag}>`
+  }
+  const inner = children
+    .map(child => formatXmlNode(child, level + 1))
+    .filter(Boolean)
+    .join('\n')
+  return `${xmlIndent(level)}<${tag}${attrs}>\n${inner}\n${xmlIndent(level)}</${tag}>`
+}
+
+function formatCaseBody() {
+  if (caseForm.bodyFormat === 'xml') {
+    try {
+      caseForm.bodyText = formatXmlText(caseForm.bodyText)
+      message.success('XML 已格式化')
+    } catch {
+      message.warning('XML 格式不完整，已保留原内容')
+    }
+    return
+  }
+  const parsed = parseJson(caseForm.bodyText, undefined)
+  if (parsed === undefined) {
+    message.warning(caseForm.bodyFormat === 'x-www-form-data' ? '表单 Body 必须是合法 JSON 对象' : 'Body 必须是合法 JSON')
+    return
+  }
+  caseForm.bodyText = JSON.stringify(parsed, null, 2)
+  message.success('JSON 已格式化')
+}
+
+function formatBodyText(text: string, format: ApiEditor['bodyFormat']) {
+  if (format === 'xml') {
+    return formatXmlText(text)
+  }
+  const parsed = parseJson(text, undefined)
+  if (parsed === undefined) {
+    throw new Error('Invalid JSON')
+  }
+  if (format === 'x-www-form-data' && (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))) {
+    throw new Error('Invalid form JSON')
+  }
+  return JSON.stringify(parsed, null, 2)
+}
+
+function apiBodyTemplatePlaceholder(editor: ApiEditor) {
+  if (editor.bodyFormat === 'xml') return '<request>\n    <token>${token}</token>\n</request>'
+  if (editor.bodyFormat === 'x-www-form-data') return '{\n    "username": "${username}",\n    "password": "${password}"\n}'
+  return '{\n    "token": "${token}"\n}'
+}
+
+function formatApiBodyTemplate(editor: ApiEditor) {
+  if (!editor.bodyTemplate.trim()) {
+    message.warning('请先输入请求体模板')
+    return
+  }
+  try {
+    editor.bodyTemplate = formatBodyText(editor.bodyTemplate, editor.bodyFormat)
+    markApiEditorDirty(editor)
+    message.success(editor.bodyFormat === 'xml' ? 'XML 已格式化' : 'JSON 已格式化')
+  } catch {
+    message.warning(editor.bodyFormat === 'xml' ? 'XML 格式不完整，已保留原内容' : '模板必须是合法 JSON')
+  }
+}
+
+function insertTextareaTab(target: HTMLTextAreaElement, value: string, update: (next: string) => void) {
+  const start = target.selectionStart
+  const end = target.selectionEnd
+  const indent = '  '
+  update(`${value.slice(0, start)}${indent}${value.slice(end)}`)
+  requestAnimationFrame(() => {
+    target.selectionStart = start + indent.length
+    target.selectionEnd = start + indent.length
+  })
+}
+
+function insertCaseBodyTab(event: KeyboardEvent) {
+  const target = event.target as HTMLTextAreaElement | null
+  if (!target) return
+  insertTextareaTab(target, caseForm.bodyText, next => { caseForm.bodyText = next })
+}
+
+function insertApiBodyTemplateTab(event: KeyboardEvent, editor: ApiEditor) {
+  const target = event.target as HTMLTextAreaElement | null
+  if (!target) return
+  insertTextareaTab(target, editor.bodyTemplate, next => {
+    editor.bodyTemplate = next
+    markApiEditorDirty(editor)
+  })
+}
+
 function createEmptyApiEditor(): ApiEditor {
   const editor: ApiEditor = {
     tabName: 'api-create',
@@ -2342,6 +2643,7 @@ function createEmptyApiEditor(): ApiEditor {
     method: 'GET',
     path: '',
     bodyFormat: 'json',
+    bodyTemplate: '',
     activePanel: '',
     queryRows: [],
     headerRows: defaultHeaderRows(),
@@ -2426,6 +2728,7 @@ function createEditApiEditor(row: any): ApiEditor {
     method: row.method || 'GET',
     path: row.path || '',
     bodyFormat: bodyFormatFromApi(row),
+    bodyTemplate: bodyTemplateFromApi(row),
     activePanel: '',
     queryRows: objectToRows(row.query),
     headerRows: mergeDefaultHeaders(savedHeaderRows),
@@ -2614,7 +2917,7 @@ function apiPayload(editor: ApiEditor) {
     path: editor.path.trim(),
     headers,
     query: rowsToObject(editor.queryRows),
-    body: { format: editor.bodyFormat },
+    body: { format: editor.bodyFormat, template: editor.bodyTemplate },
     pre_script: editor.preScript,
     encryption: {
       mode: editor.encryption.enabled ? editor.encryption.mode : 'none',
@@ -2806,6 +3109,7 @@ function resetCaseForm() {
   caseForm.name = ''
   caseForm.description = ''
   caseForm.bodyText = '{}'
+  caseForm.bodyFormat = 'json'
   caseForm.assertionRows = []
   caseForm.extractorRows = []
 }
@@ -2821,7 +3125,10 @@ function openEditCasePage(row: any) {
   caseForm.api_id = row.api_id
   caseForm.name = row.name || ''
   caseForm.description = row.tags || ''
-  caseForm.bodyText = JSON.stringify(row.request_body ?? {}, null, 2)
+  caseForm.bodyFormat = bodyFormatFromApi(apis.value.find(item => item.id === row.api_id))
+  caseForm.bodyText = caseForm.bodyFormat === 'xml'
+    ? String(row.request_body ?? '')
+    : JSON.stringify(row.request_body ?? {}, null, 2)
   caseForm.assertionRows = caseAssertionsToRows(row.assertions)
   caseForm.extractorRows = caseExtractorsToRows(row.extractors)
   openRuntimeTab({ name: `case-edit-${row.id}`, label: '编辑用例', closable: true })
@@ -2835,6 +3142,11 @@ function closeCaseEditorPage() {
 
 function changeCaseFormProject() {
   caseForm.api_id = undefined
+  caseForm.bodyFormat = 'json'
+}
+
+function changeCaseFormApi() {
+  syncCaseBodyFormatFromApi(true)
 }
 
 function caseAssertionsToRows(assertions: any[]): CaseAssertionRow[] {
@@ -2853,28 +3165,88 @@ function caseExtractorsToRows(extractors: any[]): CaseExtractorRow[] {
   if (!Array.isArray(extractors)) {
     return []
   }
-  return extractors.map(item => nextCaseExtractorRow(item?.name || '', item?.path || ''))
+  return extractors.map(item => {
+    const source = ['jsonpath', 'xmlpath', 'regex'].includes(item?.source) ? item.source : 'jsonpath'
+    return nextCaseExtractorRow(item?.name || '', item?.path || '', source)
+  })
 }
 
 function caseAssertionRowsToPayload() {
   return caseForm.assertionRows
-    .filter(row => row.type)
+    .filter(row => row.target && row.check)
     .map(row => ({
-      type: row.type,
-      path: row.path.trim(),
+      type: assertionTypeFromParts(row.target, row.check),
+      path: assertionNeedsPath(row.target) ? row.path.trim() : '',
       operator: row.operator.trim() || '==',
       expected: parseAssertionExpected(row.expected)
     }))
 }
 
+function assertionCheckOptions(target: AssertionTarget) {
+  return assertionChecks[target] || assertionChecks.status
+}
+
+function assertionNeedsPath(target: AssertionTarget) {
+  return ['jsonpath', 'xmlpath'].includes(target)
+}
+
+function assertionPathPlaceholder(target: AssertionTarget) {
+  if (target === 'jsonpath') return '$.data.id'
+  if (target === 'xmlpath') return './/STATUS'
+  return '无需填写'
+}
+
+function changeCaseAssertionTarget(row: CaseAssertionRow) {
+  row.check = defaultAssertionCheck(row.target)
+  row.type = assertionTypeFromParts(row.target, row.check)
+  row.path = assertionNeedsPath(row.target) ? row.path : ''
+  row.expected = defaultAssertionExpected(row.target, row.check)
+}
+
+function syncCaseAssertionType(row: CaseAssertionRow) {
+  row.type = assertionTypeFromParts(row.target, row.check)
+  row.expected = defaultAssertionExpected(row.target, row.check)
+}
+
+function isNumericAssertion(target: AssertionTarget) {
+  return ['status', 'duration'].includes(target)
+}
+
+function assertionExpectedPlaceholder(target: AssertionTarget) {
+  if (target === 'status') return '必填数字，例如 200'
+  if (target === 'duration') return '必填毫秒数，例如 1000'
+  if (target === 'text') return 'success'
+  return '200 / success'
+}
+
+function validateAssertionRows() {
+  for (const row of caseForm.assertionRows) {
+    if (!row.target || !isNumericAssertion(row.target)) {
+      continue
+    }
+    const value = String(row.expected ?? '').trim()
+    if (!/^\d+$/.test(value)) {
+      message.warning(`${assertionTargets.find(item => item.value === row.target)?.label || '数字断言'}的期望值必须填写数字`)
+      return false
+    }
+  }
+  return true
+}
+
 function caseExtractorRowsToPayload() {
   return caseForm.extractorRows
-    .map(row => ({ name: row.name.trim(), path: row.path.trim() }))
+    .map(row => ({ name: row.name.trim(), path: row.path.trim(), source: row.source }))
     .filter(row => row.name && row.path)
 }
 
-function parseAssertionExpected(value: string) {
-  const trimmed = value.trim()
+function caseExtractorPlaceholder(source: CaseExtractorRow['source']) {
+  if (source === 'xmlpath') return './/STATUS'
+  if (source === 'regex') return 'token=(\\w+)'
+  return '$.data.token'
+}
+
+function parseAssertionExpected(value: string | number | null) {
+  const trimmed = String(value ?? '').trim()
   if (!trimmed) {
     return ''
   }
@@ -2915,10 +3287,20 @@ function validateCaseForm() {
     message.warning('请输入用例名称')
     return null
   }
-  const requestBody = parseJson(caseForm.bodyText, undefined)
-  if (requestBody === undefined) {
-    message.warning('Body 必须是合法 JSON')
+  if (!validateAssertionRows()) {
     return null
+  }
+  let requestBody: any = caseForm.bodyText
+  if (caseForm.bodyFormat !== 'xml') {
+    requestBody = parseJson(caseForm.bodyText, undefined)
+    if (requestBody === undefined) {
+      message.warning(caseForm.bodyFormat === 'x-www-form-data' ? '表单 Body 必须是合法 JSON 对象' : 'Body 必须是合法 JSON')
+      return null
+    }
+    if (caseForm.bodyFormat === 'x-www-form-data' && (!requestBody || typeof requestBody !== 'object' || Array.isArray(requestBody))) {
+      message.warning('表单 Body 必须是 JSON 对象')
+      return null
+    }
   }
   return {
     project_id: caseForm.project_id,

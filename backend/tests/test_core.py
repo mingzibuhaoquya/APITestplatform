@@ -19,6 +19,7 @@ from app.services.assertions import all_passed, run_assertions
 from app.services import executor as executor_service
 from app.services.executor import _apply_auth_config, _build_request_url, _execute, _initial_variables
 from app.services.jsonpath import find_jsonpath
+from app.services.xmlpath import find_xmlpath
 from app.services.pre_scripts import PreScriptError, run_pre_script
 from app.services import crypto_envelope
 from app.services.variables import render_variables
@@ -188,6 +189,12 @@ def test_jsonpath_simple_path_and_index():
     assert find_jsonpath(data, "$.data.users[0].id") == [7]
 
 
+def test_xmlpath_simple_path_and_attribute():
+    text = '<TRANSACTION><MESSAGE_BODY><RESPONSE id="r1"><STATUS>0</STATUS></RESPONSE></MESSAGE_BODY></TRANSACTION>'
+    assert find_xmlpath(text, "/TRANSACTION/MESSAGE_BODY/RESPONSE/STATUS") == ["0"]
+    assert find_xmlpath(text, ".//RESPONSE/@id") == ["r1"]
+
+
 def test_assertion_rules():
     response = {"status_code": 200, "json": {"code": 0, "data": {"token": "abc"}}, "text": '{"code":0}', "duration_ms": 32}
     results = run_assertions(response, [
@@ -198,6 +205,28 @@ def test_assertion_rules():
         {"type": "body_contains", "expected": "code"},
     ])
     assert all_passed(results)
+
+
+def test_xmlpath_assertion_rules():
+    response = {
+        "status_code": 200,
+        "json": None,
+        "text": "<RESPONSE><STATUS>0</STATUS><MESSAGE>ok</MESSAGE></RESPONSE>",
+        "duration_ms": 32,
+    }
+    results = run_assertions(response, [
+        {"type": "xmlpath_equal", "path": ".//STATUS", "expected": "0"},
+        {"type": "xmlpath_exists", "path": ".//MESSAGE"},
+        {"type": "xmlpath_not_empty", "path": ".//MESSAGE"},
+    ])
+    assert all_passed(results)
+
+
+def test_numeric_assertion_invalid_expected_fails_without_exception():
+    response = {"status_code": 200, "json": {}, "text": "", "duration_ms": 32}
+    results = run_assertions(response, [{"type": "status_code", "expected": ""}])
+    assert results[0]["passed"] is False
+    assert "必须填写数字" in results[0]["message"]
 
 
 def test_mock_user_login_success():
@@ -662,14 +691,14 @@ def test_create_api_validates_required_project_name_path_and_duplicate_name(db_s
     other_project = create_project(ProjectIn(name="api_required_other", description="other project"), admin, db)
     environment = create_test_environment(project["id"], admin, db)
     other_environment = create_test_environment(other_project["id"], admin, db)
-    created = create_api(ApiDefinitionIn(project_id=project["id"], name="login", method="POST", path="/login", module="legacy", headers={"A": "B"}, query={"q": 1}, body={"x": 1}, description="login api", pre_script="pm.environment.set('requestId', Date.now());"), admin, db)
+    created = create_api(ApiDefinitionIn(project_id=project["id"], name="login", method="POST", path="/login", module="legacy", headers={"A": "B"}, query={"q": 1}, body={"format": "json", "template": {"username": "${username}"}}, description="login api", pre_script="pm.environment.set('requestId', Date.now());"), admin, db)
 
     assert created["environment_id"] == 0
     assert created["environment_name"] == ""
     assert created["module"] == ""
     assert created["headers"] == {"A": "B"}
     assert created["query"] == {"q": 1}
-    assert created["body"] == {"x": 1}
+    assert created["body"] == {"format": "json", "template": {"username": "${username}"}}
     assert created["description"] == "login api"
     assert created["pre_script"] == "pm.environment.set('requestId', Date.now());"
     assert created["auth"]["type"] == "none"
@@ -715,7 +744,7 @@ def test_update_api_and_reject_duplicate_name(db_session):
             path="/new",
             headers={"Content-Type": "application/json", "Authorization": "Bearer abc"},
             query={"page": "1"},
-            body={"format": "json"},
+            body={"format": "xml", "template": "<request><token>${token}</token></request>"},
             description="new description",
             pre_script="pm.environment.set('signature', CryptoJS.MD5('payload').toString());",
             auth={
@@ -738,7 +767,7 @@ def test_update_api_and_reject_duplicate_name(db_session):
     assert updated["path"] == "/new"
     assert updated["headers"] == {"Content-Type": "application/json", "Authorization": "Bearer abc"}
     assert updated["query"] == {"page": "1"}
-    assert updated["body"] == {"format": "json"}
+    assert updated["body"] == {"format": "xml", "template": "<request><token>${token}</token></request>"}
     assert updated["description"] == "new description"
     assert updated["pre_script"] == "pm.environment.set('signature', CryptoJS.MD5('payload').toString());"
     assert updated["auth"]["type"] == "bearer"
@@ -885,7 +914,7 @@ def test_create_and_filter_cases_by_project_and_api(db_session):
     assert created["project_name"] == "case_project_first"
     assert created["api_name"] == "case_api_first"
     assert created["request_body"] == {"username": "tester"}
-    assert created["extractors"] == [{"name": "token", "path": "$.data.token"}]
+    assert created["extractors"] == [{"name": "token", "path": "$.data.token", "source": "jsonpath"}]
     assert "priority" not in created
     assert "status" not in created
     assert created["is_deleted"] is False
@@ -945,7 +974,7 @@ def test_update_and_logically_delete_case(db_session):
     assert updated["name"] == "updated_case"
     assert updated["request_body"] == {"updated": True}
     assert updated["assertions"] == [{"type": "jsonpath_equal", "path": "$.code", "operator": "==", "expected": 0}]
-    assert updated["extractors"] == [{"name": "userId", "path": "$.data.userId"}]
+    assert updated["extractors"] == [{"name": "userId", "path": "$.data.userId", "source": "jsonpath"}]
     assert updated["tags"] == "updated description"
     assert "priority" not in updated
     assert "status" not in updated
@@ -1166,8 +1195,8 @@ def test_execute_plan_passes_extracted_variables_to_later_case_body(db_session, 
     assert requests[1]["json"] == {"authorization": "Bearer abc123"}
     assert second_request["body"] == {"authorization": "Bearer abc123"}
     assert first_response["extracted_variables"] == [
-        {"name": "token", "path": "$.data.token", "value": "abc123", "success": True},
-        {"name": "missingValue", "path": "$.data.missing", "value": None, "success": False},
+        {"name": "token", "path": "$.data.token", "source": "jsonpath", "value": "abc123", "success": True},
+        {"name": "missingValue", "path": "$.data.missing", "source": "jsonpath", "value": None, "success": False},
     ]
 
 
@@ -1215,6 +1244,91 @@ def test_execute_plan_uses_latest_upstream_value_for_duplicate_variable_names(db
     _execute(db, task)
 
     assert requests[2]["json"] == {"token": "second-token"}
+
+
+def test_execute_plan_extracts_plain_text_response_for_later_case(db_session, monkeypatch):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="plain_text_dependency_project", description="dependency project"), admin, db)
+    environment = create_test_environment(project["id"], admin, db)
+    token_api = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="plain_token_api", method="POST", path="/plain-token"), admin, db)
+    submit_api = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="plain_submit_api", method="POST", path="/plain-submit"), admin, db)
+    token_case = create_case(TestCaseIn(project_id=project["id"], api_id=token_api["id"], name="plain_token_case", extractors=[{"name": "plainToken", "source": "regex", "path": "(.+)"}]), admin, db)
+    submit_case = create_case(TestCaseIn(project_id=project["id"], api_id=submit_api["id"], name="plain_submit_case", request_body={"token": "${plainToken}"}), admin, db)
+    plan = create_plan(TestPlanIn(project_id=project["id"], environment_id=environment["id"], api_id=token_api["id"], name="plain text dependency plan", items=[token_case["id"], submit_case["id"]]), admin, db)
+    task = ExecutionTask(executor_id=admin.id, project_id=project["id"], environment_id=environment["id"], target_type="plan", target_id=plan["id"], status="running")
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    requests = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def request(self, method, url, headers=None, params=None, json=None):
+            requests.append({"url": url, "json": json})
+            if url.endswith("/plain-token"):
+                return executor_service.httpx.Response(200, text="STRING_TOKEN_001")
+            return executor_service.httpx.Response(200, json={"ok": True})
+
+    monkeypatch.setattr(executor_service.httpx, "Client", FakeClient)
+
+    rows = _execute(db, task)
+    first_response = executor_service.parse_json(rows[0].response_snapshot_json, {})
+
+    assert requests[1]["json"] == {"token": "STRING_TOKEN_001"}
+    assert first_response["extracted_variables"] == [
+        {"name": "plainToken", "path": "(.+)", "source": "regex", "value": "STRING_TOKEN_001", "success": True}
+    ]
+
+
+def test_executor_sends_body_by_api_body_format(db_session, monkeypatch):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="body_format_project", description="body format project"), admin, db)
+    environment = create_test_environment(project["id"], admin, db)
+    xml_api = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="xml_api", method="POST", path="/xml", body={"format": "xml"}), admin, db)
+    form_api = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="form_api", method="POST", path="/form", body={"format": "x-www-form-data"}), admin, db)
+    json_api = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="json_api", method="POST", path="/json", body={"format": "json"}), admin, db)
+    xml_case = create_case(TestCaseIn(project_id=project["id"], api_id=xml_api["id"], name="xml_case", request_body="<request><name>${name}</name></request>"), admin, db)
+    form_case = create_case(TestCaseIn(project_id=project["id"], api_id=form_api["id"], name="form_case", request_body={"name": "${name}"}), admin, db)
+    json_case = create_case(TestCaseIn(project_id=project["id"], api_id=json_api["id"], name="json_case", request_body={"name": "${name}"}), admin, db)
+    plan = create_plan(TestPlanIn(project_id=project["id"], environment_id=environment["id"], api_id=xml_api["id"], name="body format plan", items=[xml_case["id"], form_case["id"], json_case["id"]]), admin, db)
+    task = ExecutionTask(executor_id=admin.id, project_id=project["id"], environment_id=environment["id"], target_type="plan", target_id=plan["id"], status="running")
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    requests = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def request(self, **kwargs):
+            requests.append(kwargs)
+            return executor_service.httpx.Response(200, json={"ok": True})
+
+    monkeypatch.setattr(executor_service.httpx, "Client", FakeClient)
+    env = db.get(Environment, environment["id"])
+    env.variables_json = executor_service.dump_json({"name": "格式演示"})
+    db.commit()
+
+    _execute(db, task)
+
+    assert requests[0]["content"] == "<request><name>格式演示</name></request>"
+    assert requests[1]["data"] == {"name": "格式演示"}
+    assert requests[2]["json"] == {"name": "格式演示"}
 
 
 def test_execution_reports_search_and_soft_delete(db_session):

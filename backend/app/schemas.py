@@ -146,7 +146,17 @@ class AuthTokenPreviewIn(BaseModel):
 
 
 class AssertionRule(BaseModel):
-    type: Literal["status_code", "jsonpath_equal", "jsonpath_exists", "jsonpath_not_empty", "duration_lt", "body_contains"]
+    type: Literal[
+        "status_code",
+        "jsonpath_equal",
+        "jsonpath_exists",
+        "jsonpath_not_empty",
+        "xmlpath_equal",
+        "xmlpath_exists",
+        "xmlpath_not_empty",
+        "duration_lt",
+        "body_contains",
+    ]
     path: str = ""
     operator: str = "=="
     expected: Any = None
@@ -155,6 +165,7 @@ class AssertionRule(BaseModel):
 class ExtractorRule(BaseModel):
     name: str
     path: str
+    source: Literal["jsonpath", "xmlpath", "regex"] = "jsonpath"
 
 
 class TestCaseIn(BaseModel):

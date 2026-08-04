@@ -718,6 +718,16 @@ textarea {
   min-height: 38px;
 }
 
+.body-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: #526174;
+  font-size: 13px;
+}
+
 .auth-panel {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
@@ -809,6 +819,23 @@ textarea.code-input,
 .json-editor,
 .detail-grid pre {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.case-description-input {
+  min-height: 84px !important;
+  resize: vertical;
+}
+
+.case-body-input {
+  min-height: 220px !important;
+  max-height: 70vh;
+  resize: both;
+}
+
+.api-body-template-input {
+  min-height: 240px !important;
+  max-height: 70vh;
+  resize: both;
 }
 
 .pre-script-hint {

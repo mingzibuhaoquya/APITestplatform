@@ -1,5 +1,6 @@
 from datetime import datetime
 import base64
+import re
 import time
 from urllib.parse import urljoin, urlparse
 from uuid import uuid4
@@ -14,6 +15,7 @@ from .jsonpath import find_jsonpath
 from .pre_scripts import PreScriptError, run_pre_script
 from .report import build_html_report
 from .variables import render_variables, response_json_or_text
+from .xmlpath import find_xmlpath
 
 
 class ResultView:
@@ -140,6 +142,7 @@ def _execute_case(db: Session, task: ExecutionTask, case_id: int, variables: dic
     headers = {**env_headers, **parse_json(api.headers_json, {}), **parse_json(case.request_headers_json, {})}
     query = {**parse_json(api.query_json, {}), **parse_json(case.request_query_json, {})}
     body = parse_json(case.request_body_json, {})
+    body_format = _request_body_format(api)
     url = _build_request_url(env, api.path)
     try:
         script_logs = run_pre_script(api.pre_script, variables, headers)
@@ -206,13 +209,7 @@ def _execute_case(db: Session, task: ExecutionTask, case_id: int, variables: dic
     started = time.perf_counter()
     try:
         with httpx.Client(timeout=30) as client:
-            response = client.request(
-                request_snapshot["method"],
-                request_snapshot["url"],
-                headers=request_snapshot["headers"],
-                params=request_snapshot["query"],
-                json=request_snapshot["body"] if request_snapshot["body"] not in ({}, "", None) else None,
-            )
+            response = _send_request(client, request_snapshot, body_format)
         duration_ms = int((time.perf_counter() - started) * 1000)
         text = response.text[: get_settings().response_body_limit]
         parsed = response_json_or_text(text)
@@ -244,17 +241,55 @@ def _execute_case(db: Session, task: ExecutionTask, case_id: int, variables: dic
 
 def _extract_variables(variables: dict, response_snapshot: dict, extractors: list[dict]) -> list[dict]:
     body = response_snapshot.get("json") or response_snapshot.get("text")
+    text = str(response_snapshot.get("text") or "")
     results = []
     for item in extractors:
         name = str(item.get("name") or "").strip()
         path = str(item.get("path") or "").strip()
-        values = find_jsonpath(body, path)
-        success = bool(name and path and values)
+        source = str(item.get("source") or "jsonpath").strip()
+        values = _extract_values(source, body, text, path)
+        success = bool(name and values and (source == "text" or path))
         value = values[0] if success else None
         if success:
             variables[name] = value
-        results.append({"name": name, "path": path, "value": value, "success": success})
+        results.append({"name": name, "path": path, "source": source, "value": value, "success": success})
     return results
+
+
+def _extract_values(source: str, body: object, text: str, path: str) -> list:
+    if source == "regex":
+        if not path:
+            return []
+        match = re.search(path, text, re.S)
+        if not match:
+            return []
+        return [match.group(1) if match.groups() else match.group(0)]
+    if source == "xmlpath":
+        return find_xmlpath(text, path)
+    return find_jsonpath(body, path)
+
+
+def _request_body_format(api: ApiDefinition) -> str:
+    body_config = parse_json(api.body_json, {})
+    body_format = body_config.get("format") if isinstance(body_config, dict) else ""
+    return body_format if body_format in {"json", "xml", "x-www-form-data"} else "json"
+
+
+def _send_request(client: httpx.Client, request_snapshot: dict, body_format: str) -> httpx.Response:
+    body = request_snapshot["body"]
+    common = {
+        "method": request_snapshot["method"],
+        "url": request_snapshot["url"],
+        "headers": request_snapshot["headers"],
+        "params": request_snapshot["query"],
+    }
+    if body in ({}, "", None):
+        return client.request(**common)
+    if body_format == "xml":
+        return client.request(**common, content=str(body))
+    if body_format == "x-www-form-data":
+        return client.request(**common, data=body if isinstance(body, dict) else str(body))
+    return client.request(**common, json=body)
 
 
 def _save_result(
