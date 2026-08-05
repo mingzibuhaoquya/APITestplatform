@@ -205,7 +205,7 @@ class TestPlanIn(BaseModel):
     environment_id: int
     api_id: int
     name: str
-    items: list[int]
+    items: list[int | dict[str, Any]]
 
 
 class TestPlanUpdate(BaseModel):
@@ -213,7 +213,7 @@ class TestPlanUpdate(BaseModel):
     environment_id: int
     api_id: int
     name: str
-    items: list[int]
+    items: list[int | dict[str, Any]]
 
 
 class ExecutionCreate(BaseModel):

@@ -1,4 +1,5 @@
 import pytest
+from html import escape
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI, HTTPException, Response
@@ -21,6 +22,7 @@ from app.services.executor import _apply_auth_config, _build_request_url, _execu
 from app.services.jsonpath import find_jsonpath
 from app.services.xmlpath import find_xmlpath
 from app.services.pre_scripts import PreScriptError, run_pre_script
+from app.services.report import build_html_report
 from app.services import crypto_envelope
 from app.services.variables import render_variables
 from app.security import create_session_token, hash_password
@@ -193,6 +195,17 @@ def test_xmlpath_simple_path_and_attribute():
     text = '<TRANSACTION><MESSAGE_BODY><RESPONSE id="r1"><STATUS>0</STATUS></RESPONSE></MESSAGE_BODY></TRANSACTION>'
     assert find_xmlpath(text, "/TRANSACTION/MESSAGE_BODY/RESPONSE/STATUS") == ["0"]
     assert find_xmlpath(text, ".//RESPONSE/@id") == ["r1"]
+
+
+def test_xmlpath_ignores_trailing_signature_after_xml_document():
+    text = (
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<TRANSACTION><MESSAGE_ESB_HEAD><RET_COMM_STATUS>F</RET_COMM_STATUS></MESSAGE_ESB_HEAD></TRANSACTION>"
+        "35674D1491855DF4A44C391AA6DE1A182DE6FF8550189852047EB9433B9365BC"
+    )
+
+    assert find_xmlpath(text, "/TRANSACTION/MESSAGE_ESB_HEAD/RET_COMM_STATUS") == ["F"]
+    assert find_xmlpath(text, ".//RET_COMM_STATUS") == ["F"]
 
 
 def test_assertion_rules():
@@ -1011,6 +1024,7 @@ def test_plan_crud_paginates_searches_and_validates_relations(db_session):
     project = create_project(ProjectIn(name="plan_project", description="plan project"), admin, db)
     other_project = create_project(ProjectIn(name="plan_other_project", description="other plan project"), admin, db)
     environment = create_test_environment(project["id"], admin, db)
+    second_environment = create_environment(EnvironmentIn(project_id=project["id"], name="plan_second_env", protocol="https", base_url="plan-second.example.com"), admin, db)
     other_environment = create_test_environment(other_project["id"], admin, db)
     api_row = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="plan_api", method="POST", path="/plan"), admin, db)
     same_project_other_api = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="plan_token_api", method="POST", path="/token"), admin, db)
@@ -1035,8 +1049,12 @@ def test_plan_crud_paginates_searches_and_validates_relations(db_session):
     assert created["project_name"] == "plan_project"
     assert created["environment_name"] == f"env_{project['id']}"
     assert created["api_name"] == "plan_api"
-    assert created["items"] == [first_case["id"], second_case["id"]]
+    assert created["items"] == [
+        {"case_id": first_case["id"], "environment_id": environment["id"]},
+        {"case_id": second_case["id"], "environment_id": environment["id"]},
+    ]
     assert [item["name"] for item in created["cases"]] == ["first_plan_case", "second_plan_case"]
+    assert [item["environment_id"] for item in created["cases"]] == [environment["id"], environment["id"]]
     assert [item["status"] for item in created["cases"]] == ["", ""]
     assert created["creator_name"] == "Admin"
 
@@ -1083,12 +1101,16 @@ def test_plan_crud_paginates_searches_and_validates_relations(db_session):
             environment_id=environment["id"],
             api_id=api_row["id"],
             name="mixed api plan",
-            items=[first_case["id"], token_case["id"]],
+            items=[first_case["id"], {"case_id": token_case["id"], "environment_id": second_environment["id"]}],
         ),
         admin,
         db,
     )
-    assert mixed_api_plan["items"] == [first_case["id"], token_case["id"]]
+    assert mixed_api_plan["items"] == [
+        {"case_id": first_case["id"], "environment_id": environment["id"]},
+        {"case_id": token_case["id"], "environment_id": second_environment["id"]},
+    ]
+    assert [item["environment_id"] for item in mixed_api_plan["cases"]] == [environment["id"], second_environment["id"]]
     assert mixed_api_plan["api_name"] == "plan_api、plan_token_api"
 
     paged = list_plans(project_id=project["id"], page=1, page_size=10, _=admin, db=db)
@@ -1107,7 +1129,12 @@ def test_plan_crud_paginates_searches_and_validates_relations(db_session):
         admin,
         db,
     )
-    assert updated["items"] == [second_case["id"], first_case["id"]]
+    assert updated["items"] == [
+        {"case_id": second_case["id"], "environment_id": environment["id"]},
+        {"case_id": first_case["id"], "environment_id": environment["id"]},
+    ]
+    assert updated["last_status"] == "edited"
+    assert updated["last_execution_id"] is None
 
     deleted = delete_plan(created["id"], admin, db)
     assert deleted["is_deleted"] is True
@@ -1197,6 +1224,59 @@ def test_execute_plan_passes_extracted_variables_to_later_case_body(db_session, 
     assert first_response["extracted_variables"] == [
         {"name": "token", "path": "$.data.token", "source": "jsonpath", "value": "abc123", "success": True},
         {"name": "missingValue", "path": "$.data.missing", "source": "jsonpath", "value": None, "success": False},
+    ]
+
+
+def test_execute_plan_uses_environment_per_plan_item(db_session, monkeypatch):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="plan_item_env_project", description="plan item env"), admin, db)
+    first_env = create_environment(EnvironmentIn(project_id=project["id"], name="first_env", protocol="https", base_url="first.example.com", variables={"envName": "first"}), admin, db)
+    second_env = create_environment(EnvironmentIn(project_id=project["id"], name="second_env", protocol="https", base_url="second.example.com", variables={"envName": "second"}), admin, db)
+    api_row = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=first_env["id"], name="env_api", method="POST", path="/submit"), admin, db)
+    first_case = create_case(TestCaseIn(project_id=project["id"], api_id=api_row["id"], name="first_env_case", request_body={"env": "${envName}"}), admin, db)
+    second_case = create_case(TestCaseIn(project_id=project["id"], api_id=api_row["id"], name="second_env_case", request_body={"env": "${envName}"}), admin, db)
+    plan = create_plan(
+        TestPlanIn(
+            project_id=project["id"],
+            environment_id=first_env["id"],
+            api_id=api_row["id"],
+            name="plan item env",
+            items=[
+                {"case_id": first_case["id"], "environment_id": first_env["id"]},
+                {"case_id": second_case["id"], "environment_id": second_env["id"]},
+            ],
+        ),
+        admin,
+        db,
+    )
+    task = ExecutionTask(executor_id=admin.id, project_id=project["id"], environment_id=first_env["id"], target_type="plan", target_id=plan["id"], status="running")
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    requests = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def request(self, method, url, headers=None, params=None, json=None):
+            requests.append({"url": url, "json": json})
+            return executor_service.httpx.Response(200, json={"ok": True})
+
+    monkeypatch.setattr(executor_service.httpx, "Client", FakeClient)
+
+    rows = _execute(db, task)
+
+    assert [row.status for row in rows] == ["passed", "passed"]
+    assert requests == [
+        {"url": "https://first.example.com/submit", "json": {"env": "first"}},
+        {"url": "https://second.example.com/submit", "json": {"env": "second"}},
     ]
 
 
@@ -1348,3 +1428,39 @@ def test_execution_reports_search_and_soft_delete(db_session):
     deleted = delete_execution(task["id"], admin, db)
     assert deleted["id"] == task["id"]
     assert list_executions(name="nightly", target_type="plan", page=1, page_size=10, _=admin, db=db)["total"] == 0
+
+
+def test_html_report_formats_request_and_response_payloads():
+    class FakeTask:
+        id = 7
+        status = "failed"
+
+    class FakeResult:
+        case_id = 12
+        case_name = "XML用例"
+        api_name = "库存接口"
+        status = "failed"
+        duration_ms = 123
+        assertion_results = [{"type": "xmlpath_equal", "path": ".//STATUS", "expected": "S", "actual": "F", "passed": False, "message": "失败"}]
+        request_snapshot = {
+            "method": "POST",
+            "url": "http://example.test/api",
+            "headers": {"Content-Type": "application/xml"},
+            "query": {},
+            "body": '<?xml version="1.0" encoding="UTF-8"?><RESPONSE><STATUS>F</STATUS><EMPTY>\n    </EMPTY></RESPONSE>SIGN',
+        }
+        response_snapshot = {
+            "status_code": 200,
+            "headers": {"Content-Type": "application/xml"},
+            "text": '<?xml version="1.0" encoding="UTF-8"?><RESPONSE><STATUS>F</STATUS><EMPTY>\n    </EMPTY></RESPONSE>SIGN',
+            "duration_ms": 123,
+        }
+
+    html = build_html_report(FakeTask(), [FakeResult()], "report")
+
+    assert "请求报文" in html
+    assert "响应报文" in html
+    assert escape('<?xml version="1.0" encoding="UTF-8"?>') in html
+    assert escape("<EMPTY/>") in html
+    assert "期望" in html
+    assert "实际" in html

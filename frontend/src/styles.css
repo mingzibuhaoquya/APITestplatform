@@ -728,6 +728,12 @@ textarea {
   font-size: 13px;
 }
 
+.body-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .auth-panel {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
@@ -836,6 +842,28 @@ textarea.code-input,
   min-height: 240px !important;
   max-height: 70vh;
   resize: both;
+}
+
+.body-code-editor {
+  min-height: 220px;
+  max-height: 70vh;
+  resize: both;
+  overflow: auto;
+}
+
+.body-code-editor .cm-editor {
+  height: 100%;
+}
+
+.body-code-editor .cm-gutters {
+  background: #f8fafc;
+  color: #98a2b3;
+  border-right: 1px solid #eef2f7;
+}
+
+.body-code-editor .cm-activeLine,
+.body-code-editor .cm-activeLineGutter {
+  background: #f5f9ff;
 }
 
 .pre-script-hint {
@@ -1008,7 +1036,7 @@ textarea.code-input,
 .plan-case-expand-head,
 .plan-case-expand-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(150px, 1fr) 90px 70px;
+  grid-template-columns: minmax(180px, 1fr) minmax(150px, 1fr) minmax(130px, 180px) 90px 70px;
   gap: 12px;
   align-items: center;
 }
@@ -1034,7 +1062,8 @@ textarea.code-input,
 }
 
 .plan-case-expand-name,
-.plan-case-expand-api {
+.plan-case-expand-api,
+.plan-case-expand-env {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1159,7 +1188,7 @@ textarea.code-input,
 
 .plan-queue-row {
   display: grid;
-  grid-template-columns: 24px minmax(170px, 1fr) minmax(150px, 280px) 58px 45px 45px;
+  grid-template-columns: 24px minmax(170px, 1fr) minmax(150px, 260px) minmax(150px, 210px) 45px 45px;
   gap: 9px;
   align-items: center;
   padding: 10px 12px;
@@ -1190,6 +1219,10 @@ textarea.code-input,
 
 .queue-api {
   color: #7b8798;
+}
+
+.queue-environment-select {
+  width: 100%;
 }
 
 .plan-queue-count {
@@ -1405,9 +1438,15 @@ textarea.code-input,
     grid-row: 2;
   }
 
+  .plan-case-expand-head span:nth-child(3),
+  .plan-case-expand-row .plan-case-expand-env {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
   .plan-case-expand-action {
     grid-column: 2;
-    grid-row: 2;
+    grid-row: 3;
     text-align: right;
   }
 
@@ -1434,7 +1473,7 @@ textarea.code-input,
   }
 
   .plan-queue-row {
-    grid-template-columns: 20px minmax(0, 1fr) auto;
+    grid-template-columns: 20px minmax(0, 1fr) auto auto;
     gap: 6px;
     padding: 10px;
   }
@@ -1443,9 +1482,8 @@ textarea.code-input,
     grid-column: 2;
   }
 
-  .plan-queue-row .ant-tag {
-    grid-column: 3;
-    grid-row: 1;
+  .queue-environment-select {
+    grid-column: 2 / -1;
   }
 
   .plan-queue-row .ant-btn {

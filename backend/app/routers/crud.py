@@ -84,6 +84,27 @@ def _plan_case_out(case: TestCase, db: Session, status: str = ""):
     }
 
 
+def _plan_item_case_id(item):
+    if isinstance(item, dict):
+        return int(item.get("case_id") or item.get("id") or 0)
+    return int(item) if str(item).isdigit() else 0
+
+
+def _plan_item_environment_id(item, default_environment_id: int):
+    if isinstance(item, dict):
+        return int(item.get("environment_id") or default_environment_id)
+    return default_environment_id
+
+
+def _plan_items_with_environment(items, default_environment_id: int):
+    normalized = []
+    for item in items:
+        case_id = _plan_item_case_id(item)
+        if case_id:
+            normalized.append({"case_id": case_id, "environment_id": _plan_item_environment_id(item, default_environment_id)})
+    return normalized
+
+
 def _plan_out(row: TestSuite, db: Session):
     project = db.get(Project, row.project_id)
     environment = db.get(Environment, row.environment_id) if row.environment_id else None
@@ -91,7 +112,8 @@ def _plan_out(row: TestSuite, db: Session):
     creator = db.get(User, row.creator_id) if row.creator_id else None
     last_execution = db.get(ExecutionTask, row.last_execution_id) if row.last_execution_id else None
     executor = db.get(User, last_execution.executor_id) if last_execution else None
-    item_ids = [int(item) for item in parse_json(row.items_json, []) if str(item).isdigit()]
+    plan_items = _plan_items_with_environment(parse_json(row.items_json, []), row.environment_id)
+    item_ids = [item["case_id"] for item in plan_items]
     cases = []
     result_status_map = {}
     fallback_case_status = row.last_status if row.last_status in {"queued", "running"} else ""
@@ -101,18 +123,23 @@ def _plan_out(row: TestSuite, db: Session):
     if item_ids:
         rows = db.query(TestCase).filter(TestCase.id.in_(item_ids), TestCase.is_deleted.is_(False)).all()
         row_map = {item.id: item for item in rows}
-        cases = [
-            _plan_case_out(row_map[item_id], db, result_status_map.get(item_id, fallback_case_status))
-            for item_id in item_ids
-            if item_id in row_map
-        ]
+        cases = []
+        for item in plan_items:
+            item_id = item["case_id"]
+            if item_id not in row_map:
+                continue
+            case_out = _plan_case_out(row_map[item_id], db, result_status_map.get(item_id, fallback_case_status))
+            item_environment = db.get(Environment, item["environment_id"])
+            case_out["environment_id"] = item["environment_id"]
+            case_out["environment_name"] = item_environment.name if item_environment and not item_environment.is_deleted else ""
+            cases.append(case_out)
     api_names = list(dict.fromkeys([case["api_name"] for case in cases if case["api_name"]]))
     return {
         **_base(row),
         "project_name": project.name if project and not project.is_deleted else "",
         "environment_name": environment.name if environment and not environment.is_deleted else "",
         "api_name": "、".join(api_names) if api_names else api.name if api else "",
-        "items": item_ids,
+        "items": plan_items,
         "cases": cases,
         "creator_name": creator.real_name or creator.username if creator else "",
         "executor_name": executor.real_name or executor.username if executor else "",
@@ -177,11 +204,13 @@ def _validate_plan_payload(payload: TestPlanIn | TestPlanUpdate, db: Session):
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="test plan name is required")
+    plan_items = []
     item_ids = []
     for item in payload.items:
-        case_id = int(item)
+        case_id = _plan_item_case_id(item)
         if case_id not in item_ids:
             item_ids.append(case_id)
+            plan_items.append({"case_id": case_id, "environment_id": _plan_item_environment_id(item, payload.environment_id)})
     if not item_ids:
         raise HTTPException(status_code=400, detail="test plan cases are required")
     cases = db.query(TestCase).filter(TestCase.id.in_(item_ids), TestCase.is_deleted.is_(False)).all()
@@ -192,7 +221,8 @@ def _validate_plan_payload(payload: TestPlanIn | TestPlanUpdate, db: Session):
             raise HTTPException(status_code=404, detail="test case does not exist")
         if case.project_id != payload.project_id:
             raise HTTPException(status_code=400, detail="test case does not belong to selected project")
-    return name, item_ids
+        _active_environment(next(item["environment_id"] for item in plan_items if item["case_id"] == case_id), payload.project_id, db)
+    return name, plan_items
 
 
 def _environment_port(protocol: str, port: int | None):
@@ -606,7 +636,7 @@ def list_plans(
         ordered_rows = query.order_by(TestSuite.id.desc()).all()
         filtered_rows = [
             row for row in ordered_rows
-            if row.api_id == api_id or any(int(item) in case_ids for item in parse_json(row.items_json, []))
+            if row.api_id == api_id or any(item["case_id"] in case_ids for item in _plan_items_with_environment(parse_json(row.items_json, []), row.environment_id))
         ]
         if page is None and page_size is None:
             return [_plan_out(row, db) for row in filtered_rows]
@@ -666,6 +696,9 @@ def update_plan(plan_id: int, payload: TestPlanUpdate, _: User = Depends(current
     row.api_id = payload.api_id
     row.name = name
     row.items_json = dump_json(item_ids)
+    row.last_status = "edited"
+    row.last_execution_id = None
+    row.last_executed_at = None
     db.commit()
     db.refresh(row)
     return _plan_out(row, db)

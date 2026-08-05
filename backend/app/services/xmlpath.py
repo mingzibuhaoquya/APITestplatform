@@ -1,5 +1,6 @@
 from typing import Any
 import xml.etree.ElementTree as ET
+import re
 
 
 def _strip_namespaces(element: ET.Element) -> None:
@@ -27,12 +28,38 @@ def _normalize_path(root: ET.Element, path: str) -> tuple[str, str | None]:
     return expression, attribute
 
 
+def _parse_xml_root(text: str) -> ET.Element | None:
+    try:
+        return ET.fromstring(text)
+    except ET.ParseError:
+        pass
+
+    match = re.search(r"<([A-Za-z_][\w.\-:]*)\b[^>]*>", text)
+    if not match:
+        return None
+    root_tag = match.group(1)
+    start_tag = match.group(0)
+    if start_tag.rstrip().endswith("/>"):
+        try:
+            return ET.fromstring(text[: match.end()])
+        except ET.ParseError:
+            return None
+    close_tag = f"</{root_tag}>"
+    close_index = text.find(close_tag, match.end())
+    if close_index == -1:
+        return None
+    try:
+        return ET.fromstring(text[: close_index + len(close_tag)])
+    except ET.ParseError:
+        return None
+    return None
+
+
 def find_xmlpath(text: str, path: str) -> list[Any]:
     if not text or not path.strip():
         return []
-    try:
-        root = ET.fromstring(text)
-    except ET.ParseError:
+    root = _parse_xml_root(text)
+    if root is None:
         return []
     _strip_namespaces(root)
     expression, attribute = _normalize_path(root, path)

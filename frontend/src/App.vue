@@ -631,13 +631,12 @@
                   <span>请求体模板</span>
                   <a-button size="small" @click="formatApiBodyTemplate(activeApiEditor)">格式化</a-button>
                 </div>
-                <a-textarea
-                  v-model:value="activeApiEditor.bodyTemplate"
-                  :rows="10"
+                <BodyCodeEditor
+                  v-model="activeApiEditor.bodyTemplate"
+                  :language="activeApiEditor.bodyFormat"
                   :placeholder="apiBodyTemplatePlaceholder(activeApiEditor)"
-                  class="code-input api-body-template-input"
-                  @input="markApiEditorDirty(activeApiEditor)"
-                  @keydown.tab.prevent="insertApiBodyTemplateTab($event, activeApiEditor)"
+                  min-height="240px"
+                  @update:model-value="markApiEditorDirty(activeApiEditor)"
                 />
                 <p class="form-help-text">新建用例选择该接口时会自动带入模板；模板中可使用 ${变量名}。</p>
               </a-tab-pane>
@@ -751,14 +750,16 @@
             <a-form-item label="Body" class="wide">
               <div class="body-editor-head">
                 <span>当前格式：{{ caseBodyFormatLabel }}</span>
-                <a-button size="small" @click="formatCaseBody">格式化</a-button>
+                <div class="body-editor-actions">
+                  <a-button size="small" @click="reuseCaseBodyTemplate">复用请求体</a-button>
+                  <a-button size="small" @click="formatCaseBody">格式化</a-button>
+                </div>
               </div>
-              <a-textarea
-                v-model:value="caseForm.bodyText"
-                :rows="8"
+              <BodyCodeEditor
+                v-model="caseForm.bodyText"
+                :language="caseForm.bodyFormat"
                 :placeholder="caseBodyPlaceholder"
-                class="code-input case-body-input"
-                @keydown.tab.prevent="insertCaseBodyTab"
+                min-height="220px"
               />
               <p class="form-help-text">{{ caseBodyHelpText }} 可直接引用上游提取变量，例如 ${token}、${userId}，测试计划按队列顺序执行时会自动替换。</p>
             </a-form-item>
@@ -888,15 +889,17 @@
                 <div class="plan-case-expand-head">
                   <span>用例名称</span>
                   <span>接口</span>
+                  <span>环境</span>
                   <span>状态</span>
                   <span>操作</span>
                 </div>
                 <div v-for="caseRow in row.cases || []" :key="caseRow.id" class="plan-case-expand-row">
                   <span class="plan-case-expand-name">{{ caseRow.name || '-' }}</span>
                   <span class="plan-case-expand-api">{{ caseRow.api_name || '-' }}</span>
+                  <span class="plan-case-expand-env">{{ caseRow.environment_name || planEnvironmentName(row, caseRow.environment_id) || '-' }}</span>
                   <span><a-tag :color="executionStatusColor(caseRow.status)">{{ executionStatusText(caseRow.status) }}</a-tag></span>
                   <span class="plan-case-expand-action">
-                    <a-button size="small" @click="openCaseDetailDialog(caseRow, row.environment_id, row.last_execution_id)">查看</a-button>
+                    <a-button size="small" @click="openCaseDetailDialog(caseRow, caseRow.environment_id || row.environment_id, row.last_execution_id)">查看</a-button>
                   </span>
                 </div>
                 <a-empty v-if="!(row.cases || []).length" description="暂无用例" :image-style="{ width: '48px', height: '48px' }" />
@@ -969,8 +972,8 @@
                       <a-select-option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
                     </a-select>
                   </a-form-item>
-                  <a-form-item label="环境">
-                    <a-select v-model:value="activePlanEditor.environment_id" placeholder="请先选择项目" :disabled="!activePlanEditor.project_id" @change="markPlanEditorDirty(activePlanEditor)">
+                  <a-form-item label="默认环境">
+                    <a-select v-model:value="activePlanEditor.environment_id" placeholder="请先选择项目" :disabled="!activePlanEditor.project_id" @change="changePlanEditorDefaultEnvironment(activePlanEditor)">
                       <a-select-option v-for="e in planEditorEnvironments(activePlanEditor)" :key="e.id" :value="e.id">{{ e.name }}</a-select-option>
                     </a-select>
                   </a-form-item>
@@ -1035,7 +1038,16 @@
                     <span class="drag-handle">⋮⋮</span>
                     <span class="queue-name">{{ item.name }}</span>
                     <span class="queue-api">{{ item.api_name || '-' }}</span>
-                    <a-button size="small" type="link" @click="openCaseDetailDialog(item, activePlanEditor.environment_id)">查看</a-button>
+                    <a-select
+                      v-model:value="item.environment_id"
+                      size="small"
+                      class="queue-environment-select"
+                      placeholder="执行环境"
+                      @change="markPlanEditorDirty(activePlanEditor)"
+                    >
+                      <a-select-option v-for="e in planEditorEnvironments(activePlanEditor)" :key="e.id" :value="e.id">{{ e.name }}</a-select-option>
+                    </a-select>
+                    <a-button size="small" type="link" @click="openCaseDetailDialog(item, item.environment_id || activePlanEditor.environment_id)">查看</a-button>
                     <a-button size="small" type="link" danger @click="removePlanQueueCase(activePlanEditor, index)">移除</a-button>
                   </div>
                   <a-empty v-if="activePlanEditor.queue.length === 0" description="暂无用例" />
@@ -1058,11 +1070,11 @@
             <strong>URL</strong><span>{{ caseDetail.url || '-' }}</span>
             <strong>请求头</strong><pre>{{ formatJson(caseDetail.request_headers) }}</pre>
             <template v-if="caseDetail.request_body_original !== undefined">
-              <strong>请求原文</strong><pre>{{ formatJson(caseDetail.request_body_original) }}</pre>
-              <strong>实际请求密文</strong><pre>{{ formatJson(caseDetail.request_body) }}</pre>
+              <strong>请求原文</strong><pre>{{ formatPayloadForDisplay(caseDetail.request_body_original, caseDetail.body_format) }}</pre>
+              <strong>实际请求密文</strong><pre>{{ formatPayloadForDisplay(caseDetail.request_body) }}</pre>
             </template>
             <template v-else>
-              <strong>请求体</strong><pre>{{ formatJson(caseDetail.request_body) }}</pre>
+              <strong>请求体</strong><pre>{{ formatPayloadForDisplay(caseDetail.request_body, caseDetail.body_format) }}</pre>
             </template>
             <strong>断言信息</strong><pre>{{ formatJson(caseDetail.assertions) }}</pre>
             <strong>提取规则</strong><pre>{{ formatJson(caseDetail.extractors) }}</pre>
@@ -1071,10 +1083,10 @@
             </template>
             <template v-if="caseDetail.response_snapshot?.decrypted_text !== undefined">
               <strong>响应密文</strong><pre>{{ formatJson(caseDetail.response_snapshot.encrypted_json) }}</pre>
-              <strong>响应解密内容</strong><pre>{{ caseDetail.response_snapshot.decrypted_text }}</pre>
+              <strong>响应解密内容</strong><pre>{{ formatPayloadForDisplay(caseDetail.response_snapshot.decrypted_text, caseDetail.body_format) }}</pre>
             </template>
             <template v-else>
-              <strong>返回报文</strong><pre>{{ formatJson(caseDetail.response_snapshot) }}</pre>
+              <strong>返回报文</strong><pre>{{ formatResponseSnapshotBody(caseDetail.response_snapshot, caseDetail.body_format) }}</pre>
             </template>
           </div>
           <template #footer>
@@ -1204,9 +1216,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, defineComponent, h, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
+import { basicSetup } from 'codemirror'
+import { json as jsonLanguage } from '@codemirror/lang-json'
+import { xml as xmlLanguage } from '@codemirror/lang-xml'
+import { indentWithTab } from '@codemirror/commands'
+import { Compartment } from '@codemirror/state'
+import { EditorView, keymap, placeholder as editorPlaceholder, scrollPastEnd } from '@codemirror/view'
 import {
   ApiOutlined,
   BarChartOutlined,
@@ -1338,6 +1356,106 @@ type ApiEditor = {
   auth: ApiAuth
   dirty: boolean
 }
+
+type BodyEditorLanguage = ApiEditor['bodyFormat']
+
+function bodyEditorLanguageExtension(language: BodyEditorLanguage) {
+  return language === 'xml' ? xmlLanguage() : jsonLanguage()
+}
+
+const BodyCodeEditor = defineComponent({
+  name: 'BodyCodeEditor',
+  props: {
+    modelValue: { type: String, default: '' },
+    language: { type: String as () => BodyEditorLanguage, default: 'json' },
+    placeholder: { type: String, default: '' },
+    minHeight: { type: String, default: '220px' }
+  },
+  emits: ['update:modelValue'],
+  setup(props, { emit }) {
+    const host = ref<HTMLElement | null>(null)
+    const languageCompartment = new Compartment()
+    const placeholderCompartment = new Compartment()
+    let view: EditorView | null = null
+
+    onMounted(() => {
+      if (!host.value) return
+      view = new EditorView({
+        doc: props.modelValue,
+        parent: host.value,
+        extensions: [
+          basicSetup,
+          keymap.of([indentWithTab]),
+          EditorView.lineWrapping,
+          scrollPastEnd(),
+          languageCompartment.of(bodyEditorLanguageExtension(props.language)),
+          placeholderCompartment.of(editorPlaceholder(props.placeholder)),
+          EditorView.updateListener.of(update => {
+            if (update.docChanged) {
+              emit('update:modelValue', update.state.doc.toString())
+            }
+          }),
+          EditorView.theme({
+            '&': {
+              minHeight: props.minHeight,
+              maxHeight: '70vh',
+              border: '1px solid #d9dff0',
+              borderRadius: '6px',
+              backgroundColor: '#fff',
+              fontSize: '13px'
+            },
+            '&.cm-focused': {
+              outline: 'none',
+              borderColor: '#1677ff',
+              boxShadow: '0 0 0 2px rgba(22, 119, 255, 0.12)'
+            },
+            '.cm-scroller': {
+              minHeight: props.minHeight,
+              maxHeight: '70vh',
+              overflow: 'auto',
+              fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace'
+            },
+            '.cm-content': {
+              padding: '10px 0 56px'
+            },
+            '.cm-line': {
+              padding: '0 12px'
+            },
+            '.cm-placeholder': {
+              color: '#a8b0bd'
+            }
+          })
+        ]
+      })
+    })
+
+    watch(() => props.modelValue, value => {
+      if (!view) return
+      const current = view.state.doc.toString()
+      if (value !== current) {
+        view.dispatch({ changes: { from: 0, to: current.length, insert: value || '' } })
+      }
+    })
+
+    watch(() => props.language, language => {
+      if (!view) return
+      view.dispatch({ effects: languageCompartment.reconfigure(bodyEditorLanguageExtension(language)) })
+    })
+
+    watch(() => props.placeholder, value => {
+      if (!view) return
+      view.dispatch({ effects: placeholderCompartment.reconfigure(editorPlaceholder(value || '')) })
+    })
+
+    onBeforeUnmount(() => {
+      view?.destroy()
+      view = null
+    })
+
+    return () => h('div', { ref: host, class: 'body-code-editor' })
+  }
+})
+
 type PlanEditor = {
   tabName: string
   label: string
@@ -2501,15 +2619,134 @@ function syncCaseBodyFormatFromApi(resetEmptyBody = false) {
   }
 }
 
+function reuseCaseBodyTemplate() {
+  const api = selectedCaseApi()
+  if (!api) {
+    message.warning('请先选择接口')
+    return
+  }
+  const template = bodyTemplateFromApi(api).trim()
+  if (!template) {
+    message.warning('当前接口未配置请求体模板')
+    return
+  }
+  caseForm.bodyFormat = bodyFormatFromApi(api)
+  caseForm.bodyText = template
+  message.success('已复用接口请求体模板')
+}
+
 function formatXmlText(text: string) {
   const source = text.trim()
   if (!source) return ''
+  return formatXmlTextPreservingTags(source)
   const parser = new DOMParser()
   const document = parser.parseFromString(source, 'application/xml')
   if (document.getElementsByTagName('parsererror').length) {
     throw new Error('XML 解析失败')
   }
   return formatXmlNode(document.documentElement, 0)
+}
+
+function formatXmlTextPreservingTags(text: string) {
+  const source = text.trim()
+  if (!source) return ''
+  const tokens = source.match(/<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<[^>]+>|[^<]+/g)
+  if (!tokens) {
+    throw new Error('Invalid XML')
+  }
+  const rows: string[] = []
+  const stack: string[] = []
+  let level = 0
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index].trim()
+    if (!token) continue
+    if (!token.startsWith('<')) {
+      rows.push(`${xmlIndent(level)}${token}`)
+      continue
+    }
+    if (token.startsWith('<?') || token.startsWith('<!--') || token.startsWith('<![CDATA[')) {
+      rows.push(`${xmlIndent(level)}${token}`)
+      continue
+    }
+    if (token.startsWith('</')) {
+      const closingTag = token.match(/^<\/([A-Za-z_][\w.:-]*)\s*>$/)?.[1]
+      const expectedTag = stack.pop()
+      if (!closingTag || expectedTag !== closingTag) {
+        throw new Error('Invalid XML')
+      }
+      level = Math.max(level - 1, 0)
+      rows.push(`${xmlIndent(level)}${token}`)
+      continue
+    }
+    const tagName = token.match(/^<([A-Za-z_][\w.:-]*)\b/)?.[1]
+    if (!tagName) {
+      throw new Error('Invalid XML')
+    }
+    if (token.endsWith('/>')) {
+      rows.push(`${xmlIndent(level)}${token}`)
+      continue
+    }
+    let nextIndex = index + 1
+    while (nextIndex < tokens.length && !tokens[nextIndex].trim()) {
+      nextIndex += 1
+    }
+    const nextToken = tokens[nextIndex]?.trim()
+    const closeToken = tokens[nextIndex + 1]?.trim()
+    if (nextToken === `</${tagName}>`) {
+      const selfClosing = token.replace(/>$/, '/>')
+      rows.push(`${xmlIndent(level)}${selfClosing}`)
+      index = nextIndex
+      continue
+    }
+    if (nextToken && !nextToken.startsWith('<') && closeToken === `</${tagName}>`) {
+      rows.push(`${xmlIndent(level)}${token}${nextToken}</${tagName}>`)
+      index += 2
+      continue
+    }
+    rows.push(`${xmlIndent(level)}${token}`)
+    stack.push(tagName)
+    level += 1
+  }
+  if (stack.length) {
+    throw new Error('Invalid XML')
+  }
+  return rows.join('\n')
+}
+
+function splitFirstXmlDocument(text: string) {
+  const source = text.trim()
+  const match = source.match(/<([A-Za-z_][\w.:-]*)\b[^>]*>/)
+  if (!match || match.index === undefined) return null
+  const startTag = match[0]
+  if (startTag.trim().endsWith('/>')) {
+    return {
+      xml: source.slice(0, match.index + startTag.length),
+      rest: source.slice(match.index + startTag.length).trim()
+    }
+  }
+  const closeTag = `</${match[1]}>`
+  const closeIndex = source.indexOf(closeTag, match.index + startTag.length)
+  if (closeIndex < 0) return null
+  const endIndex = closeIndex + closeTag.length
+  return {
+    xml: source.slice(0, endIndex),
+    rest: source.slice(endIndex).trim()
+  }
+}
+
+function formatXmlPayloadText(text: string) {
+  try {
+    return formatXmlTextPreservingTags(text)
+  } catch {
+    const split = splitFirstXmlDocument(text)
+    if (!split) return text
+    try {
+      const formattedXml = formatXmlTextPreservingTags(split.xml)
+      return split.rest ? `${formattedXml}\n${split.rest}` : formattedXml
+    } catch {
+      return text
+    }
+  }
 }
 
 function xmlIndent(level: number) {
@@ -2541,7 +2778,7 @@ function formatXmlNode(node: Node, level: number): string {
   const children = Array.from(element.childNodes)
     .filter(child => child.nodeType !== Node.TEXT_NODE || Boolean(child.textContent?.trim()))
   if (children.length === 0) {
-    return `${xmlIndent(level)}<${tag}${attrs}/>`
+    return `${xmlIndent(level)}<${tag}${attrs}></${tag}>`
   }
   if (children.length === 1 && children[0].nodeType === Node.TEXT_NODE) {
     return `${xmlIndent(level)}<${tag}${attrs}>${children[0].textContent?.trim() || ''}</${tag}>`
@@ -2556,7 +2793,7 @@ function formatXmlNode(node: Node, level: number): string {
 function formatCaseBody() {
   if (caseForm.bodyFormat === 'xml') {
     try {
-      caseForm.bodyText = formatXmlText(caseForm.bodyText)
+      caseForm.bodyText = formatXmlTextPreservingTags(caseForm.bodyText)
       message.success('XML 已格式化')
     } catch {
       message.warning('XML 格式不完整，已保留原内容')
@@ -2574,7 +2811,7 @@ function formatCaseBody() {
 
 function formatBodyText(text: string, format: ApiEditor['bodyFormat']) {
   if (format === 'xml') {
-    return formatXmlText(text)
+    return formatXmlTextPreservingTags(text)
   }
   const parsed = parseJson(text, undefined)
   if (parsed === undefined) {
@@ -3396,7 +3633,7 @@ function createEditPlanEditor(row: any): PlanEditor {
     name: row.name || '',
     candidateCases: [],
     selectedCases: [],
-    queue: [...(row.cases || [])],
+    queue: (row.cases || []).map((item: any) => normalizePlanQueueItem(item, row.environment_id)),
     dirty: false
   }
 }
@@ -3420,6 +3657,13 @@ function markPlanEditorDirty(editor: PlanEditor) {
   editor.dirty = true
 }
 
+function normalizePlanQueueItem(item: any, defaultEnvironmentId?: number) {
+  return {
+    ...item,
+    environment_id: item.environment_id || defaultEnvironmentId
+  }
+}
+
 function planEditorEnvironments(editor: PlanEditor) {
   return environments.value.filter(item => editor.project_id && item.project_id === editor.project_id)
 }
@@ -3433,6 +3677,16 @@ function changePlanEditorProject(editor: PlanEditor) {
   editor.api_id = undefined
   editor.candidateCases = []
   editor.selectedCases = []
+  editor.queue = []
+  markPlanEditorDirty(editor)
+}
+
+function changePlanEditorDefaultEnvironment(editor: PlanEditor) {
+  editor.queue.forEach(item => {
+    if (!item.environment_id) {
+      item.environment_id = editor.environment_id
+    }
+  })
   markPlanEditorDirty(editor)
 }
 
@@ -3476,12 +3730,16 @@ function validatePlanEditor(editor: PlanEditor) {
     message.warning('请至少添加一条测试用例')
     return null
   }
+  if (editor.queue.some(item => !item.environment_id)) {
+    message.warning('请为执行队列中的每条用例选择环境')
+    return null
+  }
   return {
     project_id: editor.project_id,
     environment_id: editor.environment_id,
     api_id: editor.api_id,
     name,
-    items: editor.queue.map(item => item.id)
+    items: editor.queue.map(item => ({ case_id: item.id, environment_id: item.environment_id }))
   }
 }
 
@@ -3508,7 +3766,7 @@ function addSelectedPlanCases(editor: PlanEditor) {
   const exists = new Set(editor.queue.map(item => item.id))
   editor.selectedCases.forEach(item => {
     if (!exists.has(item.id)) {
-      editor.queue.push(item)
+      editor.queue.push(normalizePlanQueueItem(item, editor.environment_id))
       exists.add(item.id)
     }
   })
@@ -3544,6 +3802,7 @@ async function savePlanEditor(editor: PlanEditor, closeAfterSave = false) {
     if (editor.mode === 'edit') {
       await api.put(`/plans/${editor.planId}`, payload)
       message.success('测试计划已更新')
+      markSavedPlanEdited(editor)
     } else {
       const { data } = await api.post('/plans', payload)
       message.success('测试计划已创建')
@@ -3748,6 +4007,7 @@ async function openCaseDetailDialog(row: any, environmentId?: number, executionI
   Object.assign(caseDetail, {
     method: row.method || apiRow?.method || '',
     url: buildFullRequestUrl(environment, apiRow || row, requestQuery),
+    body_format: row.body_format || bodyFormatFromApi(apiRow),
     request_headers: requestHeaders,
     request_body: requestSnapshot.body ?? row.request_body ?? {},
     request_body_original: requestSnapshot.body_original,
@@ -3763,8 +4023,56 @@ function formatJson(value: any) {
   return JSON.stringify(value ?? {}, null, 2)
 }
 
+function formatPayloadForDisplay(value: any, preferredFormat?: string) {
+  if (value === undefined || value === null || value === '') return ''
+  if (typeof value !== 'string') return formatJson(value)
+  const text = value.trim()
+  if (!text) return ''
+  if (preferredFormat === 'xml' || text.startsWith('<')) {
+    return formatXmlPayloadText(text)
+  }
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2)
+  } catch {
+    return text
+  }
+}
+
+function formatResponseSnapshotBody(snapshot: any, preferredFormat?: string) {
+  if (!snapshot || Object.keys(snapshot).length === 0) return ''
+  if (snapshot.decrypted_text !== undefined) {
+    return formatPayloadForDisplay(snapshot.decrypted_text, preferredFormat)
+  }
+  if (snapshot.text !== undefined && snapshot.text !== '') {
+    return formatPayloadForDisplay(snapshot.text, preferredFormat)
+  }
+  if (snapshot.body !== undefined && snapshot.body !== '') {
+    return formatPayloadForDisplay(snapshot.body, preferredFormat)
+  }
+  if (snapshot.json !== undefined && snapshot.json !== null) {
+    return formatPayloadForDisplay(snapshot.json, 'json')
+  }
+  return formatJson(snapshot)
+}
+
 function formatMinute(value: string) {
   return value ? value.slice(0, 16) : ''
+}
+
+function markSavedPlanEdited(editor: PlanEditor) {
+  if (!editor.planId) return
+  const target = planList.value.find(item => item.id === editor.planId)
+  if (!target) return
+  target.last_status = 'edited'
+  target.last_executed_at = ''
+  target.last_execution_id = undefined
+}
+
+function planEnvironmentName(plan: any, environmentId?: number) {
+  if (!environmentId || environmentId === plan?.environment_id) {
+    return plan?.environment_name || ''
+  }
+  return environments.value.find(item => item.id === environmentId)?.name || ''
 }
 
 function executionStatusColor(status: string) {
@@ -3772,6 +4080,7 @@ function executionStatusColor(status: string) {
   if (status === 'failed' || status === 'error') return 'error'
   if (status === 'running') return 'warning'
   if (status === 'queued') return 'processing'
+  if (status === 'edited') return 'warning'
   return 'default'
 }
 
@@ -3781,7 +4090,8 @@ function executionStatusText(status: string) {
     running: '执行中',
     passed: '已通过',
     failed: '失败',
-    error: '异常'
+    error: '异常',
+    edited: '已编辑'
   }
   return labels[status] || '未执行'
 }

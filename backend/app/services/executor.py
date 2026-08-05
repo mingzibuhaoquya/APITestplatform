@@ -68,24 +68,48 @@ def execute_task(task_id: int) -> None:
 
 def _execute(db: Session, task: ExecutionTask) -> list[ExecutionResult]:
     if task.target_type == "case":
-        case_ids = [task.target_id]
+        plan_items = [{"case_id": task.target_id, "environment_id": task.environment_id}]
     elif task.target_type == "plan":
         plan = db.get(TestSuite, task.target_id)
-        case_ids = parse_json(plan.items_json if plan else "[]", [])
+        plan_items = _execution_plan_items(parse_json(plan.items_json if plan else "[]", []), task.environment_id)
     else:
         scenario = db.get(ScenarioCase, task.target_id)
-        case_ids = parse_json(scenario.steps_json if scenario else "[]", [])
-    variables = _initial_variables(db, task.environment_id)
+        plan_items = [{"case_id": int(case_id), "environment_id": task.environment_id} for case_id in parse_json(scenario.steps_json if scenario else "[]", [])]
+    runtime_variables = _runtime_variables()
     auth_token_cache: dict[str, str] = {}
     rows: list[ExecutionResult] = []
-    for case_id in case_ids:
-        row = _execute_case(db, task, int(case_id), variables, auth_token_cache)
+    for item in plan_items:
+        environment_id = int(item.get("environment_id") or task.environment_id)
+        variables = {**_environment_variables(db, environment_id), **runtime_variables}
+        row = _execute_case(db, task, int(item["case_id"]), variables, auth_token_cache, environment_id)
         rows.append(row)
+        _merge_extracted_variables(runtime_variables, row)
         if row.status != "passed" and task.target_type == "scenario":
             scenario = db.get(ScenarioCase, task.target_id)
             if scenario and scenario.failure_strategy == "stop":
                 break
     return rows
+
+
+def _execution_plan_items(items: list, default_environment_id: int) -> list[dict]:
+    normalized = []
+    for item in items:
+        if isinstance(item, dict):
+            case_id = int(item.get("case_id") or item.get("id") or 0)
+            environment_id = int(item.get("environment_id") or default_environment_id)
+        else:
+            case_id = int(item)
+            environment_id = default_environment_id
+        if case_id:
+            normalized.append({"case_id": case_id, "environment_id": environment_id})
+    return normalized
+
+
+def _merge_extracted_variables(runtime_variables: dict, row: ExecutionResult) -> None:
+    response_snapshot = parse_json(row.response_snapshot_json, {})
+    for item in response_snapshot.get("extracted_variables", []):
+        if item.get("success") and item.get("name"):
+            runtime_variables[item["name"]] = item.get("value")
 
 
 def _sync_plan_execution(db: Session, task: ExecutionTask) -> None:
@@ -111,9 +135,17 @@ def _execution_target_name(db: Session, task: ExecutionTask) -> str:
 
 
 def _initial_variables(db: Session, environment_id: int) -> dict:
+    return {**_environment_variables(db, environment_id), **_runtime_variables()}
+
+
+def _environment_variables(db: Session, environment_id: int) -> dict:
     env = db.get(Environment, environment_id)
-    variables = parse_json(env.variables_json if env else "{}", {})
+    return parse_json(env.variables_json if env else "{}", {})
+
+
+def _runtime_variables() -> dict:
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    variables = {}
     variables.setdefault("timestamp", timestamp)
     variables.setdefault("uuid", uuid4().hex)
     variables.setdefault("unique_username", f"test_user_{timestamp}")
@@ -131,9 +163,16 @@ def _build_request_url(env: Environment, path: str) -> str:
     return urljoin(root.rstrip("/") + "/", path.lstrip("/"))
 
 
-def _execute_case(db: Session, task: ExecutionTask, case_id: int, variables: dict, auth_token_cache: dict[str, str] | None = None) -> ExecutionResult:
+def _execute_case(
+    db: Session,
+    task: ExecutionTask,
+    case_id: int,
+    variables: dict,
+    auth_token_cache: dict[str, str] | None = None,
+    environment_id: int | None = None,
+) -> ExecutionResult:
     case = db.get(TestCase, case_id)
-    env = db.get(Environment, task.environment_id)
+    env = db.get(Environment, environment_id or task.environment_id)
     api = db.get(ApiDefinition, case.api_id) if case else None
     if not case or case.is_deleted or not api or not env:
         return _save_result(db, task.id, case_id, "error", {}, {}, [], 0, "用例、接口或环境不存在")
