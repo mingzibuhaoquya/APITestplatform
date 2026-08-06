@@ -147,11 +147,11 @@ class ExecutionResult(Base, TimestampMixin):
     task_id: Mapped[int] = mapped_column(Integer, index=True)
     case_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(32))
-    request_snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
-    response_snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
-    assertion_results_json: Mapped[str] = mapped_column(Text, default="[]")
+    request_snapshot_json: Mapped[str] = mapped_column(Text().with_variant(LONGTEXT, "mysql"), default="{}")
+    response_snapshot_json: Mapped[str] = mapped_column(Text().with_variant(LONGTEXT, "mysql"), default="{}")
+    assertion_results_json: Mapped[str] = mapped_column(Text().with_variant(LONGTEXT, "mysql"), default="[]")
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
-    error_message: Mapped[str] = mapped_column(Text, default="")
+    error_message: Mapped[str] = mapped_column(Text().with_variant(LONGTEXT, "mysql"), default="")
 
 
 class OperationLog(Base, TimestampMixin):

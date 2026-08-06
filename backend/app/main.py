@@ -1,7 +1,8 @@
 import logging
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 from .config import get_settings
@@ -10,6 +11,7 @@ from .models import TestCase, User
 from .routers import auth, crud, executions, mock, roles, users
 from .security import hash_password
 from .services.menus import ensure_default_roles
+from .services.operation_logs import log_system_exception
 from .utils import dump_json, parse_json
 
 
@@ -37,6 +39,26 @@ app.include_router(executions.router)
 app.include_router(mock.router)
 
 
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logging.exception("Unhandled system exception: %s %s", request.method, request.url.path)
+    db = SessionLocal()
+    try:
+        log_system_exception(
+            db,
+            method=request.method,
+            path=request.url.path,
+            error_type=exc.__class__.__name__,
+            message=str(exc),
+            ip=request.client.host if request.client else "",
+        )
+    except Exception:
+        logging.exception("Unable to persist system exception log")
+    finally:
+        db.close()
+    return JSONResponse(status_code=500, content={"detail": "系统异常，请查看异常日志"})
+
+
 @app.on_event("startup")
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
@@ -47,6 +69,7 @@ def startup() -> None:
     _remove_test_case_assertion_operators()
     _ensure_test_suite_columns()
     _ensure_execution_task_columns()
+    _ensure_execution_result_columns()
     _ensure_roles()
     _ensure_admin()
 
@@ -154,6 +177,19 @@ def _ensure_execution_task_columns() -> None:
             conn.execute(text("ALTER TABLE execution_task ADD COLUMN is_deleted BOOL NOT NULL DEFAULT 0"))
         if engine.dialect.name == "mysql" and "LONGTEXT" not in str(columns["report_html"]["type"]).upper():
             conn.execute(text("ALTER TABLE execution_task MODIFY COLUMN report_html LONGTEXT NOT NULL"))
+
+
+def _ensure_execution_result_columns() -> None:
+    if engine.dialect.name != "mysql":
+        return
+    inspector = inspect(engine)
+    columns = {column["name"]: column for column in inspector.get_columns("execution_result")}
+    longtext_columns = ["request_snapshot_json", "response_snapshot_json", "assertion_results_json", "error_message"]
+    with engine.begin() as conn:
+        for column_name in longtext_columns:
+            column = columns.get(column_name)
+            if column and "LONGTEXT" not in str(column["type"]).upper():
+                conn.execute(text(f"ALTER TABLE execution_result MODIFY COLUMN {column_name} LONGTEXT NOT NULL"))
 
 
 def _ensure_roles() -> None:

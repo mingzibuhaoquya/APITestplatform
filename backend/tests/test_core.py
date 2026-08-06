@@ -17,16 +17,17 @@ from app.routers.executions import delete_execution, list_executions
 from app.routers.mock import router as mock_router
 from app.routers.users import create_user, list_users, router as users_router, update_user, update_user_status
 from app.routers.roles import create_role, delete_role, list_roles, update_role
-from app.schemas import ApiDefinitionIn, ApiDefinitionUpdate, ChangePasswordIn, EnvironmentIn, EnvironmentUpdate, LoginIn, ProjectIn, ProjectUpdate, RoleIn, RoleUpdate, TestCaseIn, TestCaseUpdate, TestPlanIn, TestPlanUpdate, UserCreate, UserStatusUpdate, UserUpdate
+from app.schemas import ApiDefinitionIn, ApiDefinitionUpdate, ChangePasswordIn, EncryptionConfigIn, EnvironmentIn, EnvironmentUpdate, LoginIn, ProjectIn, ProjectUpdate, RoleIn, RoleUpdate, TestCaseIn, TestCaseUpdate, TestPlanIn, TestPlanUpdate, UserCreate, UserStatusUpdate, UserUpdate
 from app.services.menus import ensure_default_roles
 from app.services.assertions import all_passed, run_assertions
 from app.services import executor as executor_service
-from app.services.executor import _apply_auth_config, _build_request_url, _execute, _initial_variables
+from app.services.executor import _apply_auth_config, _build_request_url, _execute, _initial_variables, _request_oauth2_client_credentials_token
 from app.services.jsonpath import find_jsonpath
 from app.services.xmlpath import find_xmlpath
 from app.services.pre_scripts import PreScriptError, run_pre_script
 from app.services.report import build_html_report
 from app.services import crypto_envelope
+from app.services.operation_logs import log_system_exception
 from app.services.variables import render_variables
 from app.security import create_session_token, hash_password
 
@@ -955,6 +956,62 @@ def test_oauth2_auth_config_can_add_token_to_query(db_session, monkeypatch):
     assert "Authorization" not in headers
 
 
+def test_oauth2_token_request_uses_configurable_grant_type_and_tls_verify(db_session, monkeypatch):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="oauth_request_project", description="api auth"), admin, db)
+    environment = create_environment(EnvironmentIn(project_id=project["id"], name="oauth_env", protocol="https", base_url="example.test", variables={"grant_type": "client_credentials"}), admin, db)
+    env = db.get(Environment, environment["id"])
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = '{"access_token":"preview-token"}'
+
+    class FakeClient:
+        def __init__(self, timeout, verify):
+            captured["timeout"] = timeout
+            captured["verify"] = verify
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, data, headers, auth):
+            captured["url"] = url
+            captured["data"] = data
+            captured["headers"] = headers
+            captured["auth"] = auth
+            return FakeResponse()
+
+    monkeypatch.setattr(executor_service.httpx, "Client", FakeClient)
+    token = _request_oauth2_client_credentials_token(
+        {
+            "token_url": "https://example.test/OAuth",
+            "grant_type": "${grant_type}",
+            "client_id": "masterAPI",
+            "client_secret": "1234",
+            "scope": "https://example.test/PAPI/api/Cms/GetContractList",
+            "client_authentication": "body",
+            "verify_tls": False,
+        },
+        env,
+        "https://example.test/PAPI/api/Cms/GetContractList",
+        {"grant_type": "client_credentials"},
+    )
+
+    assert token == "preview-token"
+    assert captured["verify"] is False
+    assert captured["data"] == {
+        "grant_type": "client_credentials",
+        "scope": "https://example.test/PAPI/api/Cms/GetContractList",
+        "client_id": "masterAPI",
+        "client_secret": "1234",
+    }
+    assert captured["headers"] == {"Content-Type": "application/x-www-form-urlencoded"}
+
+
 def test_delete_api_removes_unreferenced_and_rejects_referenced(db_session):
     db, admin = db_session
     project = create_project(ProjectIn(name="api_delete_project", description="api project"), admin, db)
@@ -981,6 +1038,29 @@ def test_delete_api_removes_unreferenced_and_rejects_referenced(db_session):
     with pytest.raises(HTTPException) as missing_error:
         delete_api(99999, admin, db)
     assert missing_error.value.status_code == 404
+
+
+def test_delete_case_rejects_when_referenced_by_test_plan(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="case_delete_project", description="case delete project"), admin, db)
+    environment = create_test_environment(project["id"], admin, db)
+    api_row = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="case_delete_api", method="GET", path="/case"), admin, db)
+    referenced_case = create_case(TestCaseIn(project_id=project["id"], api_id=api_row["id"], name="referenced_case"), admin, db)
+    free_case = create_case(TestCaseIn(project_id=project["id"], api_id=api_row["id"], name="free_case"), admin, db)
+    plan = create_plan(TestPlanIn(project_id=project["id"], environment_id=environment["id"], api_id=api_row["id"], name="引用用例的计划", items=[referenced_case["id"]]), admin, db)
+
+    with pytest.raises(HTTPException) as referenced_error:
+        delete_case(referenced_case["id"], admin, db)
+    assert referenced_error.value.status_code == 400
+    assert "该用例已被测试计划引用" in referenced_error.value.detail
+    assert "引用用例的计划" in referenced_error.value.detail
+
+    deleted_free_case = delete_case(free_case["id"], admin, db)
+    assert deleted_free_case["is_deleted"] is True
+
+    delete_plan(plan["id"], admin, db)
+    deleted_referenced_case = delete_case(referenced_case["id"], admin, db)
+    assert deleted_referenced_case["is_deleted"] is True
 
 
 def test_create_and_filter_cases_by_project_and_api(db_session):
@@ -1316,6 +1396,142 @@ def test_execute_plan_passes_extracted_variables_to_later_case_body(db_session, 
     ]
 
 
+def test_execute_stores_truncated_long_response_but_asserts_full_text(db_session, monkeypatch):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="long_response_project", description="long response project"), admin, db)
+    environment = create_test_environment(project["id"], admin, db)
+    api_row = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="long_response_api", method="GET", path="/long"), admin, db)
+    case_row = create_case(
+        TestCaseIn(
+            project_id=project["id"],
+            api_id=api_row["id"],
+            name="long_response_case",
+            assertions=[{"type": "body_contains", "expected": "TAIL_OK"}],
+        ),
+        admin,
+        db,
+    )
+    task = ExecutionTask(executor_id=admin.id, project_id=project["id"], environment_id=environment["id"], target_type="case", target_id=case_row["id"], status="running")
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    class SmallSnapshotSettings:
+        response_body_limit = 20
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def request(self, **kwargs):
+            return executor_service.httpx.Response(200, text=("A" * 100) + "TAIL_OK")
+
+    monkeypatch.setattr(executor_service, "get_settings", lambda: SmallSnapshotSettings())
+    monkeypatch.setattr(executor_service.httpx, "Client", FakeClient)
+
+    rows = _execute(db, task)
+    response_snapshot = executor_service.parse_json(rows[0].response_snapshot_json, {})
+    assertion_results = executor_service.parse_json(rows[0].assertion_results_json, [])
+
+    assert rows[0].status == "passed"
+    assert assertion_results[0]["passed"] is True
+    assert response_snapshot["text"] == "A" * 20
+    assert response_snapshot["text_truncated"] is True
+    assert response_snapshot["text_original_length"] == 107
+    assert response_snapshot["text_stored_length"] == 20
+
+
+def test_execute_plan_appends_sm3_signature_to_rendered_xml_body(db_session, monkeypatch):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="sm3_project", description="sm3 project"), admin, db)
+    environment = create_environment(EnvironmentIn(project_id=project["id"], name="sm3_env", protocol="http", base_url="example.test", variables={"address": "测试地址"}), admin, db)
+    api_row = create_api(
+        ApiDefinitionIn(
+            project_id=project["id"],
+            environment_id=environment["id"],
+            name="sm3_api",
+            method="POST",
+            path="/submit",
+            body={"format": "xml", "template": "<REQUEST><ADDRESS>${address}</ADDRESS></REQUEST>"},
+            encryption=EncryptionConfigIn(sm3_signature=True),
+        ),
+        admin,
+        db,
+    )
+    body = "<REQUEST><ADDRESS>${address}</ADDRESS></REQUEST>"
+    case_row = create_case(TestCaseIn(project_id=project["id"], api_id=api_row["id"], name="sm3_case", request_body=body), admin, db)
+    plan = create_plan(TestPlanIn(project_id=project["id"], environment_id=environment["id"], api_id=api_row["id"], name="sm3 plan", items=[case_row["id"]]), admin, db)
+    task = ExecutionTask(executor_id=admin.id, project_id=project["id"], environment_id=environment["id"], target_type="plan", target_id=plan["id"], status="running")
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    requests = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def request(self, method, url, headers=None, params=None, content=None, **kwargs):
+            requests.append({"method": method, "url": url, "content": content})
+            return executor_service.httpx.Response(200, json={"code": 0})
+
+    monkeypatch.setattr(executor_service.httpx, "Client", FakeClient)
+
+    rows = _execute(db, task)
+    request_snapshot = executor_service.parse_json(rows[0].request_snapshot_json, {})
+    rendered_body = "<REQUEST><ADDRESS>测试地址</ADDRESS></REQUEST>"
+    signature = crypto_envelope.sm3_hex(rendered_body)
+
+    assert rows[0].status == "passed"
+    assert requests[0]["content"] == rendered_body + signature
+    assert request_snapshot["body_original"] == rendered_body
+    assert request_snapshot["body"] == rendered_body + signature
+    assert request_snapshot["sm3_signature"]["value"] == signature
+    assert request_snapshot["sm3_signature"]["source_length"] == len(rendered_body)
+
+
+def test_execute_plan_rejects_sm3_signature_with_request_encryption(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="sm3_encrypt_project", description="sm3 encrypt project"), admin, db)
+    environment = create_test_environment(project["id"], admin, db)
+    api_row = create_api(
+        ApiDefinitionIn(
+            project_id=project["id"],
+            environment_id=environment["id"],
+            name="sm3_encrypt_api",
+            method="POST",
+            path="/submit",
+            body={"format": "xml", "template": "<REQUEST/>"},
+            encryption=EncryptionConfigIn(mode="rsa_aes_sm3", encrypt_request=True, sm3_signature=True),
+        ),
+        admin,
+        db,
+    )
+    case_row = create_case(TestCaseIn(project_id=project["id"], api_id=api_row["id"], name="sm3_encrypt_case", request_body="<REQUEST/>"), admin, db)
+    plan = create_plan(TestPlanIn(project_id=project["id"], environment_id=environment["id"], api_id=api_row["id"], name="sm3 encrypt plan", items=[case_row["id"]]), admin, db)
+    task = ExecutionTask(executor_id=admin.id, project_id=project["id"], environment_id=environment["id"], target_type="plan", target_id=plan["id"], status="running")
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    rows = _execute(db, task)
+
+    assert rows[0].status == "error"
+    assert "SM3尾部签名不能与请求 Body 加密同时启用" in rows[0].error_message
+
+
 def test_execute_plan_uses_environment_per_plan_item(db_session, monkeypatch):
     db, admin = db_session
     project = create_project(ProjectIn(name="plan_item_env_project", description="plan item env"), admin, db)
@@ -1552,9 +1768,14 @@ def test_log_center_operation_execution_exception_and_detail(db_session):
     assert execution_logs["total"] == 1
     assert execution_logs["items"][0]["case_name"] == "log_case"
 
-    exception_logs = list_exception_logs(name="log", status="failed", task_id=task.id, page=1, page_size=10, _=admin, db=db)
+    log_system_exception(db, "POST", "/api/projects", "RuntimeError", "保存项目失败", "127.0.0.1")
+    exception_logs = list_exception_logs(name="/api/projects", status="error", page=1, page_size=10, _=admin, db=db)
     assert exception_logs["total"] == 1
-    assert exception_logs["items"][0]["failed_assertion"]["actual"] == 1
+    assert exception_logs["items"][0]["module"] == "system"
+    assert exception_logs["items"][0]["action"] == "exception"
+    assert exception_logs["items"][0]["path"] == "/api/projects"
+    assert exception_logs["items"][0]["error_type"] == "RuntimeError"
+    assert exception_logs["items"][0]["error_message"] == "保存项目失败"
 
     detail = get_execution_log_detail(result.id, admin, db)
     assert detail["request_snapshot"]["body"] == {"name": "demo"}

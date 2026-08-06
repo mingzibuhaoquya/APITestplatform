@@ -19,7 +19,13 @@ class CryptoEnvelopeError(Exception):
 
 
 def default_config() -> dict[str, Any]:
-    return {"mode": "none", "encrypt_request": False, "decrypt_response": False, "client_header": "appKey"}
+    return {
+        "mode": "none",
+        "encrypt_request": False,
+        "decrypt_response": False,
+        "client_header": "appKey",
+        "sm3_signature": False,
+    }
 
 
 def normalize_config(value: dict[str, Any] | None) -> dict[str, Any]:
@@ -28,7 +34,11 @@ def normalize_config(value: dict[str, Any] | None) -> dict[str, Any]:
         config["mode"] = "none"
     config["encrypt_request"] = bool(config["encrypt_request"])
     config["decrypt_response"] = bool(config["decrypt_response"])
+    if config["mode"] == "none":
+        config["encrypt_request"] = False
+        config["decrypt_response"] = False
     config["client_header"] = str(config.get("client_header") or "appKey").strip() or "appKey"
+    config["sm3_signature"] = bool(config.get("sm3_signature"))
     return config
 
 
@@ -39,6 +49,7 @@ def public_config(value: dict[str, Any] | None) -> dict[str, Any]:
         "encrypt_request": config["encrypt_request"],
         "decrypt_response": config["decrypt_response"],
         "client_header": config["client_header"],
+        "sm3_signature": config["sm3_signature"],
         "public_key_configured": FIXED_PUBLIC_KEY_PATH.is_file(),
         "private_key_configured": FIXED_PRIVATE_KEY_PATH.is_file(),
     }
@@ -62,6 +73,28 @@ def _sm3(data: bytes) -> bytes:
         return hashlib.new("sm3", data).digest()
     except ValueError as exc:
         raise CryptoEnvelopeError("SM3 is unavailable in this runtime") from exc
+
+
+def sm3_hex(text: str) -> str:
+    return _sm3(text.encode("utf-8")).hex().upper()
+
+
+def append_sm3_signature(body: Any, body_format: str) -> tuple[str, dict[str, Any]]:
+    if body_format != "xml":
+        raise CryptoEnvelopeError("SM3尾部签名第一版仅支持 XML 请求体")
+    if body in ({}, "", None):
+        raise CryptoEnvelopeError("SM3尾部签名需要非空请求体")
+    text = str(body)
+    signature = sm3_hex(text)
+    return text + signature, {
+        "enabled": True,
+        "placement": "body_tail",
+        "algorithm": "SM3",
+        "format": "HEX_UPPER",
+        "separator": "",
+        "value": signature,
+        "source_length": len(text),
+    }
 
 
 def encrypt_body(body: Any, headers: dict[str, Any], config: dict[str, Any]) -> dict[str, str]:

@@ -168,6 +168,8 @@ def _request_sections(snapshot: dict[str, Any], index: int) -> str:
     ]
     if "body_original" in snapshot:
         sections.append(_snapshot("请求原文", snapshot.get("body_original"), f"request-body-original-{index}"))
+        if snapshot.get("sm3_signature"):
+            sections.append(_snapshot("SM3签名", snapshot.get("sm3_signature"), f"request-sm3-signature-{index}"))
         sections.append(_snapshot("实际请求报文", snapshot.get("body"), f"request-body-{index}"))
     else:
         sections.append(_snapshot("请求报文", snapshot.get("body"), f"request-body-{index}"))

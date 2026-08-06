@@ -126,6 +126,7 @@ class EncryptionConfigIn(BaseModel):
     encrypt_request: bool = False
     decrypt_response: bool = False
     client_header: str = "appKey"
+    sm3_signature: bool = False
 
 
 class AuthConfigIn(BaseModel):
@@ -139,11 +140,13 @@ class AuthConfigIn(BaseModel):
     api_key_name: str = ""
     api_key_value: str = ""
     token_url: str = ""
+    grant_type: str = "client_credentials"
     client_id: str = ""
     client_secret: str = ""
     scope: str = ""
     audience: str = ""
     client_authentication: Literal["body", "basic"] = "body"
+    verify_tls: bool = True
 
 
 class ApiDefinitionIn(BaseModel):

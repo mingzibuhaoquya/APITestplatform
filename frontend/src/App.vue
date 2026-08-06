@@ -549,7 +549,7 @@
             <h2>{{ activeApiEditor.label }}</h2>
             <div class="toolbar-actions">
               <a-button @click="closeApiEditorFromPage(activeApiEditor)">关闭</a-button>
-              <a-button type="primary" @click="saveApiEditor(activeApiEditor)">保存</a-button>
+              <a-button type="primary" @click="saveApiEditor(activeApiEditor, true)">保存</a-button>
             </div>
           </div>
 
@@ -686,9 +686,7 @@
                           <a-button size="small" @click="generateApiAuthUrls(activeApiEditor, true)">一键生成 URL/Scope</a-button>
                         </div>
                         <a-form-item label="授权模式">
-                          <a-select value="client_credentials" disabled>
-                            <a-select-option value="client_credentials">Client Credentials</a-select-option>
-                          </a-select>
+                          <a-input v-model:value="activeApiEditor.auth.grantType" placeholder="client_credentials / ${grant_type}" @input="markApiEditorDirty(activeApiEditor)" />
                         </a-form-item>
                         <a-form-item label="Access Token URL" class="wide">
                           <a-input v-model:value="activeApiEditor.auth.tokenUrl" placeholder="环境地址 + /OAuth/Oauth/Token" @input="markApiEditorDirty(activeApiEditor)" />
@@ -707,6 +705,10 @@
                             <a-select-option value="body">在请求体中发送 Client ID/Secret</a-select-option>
                             <a-select-option value="basic">通过 Basic Auth 请求头发送</a-select-option>
                           </a-select>
+                        </a-form-item>
+                        <a-form-item class="wide">
+                          <a-checkbox v-model:checked="activeApiEditor.auth.verifyTls" @change="markApiEditorDirty(activeApiEditor)">校验 SSL 证书</a-checkbox>
+                          <p class="form-help-text">如果和 Postman 关闭 SSL 校验后才能获取 Token，可取消勾选。</p>
                         </a-form-item>
                         <div class="wide">
                           <a-button type="primary" :loading="activeApiEditor.auth.loading" @click="getApiEditorAccessToken(activeApiEditor)">获取 Access Token</a-button>
@@ -753,7 +755,7 @@
               </a-tab-pane>
               <a-tab-pane tab="加密配置" key="encryption">
                 <a-form layout="vertical">
-                  <a-form-item label="启用接口加密">
+                  <a-form-item label="启用加密配置">
                     <a-switch v-model:checked="activeApiEditor.encryption.enabled" @change="markApiEditorDirty(activeApiEditor)" />
                   </a-form-item>
                   <template v-if="activeApiEditor.encryption.enabled">
@@ -767,6 +769,21 @@
                       <a-checkbox v-model:checked="activeApiEditor.encryption.decryptResponse" @change="markApiEditorDirty(activeApiEditor)">响应 Body 解密</a-checkbox>
                     </a-form-item>
                     <p class="pre-script-hint">平台使用服务器预置的固定 RSA 密钥，无需上传 PEM 文件。</p>
+                  </template>
+                </a-form>
+              </a-tab-pane>
+              <a-tab-pane tab="SM3签名" key="sm3-signature">
+                <a-form layout="vertical" class="sm3-signature-form">
+                  <a-form-item label="启用SM3签名">
+                    <a-switch v-model:checked="activeApiEditor.encryption.sm3Signature" @change="markApiEditorDirty(activeApiEditor)" />
+                  </a-form-item>
+                  <template v-if="activeApiEditor.encryption.sm3Signature">
+                    <a-alert
+                      type="info"
+                      show-icon
+                      message="执行时会在变量替换和鉴权处理后，使用最终请求体原文计算 SM3，并以大写 Hex 追加到请求体尾部。"
+                    />
+                    <p class="pre-script-hint">当前第一版仅支持 XML 请求体；请求模板和用例 Body 不会被写入签名，签名只在实际发送时自动追加。</p>
                   </template>
                 </a-form>
               </a-tab-pane>
@@ -849,7 +866,7 @@
             </a-form-item>
             <a-form-item label="Body" class="wide">
               <div class="body-editor-head">
-                <span>当前格式：{{ caseBodyFormatLabel }}</span>
+                <span>当前格式：{{ caseBodyFormatLabel }}{{ caseBodySm3Hint }}</span>
                 <div class="body-editor-actions">
                   <a-button size="small" @click="reuseCaseBodyTemplate">复用请求体</a-button>
                   <a-button size="small" @click="formatCaseBody">格式化</a-button>
@@ -1168,7 +1185,10 @@
             <strong>请求头</strong><pre>{{ formatJson(caseDetail.request_headers) }}</pre>
             <template v-if="caseDetail.request_body_original !== undefined">
               <strong>请求原文</strong><pre>{{ formatPayloadForDisplay(caseDetail.request_body_original, caseDetail.body_format) }}</pre>
-              <strong>实际请求密文</strong><pre>{{ formatPayloadForDisplay(caseDetail.request_body) }}</pre>
+              <template v-if="caseDetail.sm3_signature">
+                <strong>SM3签名</strong><pre>{{ formatJson(caseDetail.sm3_signature) }}</pre>
+              </template>
+              <strong>实际请求报文</strong><pre>{{ formatPayloadForDisplay(caseDetail.request_body, caseDetail.body_format) }}</pre>
             </template>
             <template v-else>
               <strong>请求体</strong><pre>{{ formatPayloadForDisplay(caseDetail.request_body, caseDetail.body_format) }}</pre>
@@ -1196,7 +1216,7 @@
             <a-descriptions-item label="状态">{{ executionDetail.task.status }}</a-descriptions-item>
             <a-descriptions-item label="汇总">{{ formatJson(executionDetail.task.summary) }}</a-descriptions-item>
           </a-descriptions>
-          <a-table :pagination="false" :data-source="executionDetail.results" size="small" class="sub">
+          <a-table :pagination="false" :data-source="executionDetail.results" size="small" class="sub execution-progress-table" :scroll="{ x: 760 }">
             <template #expandedRowRender="{ record: row }">
               <div class="execution-result-expand">
                 <strong>参数提取结果</strong>
@@ -1207,15 +1227,17 @@
                 <pre>{{ formatJson(row.response_snapshot) }}</pre>
               </div>
             </template>
-            <a-table-column data-index="case_name" title="用例名称" width="180" />
-            <a-table-column data-index="api_name" title="接口" width="180" />
+            <a-table-column data-index="case_name" title="用例名称" width="240" class-name="log-ellipsis-cell" />
+            <a-table-column data-index="api_name" title="接口" width="220" class-name="log-ellipsis-cell" />
             <a-table-column title="状态" width="100">
               <template #default="{ record: row }">
                 <a-tag :color="executionStatusColor(row.status)">{{ executionStatusText(row.status) }}</a-tag>
               </template>
             </a-table-column>
-            <a-table-column data-index="duration_ms" title="耗时(ms)" width="110" />
-            <a-table-column data-index="error_message" title="错误信息" />
+            <a-table-column data-index="duration_ms" title="耗时(ms)" width="100" />
+            <a-table-column title="错误信息" width="220" class-name="log-ellipsis-cell">
+              <template #default="{ record: row }"><span :title="row.error_message || '-'">{{ row.error_message || '-' }}</span></template>
+            </a-table-column>
           </a-table>
           <template #footer>
             <a-button type="primary" @click="executionDetailDialogVisible = false">关闭</a-button>
@@ -1223,7 +1245,12 @@
         </a-modal>
 
         <section v-if="active === 'reports'" class="page-view">
-          <div class="toolbar"><h2>报告中心</h2></div>
+          <div class="toolbar">
+            <h2>报告中心</h2>
+            <div class="toolbar-actions">
+              <a-button danger :disabled="!selectedReportIds.length" @click="deleteSelectedReports">批量删除</a-button>
+            </div>
+          </div>
           <a-form class="search-form" layout="vertical">
             <a-form-item label="测试计划名称">
               <a-input v-model:value="reportSearch.name" placeholder="请输入测试计划名称" allow-clear @keyup.enter="searchReports" />
@@ -1242,7 +1269,12 @@
               <a-button @click="resetReportSearch">重置</a-button>
             </div>
           </a-form>
-          <a-table :pagination="false" :data-source="reportList">
+          <a-table
+            :pagination="false"
+            :data-source="reportList"
+            :row-key="(row: any) => row.id"
+            :row-selection="{ selectedRowKeys: selectedReportIds, onChange: changeSelectedReports }"
+          >
             <a-table-column data-index="target_name" title="测试计划名称" width="180" />
             <a-table-column data-index="project_name" title="项目" />
             <a-table-column data-index="environment_name" title="环境" />
@@ -1359,10 +1391,9 @@
             </a-tab-pane>
             <a-tab-pane key="exceptions" tab="异常日志">
               <a-form class="search-form log-search-form" layout="vertical">
-                <a-form-item label="名称"><a-input v-model:value="exceptionLogSearch.name" placeholder="计划 / 用例 / 接口" allow-clear @keyup.enter="searchExceptionLogs" /></a-form-item>
-                <a-form-item label="状态">
-                  <a-select v-model:value="exceptionLogSearch.status" placeholder="请选择状态" allow-clear>
-                    <a-select-option value="failed">失败</a-select-option>
+                <a-form-item label="关键字"><a-input v-model:value="exceptionLogSearch.name" placeholder="请求路径 / 异常类型 / 异常摘要" allow-clear @keyup.enter="searchExceptionLogs" /></a-form-item>
+                <a-form-item label="结果">
+                  <a-select v-model:value="exceptionLogSearch.status" placeholder="请选择结果" allow-clear>
                     <a-select-option value="error">异常</a-select-option>
                   </a-select>
                 </a-form-item>
@@ -1372,18 +1403,19 @@
                 </div>
               </a-form>
               <a-table :pagination="false" :data-source="exceptionLogs" :scroll="{ x: 1060 }" class="log-table">
-                <a-table-column data-index="target_name" title="计划/目标" width="240" class-name="log-ellipsis-cell" />
-                <a-table-column data-index="case_name" title="用例" width="260" class-name="log-ellipsis-cell" />
-                <a-table-column data-index="api_name" title="接口" width="220" class-name="log-ellipsis-cell" />
-                <a-table-column title="状态" width="90">
-                  <template #default="{ record: row }"><a-tag :color="executionStatusColor(row.status)">{{ executionStatusText(row.status) }}</a-tag></template>
+                <a-table-column data-index="path" title="请求路径" width="280" class-name="log-ellipsis-cell" />
+                <a-table-column data-index="method" title="方法" width="90" />
+                <a-table-column data-index="error_type" title="异常类型" width="180" class-name="log-ellipsis-cell" />
+                <a-table-column title="结果" width="90">
+                  <template #default="{ record: row }"><a-tag color="error">{{ operationResultText(row.result) }}</a-tag></template>
                 </a-table-column>
-                <a-table-column title="失败原因" width="360" class-name="log-ellipsis-cell">
-                  <template #default="{ record: row }"><span :title="logFailureSummary(row)">{{ logFailureSummary(row) }}</span></template>
+                <a-table-column title="异常摘要" width="360" class-name="log-ellipsis-cell">
+                  <template #default="{ record: row }"><span :title="row.error_message || '-'">{{ row.error_message || '-' }}</span></template>
                 </a-table-column>
-                <a-table-column data-index="create_date" title="时间" width="150" />
+                <a-table-column data-index="ip" title="IP" width="130" />
+                <a-table-column data-index="create_date" title="时间" width="160" />
                 <a-table-column title="操作" width="90">
-                  <template #default="{ record: row }"><a-button size="small" @click="openExecutionLogDetail(row)">详情</a-button></template>
+                  <template #default="{ record: row }"><a-button size="small" @click="openOperationLogDetail(row)">详情</a-button></template>
                 </a-table-column>
               </a-table>
               <div class="pagination">
@@ -1417,6 +1449,12 @@
           <div class="execution-result-expand log-detail-block">
             <strong>请求头</strong><pre>{{ formatJson(executionLogDetail?.request_snapshot?.headers || {}) }}</pre>
             <strong>请求参数</strong><pre>{{ formatJson(executionLogDetail?.request_snapshot?.query || {}) }}</pre>
+            <template v-if="executionLogDetail?.request_snapshot?.body_original !== undefined">
+              <strong>请求原文</strong><pre>{{ formatPayloadForDisplay(executionLogDetail?.request_snapshot?.body_original || '') }}</pre>
+            </template>
+            <template v-if="executionLogDetail?.request_snapshot?.sm3_signature">
+              <strong>SM3签名</strong><pre>{{ formatJson(executionLogDetail?.request_snapshot?.sm3_signature) }}</pre>
+            </template>
             <strong>请求报文</strong><pre>{{ formatPayloadForDisplay(executionLogDetail?.request_snapshot?.body || '') }}</pre>
             <strong>响应状态</strong><pre>{{ formatJson({ status_code: executionLogDetail?.response_snapshot?.status_code, duration_ms: executionLogDetail?.response_snapshot?.duration_ms }) }}</pre>
             <strong>响应报文</strong><pre>{{ formatResponseSnapshotBody(executionLogDetail?.response_snapshot || {}) }}</pre>
@@ -1558,6 +1596,7 @@ type ApiEncryption = {
   mode: 'none' | 'rsa_aes_sm3'
   encryptRequest: boolean
   decryptResponse: boolean
+  sm3Signature: boolean
 }
 type ApiAuth = {
   type: 'none' | 'bearer' | 'basic' | 'api_key' | 'oauth2_client_credentials'
@@ -1570,11 +1609,13 @@ type ApiAuth = {
   apiKeyName: string
   apiKeyValue: string
   tokenUrl: string
+  grantType: string
   clientId: string
   clientSecret: string
   scope: string
   audience: string
   clientAuthentication: 'body' | 'basic'
+  verifyTls: boolean
   currentToken: string
   loading: boolean
 }
@@ -1590,7 +1631,7 @@ type ApiEditor = {
   path: string
   bodyFormat: 'json' | 'xml' | 'x-www-form-data'
   bodyTemplate: string
-  activePanel: '' | 'query' | 'headers' | 'auth' | 'body' | 'pre-script' | 'encryption'
+  activePanel: '' | 'query' | 'headers' | 'auth' | 'body' | 'pre-script' | 'encryption' | 'sm3-signature'
   queryRows: KeyValueRow[]
   headerRows: KeyValueRow[]
   preScript: string
@@ -1662,6 +1703,12 @@ const BodyCodeEditor = defineComponent({
             },
             '.cm-line': {
               padding: '0 12px'
+            },
+            '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
+              backgroundColor: 'rgba(22, 119, 255, 0.28)'
+            },
+            '.cm-content ::selection': {
+              backgroundColor: 'rgba(22, 119, 255, 0.28)'
             },
             '.cm-placeholder': {
               color: '#a8b0bd'
@@ -1821,6 +1868,7 @@ const planSearch = reactive({ project_id: undefined as number | undefined, api_i
 const planPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const reportSearch = reactive({ name: '', status: '' })
 const reportPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const selectedReportIds = ref<number[]>([])
 const activeLogTab = ref('operations')
 const operationLogSearch = reactive({ module: '', action: '', result: '', start_time: '', end_time: '' })
 const executionLogSearch = reactive({ name: '', status: '' })
@@ -1903,6 +1951,7 @@ const dashboardStats = computed(() => [
 ])
 const caseSearchApis = computed(() => apis.value.filter(item => caseSearch.project_id && item.project_id === caseSearch.project_id))
 const caseFormApis = computed(() => apis.value.filter(item => caseForm.project_id && item.project_id === caseForm.project_id))
+const currentCaseApi = computed(() => selectedCaseApi())
 const caseBodyFormatLabel = computed(() => {
   const labels: Record<string, string> = {
     json: 'JSON',
@@ -1911,6 +1960,7 @@ const caseBodyFormatLabel = computed(() => {
   }
   return labels[caseForm.bodyFormat] || 'JSON'
 })
+const caseBodySm3Hint = computed(() => currentCaseApi.value?.encryption?.sm3_signature ? '，该接口已开启SM3签名' : '')
 const caseBodyPlaceholder = computed(() => {
   if (caseForm.bodyFormat === 'xml') return '<request>\\n  <token>${token}</token>\\n</request>'
   if (caseForm.bodyFormat === 'x-www-form-data') return '{\\n  "username": "admin",\\n  "password": "123456"\\n}'
@@ -2254,6 +2304,7 @@ async function loadReports() {
     }
   })
   reportList.value = data.items
+  selectedReportIds.value = selectedReportIds.value.filter(id => reportList.value.some(item => item.id === id))
   reportPagination.total = data.total
   reportPagination.page = data.page
   reportPagination.pageSize = data.page_size
@@ -2274,6 +2325,10 @@ async function resetReportSearch() {
 async function changeReportPage(page: number) {
   reportPagination.page = page
   await loadReports()
+}
+
+function changeSelectedReports(keys: Array<string | number>) {
+  selectedReportIds.value = keys.map(key => Number(key)).filter(Boolean)
 }
 
 async function loadLogs() {
@@ -2413,7 +2468,8 @@ const operationModuleMap: Record<string, string> = {
   api: '接口管理',
   case: '用例管理',
   plan: '测试计划',
-  log: '日志中心'
+  log: '日志中心',
+  system: '系统异常'
 }
 
 const operationActionMap: Record<string, string> = {
@@ -2424,7 +2480,8 @@ const operationActionMap: Record<string, string> = {
   update: '编辑',
   delete: '删除',
   status: '修改状态',
-  execute: '执行'
+  execute: '执行',
+  exception: '异常捕获'
 }
 
 const operationResultMap: Record<string, string> = {
@@ -3585,6 +3642,7 @@ function createEmptyApiEditor(): ApiEditor {
       mode: 'none',
       encryptRequest: false,
       decryptResponse: false,
+      sm3Signature: false,
     },
     auth: defaultApiAuth(),
     dirty: false
@@ -3604,11 +3662,13 @@ function defaultApiAuth(): ApiAuth {
     apiKeyName: '',
     apiKeyValue: '',
     tokenUrl: '',
+    grantType: 'client_credentials',
     clientId: '',
     clientSecret: '',
     scope: '',
     audience: '',
     clientAuthentication: 'body',
+    verifyTls: true,
     currentToken: '',
     loading: false,
   }
@@ -3616,12 +3676,14 @@ function defaultApiAuth(): ApiAuth {
 
 function encryptionFromApi(row: any): ApiEncryption {
   const encryption = row.encryption || {}
+  const sm3Signature = Boolean(encryption.sm3_signature)
   const enabled = encryption.mode === 'rsa_aes_sm3'
   return {
     enabled,
-    mode: enabled ? 'rsa_aes_sm3' : 'none',
+    mode: encryption.mode === 'rsa_aes_sm3' ? 'rsa_aes_sm3' : 'none',
     encryptRequest: Boolean(encryption.encrypt_request),
     decryptResponse: Boolean(encryption.decrypt_response),
+    sm3Signature,
   }
 }
 
@@ -3639,11 +3701,13 @@ function authFromApi(row: any): ApiAuth {
     apiKeyName: auth.api_key_name || '',
     apiKeyValue: auth.api_key_value || '',
     tokenUrl: auth.token_url || '',
+    grantType: auth.grant_type || 'client_credentials',
     clientId: auth.client_id || '',
     clientSecret: auth.client_secret || '',
     scope: auth.scope || '',
     audience: auth.audience || '',
     clientAuthentication: auth.client_authentication || 'body',
+    verifyTls: auth.verify_tls !== false,
   }
 }
 
@@ -3852,10 +3916,11 @@ function apiPayload(editor: ApiEditor) {
     body: { format: editor.bodyFormat, template: editor.bodyTemplate },
     pre_script: editor.preScript,
     encryption: {
-      mode: editor.encryption.enabled ? editor.encryption.mode : 'none',
+      mode: editor.encryption.enabled ? 'rsa_aes_sm3' : 'none',
       encrypt_request: editor.encryption.enabled && editor.encryption.encryptRequest,
       decrypt_response: editor.encryption.enabled && editor.encryption.decryptResponse,
-      client_header: 'appKey'
+      client_header: 'appKey',
+      sm3_signature: editor.encryption.sm3Signature
     },
     auth: {
       type: editor.auth.type,
@@ -3868,11 +3933,13 @@ function apiPayload(editor: ApiEditor) {
       api_key_name: editor.auth.apiKeyName,
       api_key_value: editor.auth.apiKeyValue,
       token_url: editor.auth.tokenUrl,
+      grant_type: editor.auth.grantType || 'client_credentials',
       client_id: editor.auth.clientId,
       client_secret: editor.auth.clientSecret,
       scope: editor.auth.scope,
       audience: editor.auth.audience,
-      client_authentication: editor.auth.clientAuthentication
+      client_authentication: editor.auth.clientAuthentication,
+      verify_tls: editor.auth.verifyTls
     }
   }
 }
@@ -4604,7 +4671,7 @@ function clearPlanExecutionPoller(planId: number) {
 
 function updatePlanExecutionState(planId: number, taskId: number, status: string, row?: any, results: any[] = []) {
   const resultStatusMap = new Map(results.filter(item => item?.case_id).map(item => [item.case_id, item.status]))
-  const fallbackStatus = ['queued', 'running'].includes(status) ? status : ''
+  const fallbackStatus = fallbackExecutionCaseStatus(status, results)
   const plans = [row, planList.value.find(item => item.id === planId)].filter((item, index, items) => item && items.indexOf(item) === index)
 
   for (const plan of plans) {
@@ -4614,6 +4681,70 @@ function updatePlanExecutionState(planId: number, taskId: number, status: string
       caseRow.status = resultStatusMap.get(caseRow.id) || fallbackStatus
     }
   }
+  syncExecutionDetail(planId, taskId, status, row, results)
+}
+
+function initialPlanExecutionResults(row: any, status = 'queued') {
+  return (row?.cases || []).map((caseRow: any) => ({
+    id: `pending-${caseRow.id}`,
+    case_id: caseRow.id,
+    case_name: caseRow.name || '',
+    api_name: caseRow.api_name || '',
+    status,
+    request_snapshot: {},
+    response_snapshot: {},
+    assertion_results: [],
+    duration_ms: 0,
+    error_message: '',
+  }))
+}
+
+function mergePlanExecutionResults(row: any, results: any[], fallbackStatus: string) {
+  const resultMap = new Map((results || []).filter(item => item?.case_id).map(item => [item.case_id, item]))
+  return (row?.cases || []).map((caseRow: any) => resultMap.get(caseRow.id) || {
+    id: `pending-${caseRow.id}`,
+    case_id: caseRow.id,
+    case_name: caseRow.name || '',
+    api_name: caseRow.api_name || '',
+    status: fallbackStatus,
+    request_snapshot: {},
+    response_snapshot: {},
+    assertion_results: [],
+    duration_ms: 0,
+    error_message: '',
+  })
+}
+
+function fallbackExecutionCaseStatus(status: string, results: any[] = []) {
+  if (['queued', 'running'].includes(status)) return status
+  if (!results.length && ['passed', 'failed', 'error'].includes(status)) return status
+  return ''
+}
+
+function resetExecutionDetailForPlan(row: any, taskId: number, status = 'queued') {
+  executionDetail.task = {
+    id: taskId,
+    target_name: row?.name || '',
+    status,
+    summary: {}
+  }
+  executionDetail.results = initialPlanExecutionResults(row, status)
+  executionDetailDialogVisible.value = true
+}
+
+function syncExecutionDetail(planId: number, taskId: number, status: string, row?: any, results: any[] = []) {
+  if (!executionDetailDialogVisible.value || executionDetail.task?.id !== taskId) {
+    return
+  }
+  const plan = row || planList.value.find(item => item.id === planId)
+  executionDetail.task = {
+    ...(executionDetail.task || {}),
+    id: taskId,
+    target_name: plan?.name || executionDetail.task?.target_name || '',
+    status,
+  }
+  const fallbackStatus = fallbackExecutionCaseStatus(status, results)
+  executionDetail.results = mergePlanExecutionResults(plan, results, fallbackStatus)
 }
 
 async function refreshExecutionViews() {
@@ -4637,6 +4768,10 @@ function pollPlanExecution(planId: number, taskId: number, row?: any) {
       const status = data?.task?.status || ''
       if (status) {
         updatePlanExecutionState(planId, taskId, status, row, data?.results || [])
+        if (executionDetailDialogVisible.value && executionDetail.task?.id === taskId) {
+          executionDetail.task = data.task
+          syncExecutionDetail(planId, taskId, status, row, data?.results || [])
+        }
       }
       if (terminalStatuses.has(status) || attempts >= 30) {
         clearPlanExecutionPoller(planId)
@@ -4660,6 +4795,7 @@ async function executePlan(row: any) {
   const { data } = await api.post(`/plans/${row.id}/execute`)
   const taskId = data.id
   const status = data.status || 'queued'
+  resetExecutionDetailForPlan(row, taskId, status)
   updatePlanExecutionState(row.id, taskId, status, row)
   message.success('执行任务已提交')
   await refreshExecutionViews()
@@ -4721,6 +4857,7 @@ async function openCaseDetailDialog(row: any, environmentId?: number, executionI
     request_headers: requestHeaders,
     request_body: requestSnapshot.body ?? row.request_body ?? {},
     request_body_original: requestSnapshot.body_original,
+    sm3_signature: requestSnapshot.sm3_signature,
     assertions: row.assertions || [],
     extractors: row.extractors || [],
     extracted_variables: responseSnapshot.extracted_variables || [],
@@ -4813,8 +4950,11 @@ async function openExecutionDetail(row: any) {
   }
   const { data } = await api.get(`/executions/${row.last_execution_id}`)
   executionDetail.task = data.task
-  executionDetail.results = data.results || []
+  executionDetail.results = mergePlanExecutionResults(row, data.results || [], fallbackExecutionCaseStatus(data.task?.status, data.results || []))
   executionDetailDialogVisible.value = true
+  if (['queued', 'running'].includes(data.task?.status)) {
+    pollPlanExecution(row.id, row.last_execution_id, row)
+  }
 }
 
 async function openReport(row: any) {
@@ -4847,9 +4987,34 @@ async function deleteReport(row: any) {
   } catch {
     return
   }
-  await api.delete(`/executions/${row.id}`)
+  await deleteReportsByIds([row.id])
   message.success('报告已删除')
   await loadReports()
+}
+
+async function deleteSelectedReports() {
+  const ids = [...selectedReportIds.value]
+  if (!ids.length) {
+    message.warning('请先选择要删除的报告')
+    return
+  }
+  try {
+    await confirmAction(`确认删除选中的 ${ids.length} 条报告吗？删除后报告中心将不再展示。`, '批量删除报告', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  await deleteReportsByIds(ids)
+  selectedReportIds.value = []
+  message.success('报告已批量删除')
+  await loadReports()
+}
+
+async function deleteReportsByIds(ids: number[]) {
+  await Promise.all(ids.map(id => api.delete(`/executions/${id}`)))
 }
 
 async function runCase() {

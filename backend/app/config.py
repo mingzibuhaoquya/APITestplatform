@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     app_secret: str = Field(default="dev-secret")
     admin_username: str = Field(default="admin")
     admin_password: str = Field(default="admin123")
-    response_body_limit: int = Field(default=65535)
+    response_body_limit: int = Field(default=30000)
     queue_poll_interval_seconds: float = Field(default=1.0)
 
 

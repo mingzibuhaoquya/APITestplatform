@@ -5,12 +5,13 @@ import time
 from urllib.parse import urljoin, urlparse
 from uuid import uuid4
 import httpx
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from ..config import get_settings
 from ..models import ApiDefinition, Environment, ExecutionResult, ExecutionTask, ScenarioCase, TestCase, TestSuite
 from ..utils import dump_json, parse_json
 from .assertions import all_passed, run_assertions
-from .crypto_envelope import CryptoEnvelopeError, decrypt_body, encrypt_body, normalize_config
+from .crypto_envelope import CryptoEnvelopeError, append_sm3_signature, decrypt_body, encrypt_body, normalize_config
 from .jsonpath import find_jsonpath
 from .pre_scripts import PreScriptError, run_pre_script
 from .report import build_html_report
@@ -225,7 +226,12 @@ def _execute_case(
         )
     encryption = normalize_config(parse_json(api.encryption_config_json, {}))
     sent_body = rendered_body
+    sm3_signature = None
     try:
+        if encryption["encrypt_request"] and encryption["sm3_signature"]:
+            raise CryptoEnvelopeError("SM3尾部签名不能与请求 Body 加密同时启用")
+        if encryption["sm3_signature"]:
+            sent_body, sm3_signature = append_sm3_signature(rendered_body, body_format)
         if encryption["encrypt_request"]:
             sent_body = encrypt_body(rendered_body, rendered_headers, encryption)
     except CryptoEnvelopeError as exc:
@@ -242,15 +248,17 @@ def _execute_case(
         "body": sent_body,
         "pre_script_logs": script_logs,
     }
-    if encryption["encrypt_request"]:
+    if encryption["encrypt_request"] or sm3_signature:
         request_snapshot["body_original"] = rendered_body
+    if sm3_signature:
+        request_snapshot["sm3_signature"] = sm3_signature
 
     started = time.perf_counter()
     try:
         with httpx.Client(timeout=30) as client:
             response = _send_request(client, request_snapshot, body_format)
         duration_ms = int((time.perf_counter() - started) * 1000)
-        text = response.text[: get_settings().response_body_limit]
+        text = response.text
         parsed = response_json_or_text(text)
         response_snapshot = {
             "status_code": response.status_code,
@@ -272,7 +280,8 @@ def _execute_case(
         assertion_results = run_assertions(response_snapshot, parse_json(case.assertions_json, []))
         response_snapshot["extracted_variables"] = _extract_variables(variables, response_snapshot, parse_json(case.extractors_json, []))
         status = "passed" if all_passed(assertion_results) else "failed"
-        return _save_result(db, task.id, case_id, status, request_snapshot, response_snapshot, assertion_results, duration_ms, "")
+        stored_response_snapshot = _response_snapshot_for_storage(response_snapshot)
+        return _save_result(db, task.id, case_id, status, request_snapshot, stored_response_snapshot, assertion_results, duration_ms, "")
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
         return _save_result(db, task.id, case_id, "error", request_snapshot, {}, [], duration_ms, str(exc))
@@ -306,6 +315,35 @@ def _extract_values(source: str, body: object, text: str, path: str) -> list:
     if source == "xmlpath":
         return find_xmlpath(text, path)
     return find_jsonpath(body, path)
+
+
+def _truncate_snapshot_text(value: object, limit: int) -> tuple[object, bool, int]:
+    if not isinstance(value, str):
+        return value, False, 0
+    original_length = len(value)
+    if original_length <= limit:
+        return value, False, original_length
+    return value[:limit], True, original_length
+
+
+def _response_snapshot_for_storage(response_snapshot: dict) -> dict:
+    stored = dict(response_snapshot)
+    limit = get_settings().response_body_limit
+    for key in ("text", "decrypted_text"):
+        value, truncated, original_length = _truncate_snapshot_text(stored.get(key), limit)
+        stored[key] = value
+        if truncated:
+            stored[f"{key}_truncated"] = True
+            stored[f"{key}_original_length"] = original_length
+            stored[f"{key}_stored_length"] = len(value) if isinstance(value, str) else 0
+
+    if stored.get("text_truncated"):
+        stored["json"] = None
+        stored["json_truncated"] = True
+    if stored.get("decrypted_text_truncated"):
+        stored["decrypted_json"] = None
+        stored["decrypted_json_truncated"] = True
+    return stored
 
 
 def _request_body_format(api: ApiDefinition) -> str:
@@ -353,7 +391,11 @@ def _save_result(
         error_message=error_message,
     )
     db.add(row)
-    db.commit()
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise
     db.refresh(row)
     return row
 
@@ -369,16 +411,19 @@ def _default_token_url(env: Environment) -> str:
 def _token_cache_key(auth: dict, env: Environment, variables: dict) -> str:
     key_data = {
         "token_url": render_variables(auth.get("token_url") or _default_token_url(env), variables),
+        "grant_type": render_variables(auth.get("grant_type") or "client_credentials", variables),
         "client_id": render_variables(auth.get("client_id", ""), variables),
         "scope": render_variables(auth.get("scope", ""), variables),
         "audience": render_variables(auth.get("audience", ""), variables),
         "client_authentication": auth.get("client_authentication", "body"),
+        "verify_tls": auth.get("verify_tls", True),
     }
     return dump_json(key_data)
 
 
 def _request_oauth2_client_credentials_token(auth: dict, env: Environment, request_url: str, variables: dict) -> str:
     token_url = render_variables(auth.get("token_url") or _default_token_url(env), variables)
+    grant_type = render_variables(auth.get("grant_type") or "client_credentials", variables)
     client_id = render_variables(auth.get("client_id", ""), variables)
     client_secret = render_variables(auth.get("client_secret", ""), variables)
     scope = render_variables(auth.get("scope") or request_url, variables)
@@ -388,7 +433,7 @@ def _request_oauth2_client_credentials_token(auth: dict, env: Environment, reque
     if not client_id:
         raise ValueError("OAuth2 client ID is required")
     data = {
-        "grant_type": "client_credentials",
+        "grant_type": grant_type,
         "scope": scope,
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
@@ -400,13 +445,23 @@ def _request_oauth2_client_credentials_token(auth: dict, env: Environment, reque
         data["client_secret"] = client_secret
     if audience:
         data["audience"] = audience
-    with httpx.Client(timeout=30) as client:
-        response = client.post(token_url, data=data, headers=headers, auth=auth_param)
+    verify_tls = bool(auth.get("verify_tls", True))
+    try:
+        with httpx.Client(timeout=30, verify=verify_tls) as client:
+            response = client.post(token_url, data=data, headers=headers, auth=auth_param)
+    except httpx.ConnectError as exc:
+        message = str(exc)
+        if "CERTIFICATE_VERIFY_FAILED" in message:
+            raise ValueError("OAuth2 token 请求 SSL 证书校验失败，请使用证书匹配的域名，或在鉴权配置中勾选“忽略 SSL 证书校验”") from exc
+        raise ValueError(f"OAuth2 token 请求连接失败：{message}") from exc
+    except httpx.RequestError as exc:
+        raise ValueError(f"OAuth2 token 请求失败：{exc}") from exc
+    response_preview = response.text[:500].replace("\r", " ").replace("\n", " ")
     if response.status_code >= 400:
-        raise ValueError(f"OAuth2 token request failed with status {response.status_code}")
+        raise ValueError(f"OAuth2 token 请求失败，状态码 {response.status_code}，响应：{response_preview}")
     payload = response_json_or_text(response.text)
     if not isinstance(payload, dict) or not payload.get("access_token"):
-        raise ValueError("OAuth2 token response does not contain access_token")
+        raise ValueError(f"OAuth2 token 响应中没有 access_token，响应：{response_preview}")
     return str(payload["access_token"])
 
 

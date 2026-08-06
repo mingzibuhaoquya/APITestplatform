@@ -46,6 +46,19 @@ def _operation_log_out(row: OperationLog, db: Session):
     }
 
 
+def _system_exception_log_out(row: OperationLog, db: Session):
+    content = parse_json(row.content, {})
+    if not isinstance(content, dict):
+        content = {}
+    return {
+        **_operation_log_out(row, db),
+        "method": content.get("method", ""),
+        "path": content.get("path", ""),
+        "error_type": content.get("error_type", ""),
+        "error_message": content.get("message", row.content or ""),
+    }
+
+
 def _execution_target_name(row: ExecutionTask, db: Session) -> str:
     if row.target_type == "plan":
         plan = db.get(TestSuite, row.target_id)
@@ -194,6 +207,15 @@ def _plan_items_with_environment(items, default_environment_id: int):
     return normalized
 
 
+def _plans_referencing_case(db: Session, case_id: int) -> list[TestSuite]:
+    rows = db.query(TestSuite).filter(TestSuite.is_deleted.is_(False)).all()
+    return [
+        row
+        for row in rows
+        if any(item["case_id"] == case_id for item in _plan_items_with_environment(parse_json(row.items_json, []), row.environment_id))
+    ]
+
+
 def _plan_out(row: TestSuite, db: Session):
     project = db.get(Project, row.project_id)
     environment = db.get(Environment, row.environment_id) if row.environment_id else None
@@ -209,6 +231,8 @@ def _plan_out(row: TestSuite, db: Session):
     if row.last_execution_id:
         results = db.query(ExecutionResult).filter(ExecutionResult.task_id == row.last_execution_id).all()
         result_status_map = {result.case_id: result.status for result in results if result.case_id}
+        if not result_status_map and row.last_status in {"passed", "failed", "error"}:
+            fallback_case_status = row.last_status
     if item_ids:
         rows = db.query(TestCase).filter(TestCase.id.in_(item_ids), TestCase.is_deleted.is_(False)).all()
         row_map = {item.id: item for item in rows}
@@ -565,8 +589,11 @@ def preview_api_auth_token(payload: AuthTokenPreviewIn, _: User = Depends(curren
         raise HTTPException(status_code=404, detail="environment does not exist")
     auth = payload.auth.model_dump()
     if auth.get("type") != "oauth2_client_credentials":
-        raise HTTPException(status_code=400, detail="only OAuth2 client credentials can get token")
-    token = get_oauth2_preview_token(auth, env, payload.path or "/", _initial_variables(db, env.id))
+        raise HTTPException(status_code=400, detail="仅 OAuth2 Client Credentials 支持获取 Token")
+    try:
+        token = get_oauth2_preview_token(auth, env, payload.path or "/", _initial_variables(db, env.id))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"access_token": token}
 
 
@@ -608,9 +635,9 @@ def update_api(api_id: int, payload: ApiDefinitionUpdate, user: User = Depends(c
 def delete_api(api_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     row = db.get(ApiDefinition, api_id)
     if not row:
-        raise HTTPException(status_code=404, detail="api does not exist")
+        raise HTTPException(status_code=404, detail="接口不存在")
     if db.query(TestCase).filter(TestCase.api_id == api_id, TestCase.is_deleted.is_(False)).first():
-        raise HTTPException(status_code=400, detail="api is referenced by test cases")
+        raise HTTPException(status_code=400, detail="该接口已被用例引用，请先删除或调整相关用例")
     data = _api_out(row, db)
     db.delete(row)
     db.commit()
@@ -704,6 +731,11 @@ def delete_case(case_id: int, user: User = Depends(current_user), db: Session = 
     row = db.get(TestCase, case_id)
     if not row or row.is_deleted:
         raise HTTPException(status_code=404, detail="用例不存在")
+    referenced_plans = _plans_referencing_case(db, case_id)
+    if referenced_plans:
+        plan_names = "、".join(plan.name for plan in referenced_plans[:3])
+        suffix = "等" if len(referenced_plans) > 3 else ""
+        raise HTTPException(status_code=400, detail=f"该用例已被测试计划引用，请先删除或调整相关测试计划：{plan_names}{suffix}")
     row.is_deleted = True
     db.commit()
     db.refresh(row)
@@ -935,17 +967,15 @@ def list_exception_logs(
     db: Session = Depends(get_db),
 ):
     items = []
-    for result, task in _execution_log_rows(db):
-        assertions = parse_json(result.assertion_results_json, [])
-        has_failed_assertion = any(not item.get("passed") for item in assertions)
-        if result.status not in {"failed", "error"} and not result.error_message and not has_failed_assertion:
+    query = db.query(OperationLog).filter(OperationLog.module == "system", OperationLog.action == "exception")
+    if status.strip():
+        query = query.filter(OperationLog.result == status.strip())
+    keyword = name.strip()
+    for row in query.order_by(OperationLog.id.desc()).all():
+        item = _system_exception_log_out(row, db)
+        if task_id:
             continue
-        if task_id and task.id != task_id:
-            continue
-        if status.strip() and result.status != status.strip():
-            continue
-        item = _execution_log_out(result, task, db)
-        if name.strip() and name.strip() not in item["target_name"] and name.strip() not in item["case_name"] and name.strip() not in item["api_name"]:
+        if keyword and keyword not in item["path"] and keyword not in item["error_type"] and keyword not in item["error_message"]:
             continue
         items.append(item)
     return _paginate_rows(items, page, page_size)

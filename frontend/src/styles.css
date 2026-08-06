@@ -706,6 +706,10 @@ textarea {
   padding: 8px 14px;
 }
 
+.sm3-signature-form .ant-form-item {
+  margin-bottom: 8px;
+}
+
 .kv-title {
   display: flex;
   align-items: center;
@@ -849,6 +853,14 @@ textarea {
   text-overflow: ellipsis;
 }
 
+.execution-progress-table {
+  max-width: 100%;
+}
+
+.execution-progress-table .ant-table-container {
+  overflow-x: auto;
+}
+
 .menu-permission-group {
   display: grid;
   gap: 10px;
@@ -908,14 +920,22 @@ textarea.code-input,
 }
 
 .body-code-editor {
+  width: 100%;
+  min-width: 0;
   min-height: 220px;
   max-height: 70vh;
-  resize: both;
+  resize: vertical;
   overflow: auto;
 }
 
 .body-code-editor .cm-editor {
+  width: 100%;
+  min-width: 0;
   height: 100%;
+}
+
+.body-code-editor .cm-scroller {
+  max-width: 100%;
 }
 
 .body-code-editor .cm-gutters {
