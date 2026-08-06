@@ -778,11 +778,7 @@
                     <a-switch v-model:checked="activeApiEditor.encryption.sm3Signature" @change="markApiEditorDirty(activeApiEditor)" />
                   </a-form-item>
                   <template v-if="activeApiEditor.encryption.sm3Signature">
-                    <a-alert
-                      type="info"
-                      show-icon
-                      message="执行时会在变量替换和鉴权处理后，使用最终请求体原文计算 SM3，并以大写 Hex 追加到请求体尾部。"
-                    />
+                    <p class="pre-script-hint">执行时会在变量替换和鉴权处理后，使用最终请求体原文计算 SM3，并以大写 Hex 追加到请求体尾部。</p>
                     <p class="pre-script-hint">当前第一版仅支持 XML 请求体；请求模板和用例 Body 不会被写入签名，签名只在实际发送时自动追加。</p>
                   </template>
                 </a-form>
