@@ -152,15 +152,18 @@ textarea {
 
 .main-layout {
   min-width: 0;
+  width: calc(100vw - 232px);
   margin-left: 232px;
   transition: margin-left 0.2s ease;
 }
 
 .main-layout-collapsed {
+  width: calc(100vw - 72px);
   margin-left: 72px;
 }
 
 .main-layout-mobile {
+  width: 100vw;
   margin-left: 0;
 }
 
@@ -801,6 +804,66 @@ textarea {
 .execution-result-expand {
   display: grid;
   gap: 8px;
+}
+
+.log-tabs {
+  padding: 0 0 4px;
+}
+
+.page-view > .log-search-form {
+  grid-template-columns: repeat(3, minmax(180px, 260px)) auto;
+  justify-content: start;
+  padding: 12px 14px 2px;
+}
+
+.log-search-form .ant-form-item {
+  margin-bottom: 10px;
+}
+
+.log-detail-block {
+  margin-top: 14px;
+}
+
+.log-table {
+  width: 100%;
+}
+
+.log-table .ant-table-cell {
+  white-space: nowrap;
+}
+
+.log-table .log-wrap-cell {
+  white-space: normal;
+  word-break: break-word;
+}
+
+.log-table .log-ellipsis-cell {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.log-table .log-ellipsis-cell > * {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.menu-permission-group {
+  display: grid;
+  gap: 10px;
+}
+
+.menu-permission-section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.menu-permission-section strong {
+  min-width: 72px;
+  color: #526174;
 }
 
 .execution-result-expand strong {

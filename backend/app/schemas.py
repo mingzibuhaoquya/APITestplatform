@@ -25,12 +25,13 @@ class UserCreate(BaseModel):
     username: str
     password: str = Field(min_length=6)
     real_name: str = ""
-    role: Role = "tester"
+    role: str = "tester"
 
 
 class UserUpdate(BaseModel):
     username: str
     real_name: str
+    role: str = "tester"
 
 
 class UserStatusUpdate(BaseModel):
@@ -42,6 +43,8 @@ class UserOut(BaseModel):
     username: str
     real_name: str
     role: str
+    role_name: str = ""
+    menus: list[str] = []
     status: str
     create_date: str | None
     update_date: str | None
@@ -49,6 +52,41 @@ class UserOut(BaseModel):
 
 class UserListOut(BaseModel):
     items: list[UserOut]
+    total: int
+    page: int
+    page_size: int
+
+
+class RoleIn(BaseModel):
+    code: str
+    name: str
+    description: str = ""
+    status: Literal["active", "disabled"] = "active"
+    menus: list[str] = []
+
+
+class RoleUpdate(BaseModel):
+    name: str
+    description: str = ""
+    status: Literal["active", "disabled"] = "active"
+    menus: list[str] = []
+
+
+class RoleOut(BaseModel):
+    id: int
+    code: str
+    name: str
+    description: str
+    status: str
+    is_builtin: bool
+    menus: list[str]
+    user_count: int = 0
+    create_date: str | None
+    update_date: str | None
+
+
+class RoleListOut(BaseModel):
+    items: list[RoleOut]
     total: int
     page: int
     page_size: int

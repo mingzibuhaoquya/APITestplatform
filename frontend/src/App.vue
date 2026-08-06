@@ -44,45 +44,35 @@
           <span v-if="!sidebarCollapsed">接口测试平台</span>
         </div>
         <a-menu :selected-keys="[active]" mode="inline" @select="handleMenuSelect">
-          <a-menu-item key="dashboard"><template #icon><DashboardOutlined /></template>数据概览</a-menu-item>
-          <a-sub-menu key="project-env">
-            <template #icon><FolderOpenOutlined /></template>
-            <template #title>项目环境</template>
-            <a-menu-item key="projects"><template #icon><ProjectOutlined /></template>项目管理</a-menu-item>
-            <a-menu-item key="environments"><template #icon><CloudServerOutlined /></template>环境管理</a-menu-item>
-          </a-sub-menu>
-          <a-menu-item key="apis"><template #icon><ApiOutlined /></template>接口管理</a-menu-item>
-          <a-menu-item key="cases"><template #icon><FileTextOutlined /></template>用例管理</a-menu-item>
-          <a-menu-item key="execute"><template #icon><PlayCircleOutlined /></template>测试计划</a-menu-item>
-          <a-menu-item key="reports"><template #icon><BarChartOutlined /></template>报告中心</a-menu-item>
-          <a-menu-item key="logs"><template #icon><ProfileOutlined /></template>日志中心</a-menu-item>
-          <a-sub-menu key="system">
-            <template #icon><SettingOutlined /></template>
-            <template #title>系统管理</template>
-            <a-menu-item key="accounts"><template #icon><TeamOutlined /></template>用户管理</a-menu-item>
-          </a-sub-menu>
+          <template v-for="item in visibleMenuGroups" :key="item.key">
+            <a-sub-menu v-if="item.children?.length" :key="item.key">
+              <template #icon><component :is="item.icon" /></template>
+              <template #title>{{ item.label }}</template>
+              <a-menu-item v-for="child in item.children" :key="child.key">
+                <template #icon><component :is="child.icon" /></template>{{ child.label }}
+              </a-menu-item>
+            </a-sub-menu>
+            <a-menu-item v-else :key="item.key">
+              <template #icon><component :is="item.icon" /></template>{{ item.label }}
+            </a-menu-item>
+          </template>
         </a-menu>
       </a-layout-sider>
       <a-drawer v-else v-model:open="mobileSidebarOpen" placement="left" :closable="false" :width="232" class="mobile-nav-drawer">
         <div class="brand"><img src="/company-logo.png" alt="接口测试平台" /><span>接口测试平台</span></div>
         <a-menu :selected-keys="[active]" mode="inline" @select="handleMenuSelect">
-          <a-menu-item key="dashboard"><template #icon><DashboardOutlined /></template>数据概览</a-menu-item>
-          <a-sub-menu key="project-env">
-            <template #icon><FolderOpenOutlined /></template>
-            <template #title>项目环境</template>
-            <a-menu-item key="projects"><template #icon><ProjectOutlined /></template>项目管理</a-menu-item>
-            <a-menu-item key="environments"><template #icon><CloudServerOutlined /></template>环境管理</a-menu-item>
-          </a-sub-menu>
-          <a-menu-item key="apis"><template #icon><ApiOutlined /></template>接口管理</a-menu-item>
-          <a-menu-item key="cases"><template #icon><FileTextOutlined /></template>用例管理</a-menu-item>
-          <a-menu-item key="execute"><template #icon><PlayCircleOutlined /></template>测试计划</a-menu-item>
-          <a-menu-item key="reports"><template #icon><BarChartOutlined /></template>报告中心</a-menu-item>
-          <a-menu-item key="logs"><template #icon><ProfileOutlined /></template>日志中心</a-menu-item>
-          <a-sub-menu key="system">
-            <template #icon><SettingOutlined /></template>
-            <template #title>系统管理</template>
-            <a-menu-item key="accounts"><template #icon><TeamOutlined /></template>用户管理</a-menu-item>
-          </a-sub-menu>
+          <template v-for="item in visibleMenuGroups" :key="item.key">
+            <a-sub-menu v-if="item.children?.length" :key="item.key">
+              <template #icon><component :is="item.icon" /></template>
+              <template #title>{{ item.label }}</template>
+              <a-menu-item v-for="child in item.children" :key="child.key">
+                <template #icon><component :is="child.icon" /></template>{{ child.label }}
+              </a-menu-item>
+            </a-sub-menu>
+            <a-menu-item v-else :key="item.key">
+              <template #icon><component :is="item.icon" /></template>{{ item.label }}
+            </a-menu-item>
+          </template>
         </a-menu>
       </a-drawer>
       <a-layout
@@ -165,7 +155,9 @@
           <a-table :pagination="false" :data-source="users">
             <a-table-column data-index="username" title="用户名" />
             <a-table-column data-index="real_name" title="姓名" />
-            <a-table-column data-index="role" title="角色" />
+            <a-table-column title="角色">
+              <template #default="{ record: row }">{{ row.role_name || row.role }}</template>
+            </a-table-column>
             <a-table-column title="状态">
               <template #default="{ record: row }">
                 <a-tag :color="row.status === 'active' ? 'success' : 'warning'">
@@ -207,6 +199,11 @@
               <a-form-item label="姓名">
                 <a-input v-model:value="userForm.real_name" placeholder="请输入姓名" />
               </a-form-item>
+              <a-form-item label="角色">
+                <a-select v-model:value="userForm.role" placeholder="请选择角色">
+                  <a-select-option v-for="role in roles" :key="role.code" :value="role.code">{{ role.name }}</a-select-option>
+                </a-select>
+              </a-form-item>
             </a-form>
             <template #footer>
               <a-button @click="cancelCreateUser">取消</a-button>
@@ -222,11 +219,113 @@
               <a-form-item label="姓名">
                 <a-input v-model:value="editUserForm.real_name" placeholder="请输入姓名" />
               </a-form-item>
+              <a-form-item label="角色">
+                <a-select v-model:value="editUserForm.role" placeholder="请选择角色">
+                  <a-select-option v-for="role in roles" :key="role.code" :value="role.code">{{ role.name }}</a-select-option>
+                </a-select>
+              </a-form-item>
             </a-form>
             <template #footer>
               <a-button @click="cancelEditUser">取消</a-button>
               <a-button type="primary" @click="updateUser">确认</a-button>
             </template>
+          </a-modal>
+        </section>
+
+        <section v-if="active === 'roles'" class="page-view">
+          <div class="toolbar"><h2>角色管理</h2><a-button type="primary" @click="openCreateRoleDialog"><template #icon><PlusOutlined /></template>新增角色</a-button></div>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="角色名称">
+              <a-input v-model:value="roleSearch.name" placeholder="请输入角色名称" allow-clear @keyup.enter="searchRoles" />
+            </a-form-item>
+            <a-form-item label="状态">
+              <a-select v-model:value="roleSearch.status" placeholder="请选择状态" allow-clear>
+                <a-select-option value="active">启用</a-select-option>
+                <a-select-option value="disabled">禁用</a-select-option>
+              </a-select>
+            </a-form-item>
+            <div class="search-actions">
+              <a-button type="primary" @click="searchRoles">搜索</a-button>
+              <a-button @click="resetRoleSearch">重置</a-button>
+            </div>
+          </a-form>
+          <a-table :pagination="false" :data-source="roles">
+            <a-table-column data-index="code" title="角色编码" width="150" />
+            <a-table-column data-index="name" title="角色名称" width="150" />
+            <a-table-column data-index="description" title="描述" />
+            <a-table-column title="状态" width="100">
+              <template #default="{ record: row }"><a-tag :color="row.status === 'active' ? 'success' : 'warning'">{{ statusText(row.status) }}</a-tag></template>
+            </a-table-column>
+            <a-table-column title="类型" width="100">
+              <template #default="{ record: row }"><a-tag :color="row.is_builtin ? 'blue' : 'default'">{{ row.is_builtin ? '内置' : '自定义' }}</a-tag></template>
+            </a-table-column>
+            <a-table-column data-index="user_count" title="用户数" width="90" />
+            <a-table-column title="菜单权限" width="240">
+              <template #default="{ record: row }">{{ roleMenuLabels(row.menus).join('、') || '-' }}</template>
+            </a-table-column>
+            <a-table-column title="操作" width="140" fixed="right">
+              <template #default="{ record: row }">
+                <div class="table-actions">
+                  <a-button size="small" @click="openEditRoleDialog(row)">编辑</a-button>
+                  <a-button size="small" danger :disabled="row.is_builtin || row.user_count > 0" @click="deleteRole(row)">删除</a-button>
+                </div>
+              </template>
+            </a-table-column>
+          </a-table>
+          <div class="pagination">
+            <a-pagination :show-total="paginationTotal" show-less-items :current="rolePagination.page" :page-size="rolePagination.pageSize" :total="rolePagination.total" @change="changeRolePage" />
+          </div>
+
+          <a-modal v-model:open="createRoleDialogVisible" title="新增角色" width="640px" @after-close="resetRoleForm">
+            <a-form layout="vertical" @submit.prevent="createRole">
+              <a-form-item label="角色编码"><a-input v-model:value="roleForm.code" placeholder="例如: reviewer" /></a-form-item>
+              <a-form-item label="角色名称"><a-input v-model:value="roleForm.name" placeholder="请输入角色名称" /></a-form-item>
+              <a-form-item label="描述"><a-textarea v-model:value="roleForm.description" :auto-size="{ minRows: 2, maxRows: 4 }" placeholder="请输入描述" /></a-form-item>
+              <a-form-item label="状态">
+                <a-select v-model:value="roleForm.status">
+                  <a-select-option value="active">启用</a-select-option>
+                  <a-select-option value="disabled">禁用</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item label="菜单权限">
+                <a-checkbox-group v-model:value="roleForm.menus" class="menu-permission-group">
+                  <template v-for="group in roleMenus" :key="group.key">
+                    <div v-if="group.children?.length" class="menu-permission-section">
+                      <strong>{{ group.label }}</strong>
+                      <a-checkbox v-for="child in group.children" :key="child.key" :value="child.key">{{ child.label }}</a-checkbox>
+                    </div>
+                    <a-checkbox v-else :value="group.key">{{ group.label }}</a-checkbox>
+                  </template>
+                </a-checkbox-group>
+              </a-form-item>
+            </a-form>
+            <template #footer><a-button @click="cancelCreateRole">取消</a-button><a-button type="primary" @click="createRole">确认</a-button></template>
+          </a-modal>
+
+          <a-modal v-model:open="editRoleDialogVisible" title="编辑角色" width="640px" @after-close="resetEditRoleForm">
+            <a-form layout="vertical" @submit.prevent="updateRole">
+              <a-form-item label="角色编码"><a-input v-model:value="editRoleForm.code" disabled /></a-form-item>
+              <a-form-item label="角色名称"><a-input v-model:value="editRoleForm.name" placeholder="请输入角色名称" /></a-form-item>
+              <a-form-item label="描述"><a-textarea v-model:value="editRoleForm.description" :auto-size="{ minRows: 2, maxRows: 4 }" placeholder="请输入描述" /></a-form-item>
+              <a-form-item label="状态">
+                <a-select v-model:value="editRoleForm.status">
+                  <a-select-option value="active">启用</a-select-option>
+                  <a-select-option value="disabled">禁用</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item label="菜单权限">
+                <a-checkbox-group v-model:value="editRoleForm.menus" class="menu-permission-group">
+                  <template v-for="group in roleMenus" :key="group.key">
+                    <div v-if="group.children?.length" class="menu-permission-section">
+                      <strong>{{ group.label }}</strong>
+                      <a-checkbox v-for="child in group.children" :key="child.key" :value="child.key">{{ child.label }}</a-checkbox>
+                    </div>
+                    <a-checkbox v-else :value="group.key">{{ group.label }}</a-checkbox>
+                  </template>
+                </a-checkbox-group>
+              </a-form-item>
+            </a-form>
+            <template #footer><a-button @click="cancelEditRole">取消</a-button><a-button type="primary" @click="updateRole">确认</a-button></template>
           </a-modal>
         </section>
 
@@ -694,9 +793,6 @@
             </div>
           </a-form>
           <a-table :pagination="false" :data-source="caseList">
-            <a-table-column title="编号" width="80">
-              <template #default="{ index: $index }">{{ caseSerialNumber($index) }}</template>
-            </a-table-column>
             <a-table-column data-index="project_name" title="项目" />
             <a-table-column data-index="api_name" title="接口" />
             <a-table-column data-index="name" title="用例名称" />
@@ -1180,9 +1276,154 @@
         </section>
 
         <section v-if="active === 'logs'" class="page-view">
-          <h2>日志中心</h2>
-          <a-table :pagination="false" :data-source="logs"><a-table-column data-index="module" title="模块" /><a-table-column data-index="action" title="操作" /><a-table-column data-index="result" title="结果" /><a-table-column data-index="create_date" title="时间" /></a-table>
+          <div class="toolbar"><h2>日志中心</h2></div>
+          <a-tabs v-model:active-key="activeLogTab" class="log-tabs" @change="changeLogTab">
+            <a-tab-pane key="operations" tab="操作日志">
+              <a-form class="search-form log-search-form" layout="vertical">
+                <a-form-item label="模块"><a-input v-model:value="operationLogSearch.module" placeholder="如：项目、接口、用例" allow-clear @keyup.enter="searchOperationLogs" /></a-form-item>
+                <a-form-item label="操作"><a-input v-model:value="operationLogSearch.action" placeholder="如：创建、编辑、删除" allow-clear @keyup.enter="searchOperationLogs" /></a-form-item>
+                <a-form-item label="结果">
+                  <a-select v-model:value="operationLogSearch.result" placeholder="请选择结果" allow-clear>
+                    <a-select-option value="success">成功</a-select-option>
+                    <a-select-option value="failed">失败</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item label="开始时间"><a-input v-model:value="operationLogSearch.start_time" placeholder="yyyy-MM-dd HH:mm:ss" allow-clear /></a-form-item>
+                <a-form-item label="结束时间"><a-input v-model:value="operationLogSearch.end_time" placeholder="yyyy-MM-dd HH:mm:ss" allow-clear /></a-form-item>
+                <div class="search-actions">
+                  <a-button type="primary" @click="searchOperationLogs">搜索</a-button>
+                  <a-button @click="resetOperationLogSearch">重置</a-button>
+                </div>
+              </a-form>
+              <a-table :pagination="false" :data-source="operationLogs" :scroll="{ x: 1040 }" class="log-table">
+                <a-table-column title="模块" width="120">
+                  <template #default="{ record: row }">{{ operationModuleText(row.module) }}</template>
+                </a-table-column>
+                <a-table-column title="操作" width="130">
+                  <template #default="{ record: row }">{{ operationActionText(row.action) }}</template>
+                </a-table-column>
+                <a-table-column data-index="operator_name" title="用户" width="130" />
+                <a-table-column title="结果" width="100">
+                  <template #default="{ record: row }"><a-tag :color="row.result === 'success' ? 'success' : 'error'">{{ operationResultText(row.result) }}</a-tag></template>
+                </a-table-column>
+                <a-table-column title="内容" class-name="log-wrap-cell">
+                  <template #default="{ record: row }">{{ operationContentText(row.content) }}</template>
+                </a-table-column>
+                <a-table-column data-index="create_date" title="时间" width="160" />
+                <a-table-column title="操作" width="90">
+                  <template #default="{ record: row }"><a-button size="small" @click="openOperationLogDetail(row)">详情</a-button></template>
+                </a-table-column>
+              </a-table>
+              <div class="pagination">
+                <a-pagination :show-total="paginationTotal" show-less-items :current="operationLogPagination.page" :page-size="operationLogPagination.pageSize" :total="operationLogPagination.total" @change="changeOperationLogPage" />
+              </div>
+            </a-tab-pane>
+            <a-tab-pane key="executions" tab="执行日志">
+              <a-form class="search-form log-search-form" layout="vertical">
+                <a-form-item label="名称"><a-input v-model:value="executionLogSearch.name" placeholder="计划 / 用例 / 接口" allow-clear @keyup.enter="searchExecutionLogs" /></a-form-item>
+                <a-form-item label="状态">
+                  <a-select v-model:value="executionLogSearch.status" placeholder="请选择状态" allow-clear>
+                    <a-select-option value="passed">通过</a-select-option>
+                    <a-select-option value="failed">失败</a-select-option>
+                    <a-select-option value="error">异常</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <div class="search-actions">
+                  <a-button type="primary" @click="searchExecutionLogs">搜索</a-button>
+                  <a-button @click="resetExecutionLogSearch">重置</a-button>
+                </div>
+              </a-form>
+              <a-table :pagination="false" :data-source="executionLogs" :scroll="{ x: 1160 }" class="log-table">
+                <a-table-column data-index="target_name" title="计划/目标" width="220" class-name="log-ellipsis-cell" />
+                <a-table-column data-index="case_name" title="用例" width="220" class-name="log-ellipsis-cell" />
+                <a-table-column data-index="api_name" title="接口" width="200" class-name="log-ellipsis-cell" />
+                <a-table-column data-index="environment_name" title="环境" width="130" />
+                <a-table-column title="状态" width="100">
+                  <template #default="{ record: row }"><a-tag :color="executionStatusColor(row.status)">{{ executionStatusText(row.status) }}</a-tag></template>
+                </a-table-column>
+                <a-table-column data-index="duration_ms" title="耗时(ms)" width="100" />
+                <a-table-column data-index="create_date" title="时间" width="160" />
+                <a-table-column title="操作" width="160">
+                  <template #default="{ record: row }">
+                    <div class="table-actions">
+                      <a-button size="small" @click="openExecutionLogDetail(row)">详情</a-button>
+                      <a-button size="small" @click="openExecutionLogReport(row)">报告</a-button>
+                    </div>
+                  </template>
+                </a-table-column>
+              </a-table>
+              <div class="pagination">
+                <a-pagination :show-total="paginationTotal" show-less-items :current="executionLogPagination.page" :page-size="executionLogPagination.pageSize" :total="executionLogPagination.total" @change="changeExecutionLogPage" />
+              </div>
+            </a-tab-pane>
+            <a-tab-pane key="exceptions" tab="异常日志">
+              <a-form class="search-form log-search-form" layout="vertical">
+                <a-form-item label="名称"><a-input v-model:value="exceptionLogSearch.name" placeholder="计划 / 用例 / 接口" allow-clear @keyup.enter="searchExceptionLogs" /></a-form-item>
+                <a-form-item label="状态">
+                  <a-select v-model:value="exceptionLogSearch.status" placeholder="请选择状态" allow-clear>
+                    <a-select-option value="failed">失败</a-select-option>
+                    <a-select-option value="error">异常</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <div class="search-actions">
+                  <a-button type="primary" @click="searchExceptionLogs">搜索</a-button>
+                  <a-button @click="resetExceptionLogSearch">重置</a-button>
+                </div>
+              </a-form>
+              <a-table :pagination="false" :data-source="exceptionLogs" :scroll="{ x: 1060 }" class="log-table">
+                <a-table-column data-index="target_name" title="计划/目标" width="240" class-name="log-ellipsis-cell" />
+                <a-table-column data-index="case_name" title="用例" width="260" class-name="log-ellipsis-cell" />
+                <a-table-column data-index="api_name" title="接口" width="220" class-name="log-ellipsis-cell" />
+                <a-table-column title="状态" width="90">
+                  <template #default="{ record: row }"><a-tag :color="executionStatusColor(row.status)">{{ executionStatusText(row.status) }}</a-tag></template>
+                </a-table-column>
+                <a-table-column title="失败原因" width="360" class-name="log-ellipsis-cell">
+                  <template #default="{ record: row }"><span :title="logFailureSummary(row)">{{ logFailureSummary(row) }}</span></template>
+                </a-table-column>
+                <a-table-column data-index="create_date" title="时间" width="150" />
+                <a-table-column title="操作" width="90">
+                  <template #default="{ record: row }"><a-button size="small" @click="openExecutionLogDetail(row)">详情</a-button></template>
+                </a-table-column>
+              </a-table>
+              <div class="pagination">
+                <a-pagination :show-total="paginationTotal" show-less-items :current="exceptionLogPagination.page" :page-size="exceptionLogPagination.pageSize" :total="exceptionLogPagination.total" @change="changeExceptionLogPage" />
+              </div>
+            </a-tab-pane>
+          </a-tabs>
         </section>
+
+        <a-modal v-model:open="operationLogDetailVisible" title="操作日志详情" width="720px">
+          <a-descriptions v-if="operationLogDetail" :column="2" border>
+            <a-descriptions-item label="模块">{{ operationModuleText(operationLogDetail.module) }}</a-descriptions-item>
+            <a-descriptions-item label="操作">{{ operationActionText(operationLogDetail.action) }}</a-descriptions-item>
+            <a-descriptions-item label="结果">{{ operationResultText(operationLogDetail.result) }}</a-descriptions-item>
+            <a-descriptions-item label="用户">{{ operationLogDetail.operator_name || '-' }}</a-descriptions-item>
+            <a-descriptions-item label="IP">{{ operationLogDetail.ip || '-' }}</a-descriptions-item>
+            <a-descriptions-item label="时间">{{ operationLogDetail.create_date }}</a-descriptions-item>
+          </a-descriptions>
+          <div class="log-detail-block"><strong>内容</strong><pre>{{ operationContentText(operationLogDetail?.content) }}</pre></div>
+          <template #footer><a-button type="primary" @click="operationLogDetailVisible = false">关闭</a-button></template>
+        </a-modal>
+
+        <a-modal v-model:open="executionLogDetailVisible" title="执行日志详情" width="920px">
+          <a-descriptions v-if="executionLogDetail" :column="3" border>
+            <a-descriptions-item label="计划/目标">{{ executionLogDetail.target_name }}</a-descriptions-item>
+            <a-descriptions-item label="状态"><a-tag :color="executionStatusColor(executionLogDetail.status)">{{ executionStatusText(executionLogDetail.status) }}</a-tag></a-descriptions-item>
+            <a-descriptions-item label="用例">{{ executionLogDetail.case_name || '-' }}</a-descriptions-item>
+            <a-descriptions-item label="接口">{{ executionLogDetail.api_name || '-' }}</a-descriptions-item>
+            <a-descriptions-item label="耗时">{{ executionLogDetail.duration_ms }} ms</a-descriptions-item>
+          </a-descriptions>
+          <div class="execution-result-expand log-detail-block">
+            <strong>请求头</strong><pre>{{ formatJson(executionLogDetail?.request_snapshot?.headers || {}) }}</pre>
+            <strong>请求参数</strong><pre>{{ formatJson(executionLogDetail?.request_snapshot?.query || {}) }}</pre>
+            <strong>请求报文</strong><pre>{{ formatPayloadForDisplay(executionLogDetail?.request_snapshot?.body || '') }}</pre>
+            <strong>响应状态</strong><pre>{{ formatJson({ status_code: executionLogDetail?.response_snapshot?.status_code, duration_ms: executionLogDetail?.response_snapshot?.duration_ms }) }}</pre>
+            <strong>响应报文</strong><pre>{{ formatResponseSnapshotBody(executionLogDetail?.response_snapshot || {}) }}</pre>
+            <strong>断言结果</strong><pre>{{ formatJson(executionLogDetail?.assertion_results || []) }}</pre>
+            <strong>提取变量</strong><pre>{{ formatJson(executionLogDetail?.response_snapshot?.extracted_variables || []) }}</pre>
+          </div>
+          <template #footer><a-button type="primary" @click="executionLogDetailVisible = false">关闭</a-button></template>
+        </a-modal>
 
         <a-modal v-model:open="changePasswordDialogVisible" title="修改密码" width="420px" @after-close="resetChangePasswordForm">
           <a-form layout="vertical" @submit.prevent="changePassword">
@@ -1281,6 +1522,7 @@ const appTheme = {
 }
 
 type AppTab = { name: string; label: string; closable: boolean }
+type MenuNode = { key: string; label: string; icon: any; children?: MenuNode[] }
 type KeyValueRow = { id: number; key: string; value: string }
 type AssertionTarget = 'status' | 'duration' | 'jsonpath' | 'xmlpath' | 'text'
 type AssertionCheck = 'equal' | 'exists' | 'not_empty' | 'lt' | 'contains'
@@ -1481,8 +1723,36 @@ const menuMeta: Record<string, AppTab> = {
   execute: { name: 'execute', label: '测试计划', closable: true },
   reports: { name: 'reports', label: '报告中心', closable: true },
   logs: { name: 'logs', label: '日志中心', closable: true },
-  accounts: { name: 'accounts', label: '用户管理', closable: true }
+  accounts: { name: 'accounts', label: '用户管理', closable: true },
+  roles: { name: 'roles', label: '角色管理', closable: true }
 }
+
+const menuTree: MenuNode[] = [
+  { key: 'dashboard', label: menuMeta.dashboard.label, icon: DashboardOutlined },
+  {
+    key: 'project-env',
+    label: '项目环境',
+    icon: FolderOpenOutlined,
+    children: [
+      { key: 'projects', label: menuMeta.projects.label, icon: ProjectOutlined },
+      { key: 'environments', label: menuMeta.environments.label, icon: CloudServerOutlined }
+    ]
+  },
+  { key: 'apis', label: menuMeta.apis.label, icon: ApiOutlined },
+  { key: 'cases', label: menuMeta.cases.label, icon: FileTextOutlined },
+  { key: 'execute', label: menuMeta.execute.label, icon: PlayCircleOutlined },
+  { key: 'reports', label: menuMeta.reports.label, icon: BarChartOutlined },
+  { key: 'logs', label: menuMeta.logs.label, icon: ProfileOutlined },
+  {
+    key: 'system',
+    label: '系统管理',
+    icon: SettingOutlined,
+    children: [
+      { key: 'accounts', label: menuMeta.accounts.label, icon: TeamOutlined },
+      { key: 'roles', label: menuMeta.roles.label, icon: SettingOutlined }
+    ]
+  }
+]
 
 function restoreTabs(): AppTab[] {
   try {
@@ -1515,6 +1785,8 @@ const loginLoading = ref(false)
 const me = ref<User | null>(null)
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 const users = ref<any[]>([])
+const roles = ref<any[]>([])
+const roleMenus = ref<any[]>([])
 const projects = ref<any[]>([])
 const projectList = ref<any[]>([])
 const environments = ref<any[]>([])
@@ -1527,11 +1799,16 @@ const executions = ref<any[]>([])
 const reportList = ref<any[]>([])
 const planList = ref<any[]>([])
 const logs = ref<any[]>([])
+const operationLogs = ref<any[]>([])
+const executionLogs = ref<any[]>([])
+const exceptionLogs = ref<any[]>([])
 const selectedProject = ref<any>(null)
 
 const loginForm = reactive({ username: '', password: '' })
 const userSearch = reactive({ username: '', status: '' })
 const userPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const roleSearch = reactive({ name: '', status: '' })
+const rolePagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const projectSearch = reactive({ name: '' })
 const projectPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const environmentSearch = reactive({ project_id: undefined as number | undefined, name: '' })
@@ -1544,9 +1821,18 @@ const planSearch = reactive({ project_id: undefined as number | undefined, api_i
 const planPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const reportSearch = reactive({ name: '', status: '' })
 const reportPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const activeLogTab = ref('operations')
+const operationLogSearch = reactive({ module: '', action: '', result: '', start_time: '', end_time: '' })
+const executionLogSearch = reactive({ name: '', status: '' })
+const exceptionLogSearch = reactive({ name: '', status: '' })
+const operationLogPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const executionLogPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const exceptionLogPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const planExecutionPollers = new Map<number, number>()
 const createUserDialogVisible = ref(false)
 const editUserDialogVisible = ref(false)
+const createRoleDialogVisible = ref(false)
+const editRoleDialogVisible = ref(false)
 const createProjectDialogVisible = ref(false)
 const editProjectDialogVisible = ref(false)
 const createEnvironmentDialogVisible = ref(false)
@@ -1555,11 +1841,17 @@ const changePasswordDialogVisible = ref(false)
 const caseBodyDialogVisible = ref(false)
 const caseDetailDialogVisible = ref(false)
 const executionDetailDialogVisible = ref(false)
+const operationLogDetailVisible = ref(false)
+const executionLogDetailVisible = ref(false)
 const caseBodyPreview = ref('')
 const caseDetail = reactive<any>({})
 const executionDetail = reactive<any>({ task: null, results: [] })
-const userForm = reactive({ username: '', real_name: '' })
-const editUserForm = reactive({ id: undefined as number | undefined, username: '', real_name: '' })
+const operationLogDetail = ref<any>(null)
+const executionLogDetail = ref<any>(null)
+const userForm = reactive({ username: '', real_name: '', role: 'tester' })
+const editUserForm = reactive({ id: undefined as number | undefined, username: '', real_name: '', role: 'tester' })
+const roleForm = reactive({ code: '', name: '', description: '', status: 'active', menus: [] as string[] })
+const editRoleForm = reactive({ id: undefined as number | undefined, code: '', name: '', description: '', status: 'active', menus: [] as string[], is_builtin: false })
 const changePasswordForm = reactive({ old_password: '', new_password: '', confirm_password: '' })
 const projectForm = reactive({ name: '', description: '' })
 const editProjectForm = reactive({ id: undefined as number | undefined, name: '', description: '' })
@@ -1583,6 +1875,26 @@ const avatarText = computed(() => me.value?.username.slice(0, 1).toUpperCase() |
 const activeApiEditor = computed(() => apiEditors[active.value])
 const activePlanEditor = computed(() => planEditors[active.value])
 const currentPageTitle = computed(() => activeApiEditor.value?.label || activePlanEditor.value?.label || menuMeta[active.value]?.label || '接口测试平台')
+const permittedMenuKeys = computed(() => new Set(me.value?.menus?.length ? me.value.menus : Object.keys(menuMeta)))
+const visibleMenuGroups = computed(() => menuTree
+  .map(item => {
+    if (!item.children) return permittedMenuKeys.value.has(item.key) ? item : null
+    const children = item.children.filter(child => permittedMenuKeys.value.has(child.key))
+    return children.length ? { ...item, children } : null
+  })
+  .filter(Boolean) as MenuNode[])
+
+function isMenuAllowed(key: string) {
+  return Boolean(menuMeta[key] && permittedMenuKeys.value.has(key))
+}
+
+function syncAllowedTabs() {
+  const fallback = permittedMenuKeys.value.has('dashboard') ? menuMeta.dashboard : menuMeta[[...permittedMenuKeys.value].find(key => menuMeta[key]) || 'dashboard']
+  openedTabs.value = openedTabs.value.filter(tab => isMenuAllowed(tab.name))
+  if (openedTabs.value.length === 0 && fallback) openedTabs.value = [fallback]
+  if (!isMenuAllowed(active.value)) active.value = openedTabs.value[0]?.name || fallback?.name || 'dashboard'
+  saveTabs()
+}
 const dashboardStats = computed(() => [
   { label: '项目数', value: projects.value.length, description: '已配置项目', tone: 'blue', icon: ProjectOutlined },
   { label: '接口数', value: apis.value.length, description: '已维护接口定义', tone: 'cyan', icon: ApiOutlined },
@@ -1649,16 +1961,17 @@ async function loadAll() {
     api.get('/environments').then(r => environments.value = r.data),
     api.get('/apis').then(r => apis.value = r.data),
     refreshAllCases(),
-    api.get('/executions').then(r => executions.value = r.data),
-    api.get('/logs').then(r => logs.value = r.data)
+    api.get('/executions').then(r => executions.value = r.data)
   ]
   calls.push(loadUsers())
+  calls.push(loadRoles())
   calls.push(loadProjects())
   calls.push(loadEnvironments())
   calls.push(loadApis())
   calls.push(loadCases())
   calls.push(loadPlans())
   calls.push(loadReports())
+  calls.push(loadLogs())
   await Promise.allSettled(calls)
 }
 
@@ -1694,6 +2007,44 @@ async function resetUserSearch() {
 async function changeUserPage(page: number) {
   userPagination.page = page
   await loadUsers()
+}
+
+async function loadRoles() {
+  const name = roleSearch.name.trim()
+  const status = roleSearch.status
+  const [roleRes, menuRes] = await Promise.all([
+    api.get('/roles', {
+      params: {
+        ...(name ? { name } : {}),
+        ...(status ? { status } : {}),
+        page: rolePagination.page,
+        page_size: rolePagination.pageSize
+      }
+    }),
+    roleMenus.value.length ? Promise.resolve({ data: roleMenus.value }) : api.get('/roles/menus')
+  ])
+  roles.value = roleRes.data.items
+  rolePagination.total = roleRes.data.total
+  rolePagination.page = roleRes.data.page
+  rolePagination.pageSize = roleRes.data.page_size
+  roleMenus.value = menuRes.data
+}
+
+async function searchRoles() {
+  rolePagination.page = 1
+  await loadRoles()
+}
+
+async function resetRoleSearch() {
+  roleSearch.name = ''
+  roleSearch.status = ''
+  rolePagination.page = 1
+  await loadRoles()
+}
+
+async function changeRolePage(page: number) {
+  rolePagination.page = page
+  await loadRoles()
 }
 
 async function loadProjects() {
@@ -1925,6 +2276,219 @@ async function changeReportPage(page: number) {
   await loadReports()
 }
 
+async function loadLogs() {
+  await Promise.allSettled([loadOperationLogs(), loadExecutionLogs(), loadExceptionLogs()])
+}
+
+async function loadOperationLogs() {
+  const { data } = await api.get('/logs', {
+    params: {
+      ...(operationLogSearch.module.trim() ? { module: operationLogSearch.module.trim() } : {}),
+      ...(operationLogSearch.action.trim() ? { action: operationLogSearch.action.trim() } : {}),
+      ...(operationLogSearch.result ? { result: operationLogSearch.result } : {}),
+      ...(operationLogSearch.start_time.trim() ? { start_time: operationLogSearch.start_time.trim() } : {}),
+      ...(operationLogSearch.end_time.trim() ? { end_time: operationLogSearch.end_time.trim() } : {}),
+      page: operationLogPagination.page,
+      page_size: operationLogPagination.pageSize
+    }
+  })
+  operationLogs.value = data.items
+  logs.value = data.items
+  operationLogPagination.total = data.total
+  operationLogPagination.page = data.page
+  operationLogPagination.pageSize = data.page_size
+}
+
+async function loadExecutionLogs() {
+  const { data } = await api.get('/logs/executions', {
+    params: {
+      ...(executionLogSearch.name.trim() ? { name: executionLogSearch.name.trim() } : {}),
+      ...(executionLogSearch.status ? { status: executionLogSearch.status } : {}),
+      page: executionLogPagination.page,
+      page_size: executionLogPagination.pageSize
+    }
+  })
+  executionLogs.value = data.items
+  executionLogPagination.total = data.total
+  executionLogPagination.page = data.page
+  executionLogPagination.pageSize = data.page_size
+}
+
+async function loadExceptionLogs() {
+  const { data } = await api.get('/logs/exceptions', {
+    params: {
+      ...(exceptionLogSearch.name.trim() ? { name: exceptionLogSearch.name.trim() } : {}),
+      ...(exceptionLogSearch.status ? { status: exceptionLogSearch.status } : {}),
+      page: exceptionLogPagination.page,
+      page_size: exceptionLogPagination.pageSize
+    }
+  })
+  exceptionLogs.value = data.items
+  exceptionLogPagination.total = data.total
+  exceptionLogPagination.page = data.page
+  exceptionLogPagination.pageSize = data.page_size
+}
+
+async function changeLogTab() {
+  if (activeLogTab.value === 'operations') await loadOperationLogs()
+  if (activeLogTab.value === 'executions') await loadExecutionLogs()
+  if (activeLogTab.value === 'exceptions') await loadExceptionLogs()
+}
+
+async function searchOperationLogs() {
+  operationLogPagination.page = 1
+  await loadOperationLogs()
+}
+
+async function resetOperationLogSearch() {
+  operationLogSearch.module = ''
+  operationLogSearch.action = ''
+  operationLogSearch.result = ''
+  operationLogSearch.start_time = ''
+  operationLogSearch.end_time = ''
+  operationLogPagination.page = 1
+  await loadOperationLogs()
+}
+
+async function changeOperationLogPage(page: number) {
+  operationLogPagination.page = page
+  await loadOperationLogs()
+}
+
+async function searchExecutionLogs() {
+  executionLogPagination.page = 1
+  await loadExecutionLogs()
+}
+
+async function resetExecutionLogSearch() {
+  executionLogSearch.name = ''
+  executionLogSearch.status = ''
+  executionLogPagination.page = 1
+  await loadExecutionLogs()
+}
+
+async function changeExecutionLogPage(page: number) {
+  executionLogPagination.page = page
+  await loadExecutionLogs()
+}
+
+async function searchExceptionLogs() {
+  exceptionLogPagination.page = 1
+  await loadExceptionLogs()
+}
+
+async function resetExceptionLogSearch() {
+  exceptionLogSearch.name = ''
+  exceptionLogSearch.status = ''
+  exceptionLogPagination.page = 1
+  await loadExceptionLogs()
+}
+
+async function changeExceptionLogPage(page: number) {
+  exceptionLogPagination.page = page
+  await loadExceptionLogs()
+}
+
+function openOperationLogDetail(row: any) {
+  operationLogDetail.value = row
+  operationLogDetailVisible.value = true
+}
+
+async function openExecutionLogDetail(row: any) {
+  const { data } = await api.get(`/logs/executions/${row.id}`)
+  executionLogDetail.value = data
+  executionLogDetailVisible.value = true
+}
+
+function openExecutionLogReport(row: any) {
+  window.open(`/api/executions/${row.task_id}/report`, '_blank')
+}
+
+const operationModuleMap: Record<string, string> = {
+  auth: '认证',
+  user: '用户管理',
+  role: '角色管理',
+  project: '项目管理',
+  environment: '环境管理',
+  api: '接口管理',
+  case: '用例管理',
+  plan: '测试计划',
+  log: '日志中心'
+}
+
+const operationActionMap: Record<string, string> = {
+  login: '登录',
+  logout: '退出登录',
+  change_password: '修改密码',
+  create: '创建',
+  update: '编辑',
+  delete: '删除',
+  status: '修改状态',
+  execute: '执行'
+}
+
+const operationResultMap: Record<string, string> = {
+  success: '成功',
+  failed: '失败',
+  error: '异常'
+}
+
+function operationModuleText(value: string) {
+  return operationModuleMap[value] || value || '-'
+}
+
+function operationActionText(value: string) {
+  return operationActionMap[value] || value || '-'
+}
+
+function operationResultText(value: string) {
+  return operationResultMap[value] || value || '-'
+}
+
+function operationContentText(value: string) {
+  if (!value) return '-'
+  const replacements: Array<[RegExp, string]> = [
+    [/^user (.+) logged in$/, '用户 $1 登录'],
+    [/^user (.+) logged out$/, '用户 $1 退出登录'],
+    [/^user (.+) changed password$/, '用户 $1 修改密码'],
+    [/^created user (.+)$/, '创建用户 $1'],
+    [/^updated user (.+)$/, '编辑用户 $1'],
+    [/^updated user (.+) status to active$/, '启用用户 $1'],
+    [/^updated user (.+) status to disabled$/, '禁用用户 $1'],
+    [/^created role (.+)$/, '创建角色 $1'],
+    [/^updated role (.+)$/, '编辑角色 $1'],
+    [/^deleted role (.+)$/, '删除角色 $1'],
+    [/^created project (.+)$/, '创建项目 $1'],
+    [/^updated project (.+)$/, '编辑项目 $1'],
+    [/^deleted project (.+)$/, '删除项目 $1'],
+    [/^created environment (.+)$/, '创建环境 $1'],
+    [/^updated environment (.+)$/, '编辑环境 $1'],
+    [/^deleted environment (.+)$/, '删除环境 $1'],
+    [/^created api (.+)$/, '创建接口 $1'],
+    [/^updated api (.+)$/, '编辑接口 $1'],
+    [/^deleted api (.+)$/, '删除接口 $1'],
+    [/^created case (.+)$/, '创建用例 $1'],
+    [/^updated case (.+)$/, '编辑用例 $1'],
+    [/^deleted case (.+)$/, '删除用例 $1'],
+    [/^created plan (.+)$/, '创建测试计划 $1'],
+    [/^updated plan (.+)$/, '编辑测试计划 $1'],
+    [/^deleted plan (.+)$/, '删除测试计划 $1'],
+    [/^executed plan (.+), task \d+$/, '执行测试计划 $1']
+  ]
+  for (const [pattern, label] of replacements) {
+    if (pattern.test(value)) return value.replace(pattern, label)
+  }
+  return value
+}
+
+function logFailureSummary(row: any) {
+  if (row.error_message) return row.error_message
+  const assertion = row.failed_assertion || {}
+  if (assertion.message) return assertion.message
+  if (assertion.type) return `${assertion.type} ${assertion.path || ''} 期望 ${assertion.expected ?? '-'}，实际 ${assertion.actual ?? '-'}`
+  return '-'
+}
+
 async function login() {
   if (loginLoading.value) {
     return
@@ -1934,6 +2498,7 @@ async function login() {
     const { data } = await api.post('/auth/login', loginForm)
     localStorage.setItem('session_token', data.token)
     me.value = data.user
+    syncAllowedTabs()
     await loadAll()
   } catch {
     message.error('用户名或密码错误')
@@ -1958,6 +2523,10 @@ function saveTabs() {
 }
 
 function openTab(index: string) {
+  if (!isMenuAllowed(index)) {
+    message.warning('当前角色无权访问该功能')
+    return
+  }
   const tab = menuMeta[index]
   if (!tab) {
     return
@@ -2118,9 +2687,12 @@ async function changePassword() {
 function resetUserForm() {
   userForm.username = ''
   userForm.real_name = ''
+  userForm.role = roles.value.find(role => role.code === 'tester') ? 'tester' : roles.value[0]?.code || 'tester'
 }
 
-function openCreateUserDialog() {
+async function openCreateUserDialog() {
+  if (!roles.value.length) await loadRoles()
+  resetUserForm()
   createUserDialogVisible.value = true
 }
 
@@ -2133,12 +2705,14 @@ function resetEditUserForm() {
   editUserForm.id = undefined
   editUserForm.username = ''
   editUserForm.real_name = ''
+  editUserForm.role = roles.value.find(role => role.code === 'tester') ? 'tester' : roles.value[0]?.code || 'tester'
 }
 
 function openEditUserDialog(user: any) {
   editUserForm.id = user.id
   editUserForm.username = user.username
   editUserForm.real_name = user.real_name
+  editUserForm.role = user.role || 'tester'
   editUserDialogVisible.value = true
 }
 
@@ -2162,11 +2736,15 @@ async function createUser() {
     message.warning('请输入姓名')
     return
   }
+  if (!userForm.role) {
+    message.warning('请选择角色')
+    return
+  }
   await api.post('/users', {
     username,
     password: '123456',
     real_name: realName,
-    role: 'tester'
+    role: userForm.role
   })
   createUserDialogVisible.value = false
   resetUserForm()
@@ -2185,7 +2763,7 @@ async function updateUser() {
     message.warning('请输入姓名')
     return
   }
-  await api.put(`/users/${editUserForm.id}`, { username, real_name: realName })
+  await api.put(`/users/${editUserForm.id}`, { username, real_name: realName, role: editUserForm.role })
   editUserDialogVisible.value = false
   resetEditUserForm()
   message.success('用户已更新')
@@ -2197,6 +2775,108 @@ async function toggleUserStatus(user: any) {
   await api.patch(`/users/${user.id}/status`, { status: nextStatus })
   message.success(nextStatus === 'active' ? '用户已启用' : '用户已禁用')
   await loadUsers()
+}
+
+function resetRoleForm() {
+  roleForm.code = ''
+  roleForm.name = ''
+  roleForm.description = ''
+  roleForm.status = 'active'
+  roleForm.menus = ['dashboard']
+}
+
+function resetEditRoleForm() {
+  editRoleForm.id = undefined
+  editRoleForm.code = ''
+  editRoleForm.name = ''
+  editRoleForm.description = ''
+  editRoleForm.status = 'active'
+  editRoleForm.menus = []
+  editRoleForm.is_builtin = false
+}
+
+function openCreateRoleDialog() {
+  resetRoleForm()
+  createRoleDialogVisible.value = true
+}
+
+function cancelCreateRole() {
+  createRoleDialogVisible.value = false
+  resetRoleForm()
+}
+
+function openEditRoleDialog(role: any) {
+  editRoleForm.id = role.id
+  editRoleForm.code = role.code
+  editRoleForm.name = role.name
+  editRoleForm.description = role.description || ''
+  editRoleForm.status = role.status
+  editRoleForm.menus = [...(role.menus || [])]
+  editRoleForm.is_builtin = Boolean(role.is_builtin)
+  editRoleDialogVisible.value = true
+}
+
+function cancelEditRole() {
+  editRoleDialogVisible.value = false
+  resetEditRoleForm()
+}
+
+function roleMenuLabels(menus: string[]) {
+  const labels = new Map<string, string>()
+  roleMenus.value.forEach(group => {
+    if (group.children?.length) group.children.forEach((child: any) => labels.set(child.key, child.label))
+    else labels.set(group.key, group.label)
+  })
+  return (menus || []).map(key => labels.get(key)).filter(Boolean)
+}
+
+async function createRole() {
+  if (!roleForm.code.trim()) {
+    message.warning('请输入角色编码')
+    return
+  }
+  if (!roleForm.name.trim()) {
+    message.warning('请输入角色名称')
+    return
+  }
+  await api.post('/roles', {
+    code: roleForm.code.trim(),
+    name: roleForm.name.trim(),
+    description: roleForm.description.trim(),
+    status: roleForm.status,
+    menus: roleForm.menus
+  })
+  createRoleDialogVisible.value = false
+  resetRoleForm()
+  message.success('角色已创建')
+  await loadRoles()
+}
+
+async function updateRole() {
+  if (!editRoleForm.name.trim()) {
+    message.warning('请输入角色名称')
+    return
+  }
+  await api.put(`/roles/${editRoleForm.id}`, {
+    name: editRoleForm.name.trim(),
+    description: editRoleForm.description.trim(),
+    status: editRoleForm.status,
+    menus: editRoleForm.menus
+  })
+  editRoleDialogVisible.value = false
+  resetEditRoleForm()
+  message.success('角色已更新')
+  await loadRoles()
+  const { data } = await api.get('/auth/me')
+  me.value = data
+  syncAllowedTabs()
+}
+
+async function deleteRole(role: any) {
+  await confirmAction(`确认删除角色 ${role.name}？`, '删除角色', { confirmButtonText: '删除' })
+  await api.delete(`/roles/${role.id}`)
+  message.success('角色已删除')
+  await loadRoles()
 }
 
 function resetProjectForm() {
@@ -4152,6 +4832,7 @@ onMounted(async () => {
   try {
     const { data } = await api.get('/auth/me')
     me.value = data
+    syncAllowedTabs()
     await loadAll()
   } catch {}
 })

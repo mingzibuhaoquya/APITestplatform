@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from .database import get_db
 from .models import User
 from .security import read_session_token
+from .services.menus import has_menu_permission
 
 
 def current_user(request: Request, db: Session = Depends(get_db)) -> User:
@@ -16,6 +17,10 @@ def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     user = db.get(User, user_id)
     if not user or user.status != "active":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号不可用")
+    allowed_paths = {"/auth/me", "/auth/logout", "/auth/change-password"}
+    path = request.url.path.removeprefix("/api")
+    if path not in allowed_paths and not has_menu_permission(db, user.role, path):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="当前角色无权访问该功能")
     return user
 
 

@@ -7,8 +7,9 @@ from sqlalchemy.orm import Session
 from .config import get_settings
 from .database import Base, SessionLocal, engine
 from .models import User
-from .routers import auth, crud, executions, mock, users
+from .routers import auth, crud, executions, mock, roles, users
 from .security import hash_password
+from .services.menus import ensure_default_roles
 
 
 os.makedirs("logs", exist_ok=True)
@@ -29,6 +30,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(users.router)
+app.include_router(roles.router)
 app.include_router(crud.router)
 app.include_router(executions.router)
 app.include_router(mock.router)
@@ -43,6 +45,7 @@ def startup() -> None:
     _ensure_test_case_columns()
     _ensure_test_suite_columns()
     _ensure_execution_task_columns()
+    _ensure_roles()
     _ensure_admin()
 
 
@@ -124,6 +127,14 @@ def _ensure_execution_task_columns() -> None:
             conn.execute(text("ALTER TABLE execution_task ADD COLUMN is_deleted BOOL NOT NULL DEFAULT 0"))
         if engine.dialect.name == "mysql" and "LONGTEXT" not in str(columns["report_html"]["type"]).upper():
             conn.execute(text("ALTER TABLE execution_task MODIFY COLUMN report_html LONGTEXT NOT NULL"))
+
+
+def _ensure_roles() -> None:
+    db: Session = SessionLocal()
+    try:
+        ensure_default_roles(db)
+    finally:
+        db.close()
 
 
 def _ensure_admin() -> None:

@@ -1,4 +1,6 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import current_user
@@ -6,10 +8,23 @@ from ..models import ApiDefinition, Environment, ExecutionResult, ExecutionTask,
 from ..schemas import ApiDefinitionIn, ApiDefinitionUpdate, AuthTokenPreviewIn, EnvironmentIn, EnvironmentUpdate, ProjectIn, ProjectUpdate, ScenarioCaseIn, TestCaseIn, TestCaseUpdate, TestPlanIn, TestPlanUpdate
 from ..services.crypto_envelope import normalize_config, public_config
 from ..services.executor import _initial_variables, get_oauth2_preview_token
+from ..services.operation_logs import log_operation
 from ..utils import dump_json, fmt_time, parse_json
 
 
 router = APIRouter(tags=["crud"])
+
+
+def _parse_time(value: str):
+    value = value.strip()
+    if not value:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    return None
 
 
 def _base(row):
@@ -17,6 +32,80 @@ def _base(row):
     data["create_date"] = fmt_time(row.create_date)
     data["update_date"] = fmt_time(row.update_date)
     return data
+
+
+def _operator_name(user: User | None) -> str:
+    return user.real_name or user.username if user else ""
+
+
+def _operation_log_out(row: OperationLog, db: Session):
+    operator = db.get(User, row.operator_id) if row.operator_id else None
+    return {
+        **_base(row),
+        "operator_name": _operator_name(operator),
+    }
+
+
+def _execution_target_name(row: ExecutionTask, db: Session) -> str:
+    if row.target_type == "plan":
+        plan = db.get(TestSuite, row.target_id)
+        return plan.name if plan and not plan.is_deleted else ""
+    if row.target_type == "case":
+        case = db.get(TestCase, row.target_id)
+        return case.name if case and not case.is_deleted else ""
+    scenario = db.get(ScenarioCase, row.target_id)
+    return scenario.name if scenario else ""
+
+
+def _execution_log_out(result: ExecutionResult, task: ExecutionTask, db: Session):
+    case = db.get(TestCase, result.case_id) if result.case_id else None
+    api = db.get(ApiDefinition, case.api_id) if case else None
+    project = db.get(Project, task.project_id)
+    environment = db.get(Environment, task.environment_id)
+    executor = db.get(User, task.executor_id)
+    assertions = parse_json(result.assertion_results_json, [])
+    failed_assertion = next((item for item in assertions if not item.get("passed")), {})
+    return {
+        "id": result.id,
+        "task_id": task.id,
+        "target_type": task.target_type,
+        "target_name": _execution_target_name(task, db),
+        "project_name": project.name if project and not project.is_deleted else "",
+        "environment_name": environment.name if environment and not environment.is_deleted else "",
+        "case_id": result.case_id,
+        "case_name": case.name if case and not case.is_deleted else "",
+        "api_name": api.name if api else "",
+        "status": result.status,
+        "duration_ms": result.duration_ms,
+        "executor_name": _operator_name(executor),
+        "error_message": result.error_message,
+        "failed_assertion": failed_assertion,
+        "create_date": fmt_time(result.create_date),
+    }
+
+
+def _execution_log_detail(result: ExecutionResult, db: Session):
+    task = db.get(ExecutionTask, result.task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="execution task does not exist")
+    return {
+        **_execution_log_out(result, task, db),
+        "request_snapshot": parse_json(result.request_snapshot_json, {}),
+        "response_snapshot": parse_json(result.response_snapshot_json, {}),
+        "assertion_results": parse_json(result.assertion_results_json, []),
+    }
+
+
+def _paginate_rows(rows, page: int, page_size: int):
+    page = max(page or 1, 1)
+    page_size = min(max(page_size or 10, 1), 20)
+    total = len(rows)
+    return {
+        "items": rows[(page - 1) * page_size: page * page_size],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 def _active_project(project_id: int, db: Session):
@@ -272,11 +361,12 @@ def create_project(payload: ProjectIn, user: User = Depends(current_user), db: S
     db.add(row)
     db.commit()
     db.refresh(row)
+    log_operation(db, user, "project", "create", f"created project {row.name}")
     return _base(row)
 
 
 @router.put("/projects/{project_id}")
-def update_project(project_id: int, payload: ProjectUpdate, _: User = Depends(current_user), db: Session = Depends(get_db)):
+def update_project(project_id: int, payload: ProjectUpdate, user: User = Depends(current_user), db: Session = Depends(get_db)):
     row = db.get(Project, project_id)
     if not row or row.is_deleted:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -287,17 +377,19 @@ def update_project(project_id: int, payload: ProjectUpdate, _: User = Depends(cu
     row.description = payload.description
     db.commit()
     db.refresh(row)
+    log_operation(db, user, "project", "update", f"updated project {row.name}")
     return _base(row)
 
 
 @router.delete("/projects/{project_id}")
-def delete_project(project_id: int, _: User = Depends(current_user), db: Session = Depends(get_db)):
+def delete_project(project_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     row = db.get(Project, project_id)
     if not row or row.is_deleted:
         raise HTTPException(status_code=404, detail="项目不存在")
     row.is_deleted = True
     db.commit()
     db.refresh(row)
+    log_operation(db, user, "project", "delete", f"deleted project {row.name}")
     return _base(row)
 
 
@@ -333,7 +425,7 @@ def list_environments(
 
 
 @router.post("/environments")
-def create_environment(payload: EnvironmentIn, _: User = Depends(current_user), db: Session = Depends(get_db)):
+def create_environment(payload: EnvironmentIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     _active_project(payload.project_id, db)
     name = payload.name.strip()
     base_url = payload.base_url.strip()
@@ -356,11 +448,12 @@ def create_environment(payload: EnvironmentIn, _: User = Depends(current_user), 
     db.add(row)
     db.commit()
     db.refresh(row)
+    log_operation(db, user, "environment", "create", f"created environment {row.name}")
     return _environment_out(row, db)
 
 
 @router.put("/environments/{environment_id}")
-def update_environment(environment_id: int, payload: EnvironmentUpdate, _: User = Depends(current_user), db: Session = Depends(get_db)):
+def update_environment(environment_id: int, payload: EnvironmentUpdate, user: User = Depends(current_user), db: Session = Depends(get_db)):
     row = db.get(Environment, environment_id)
     if not row or row.is_deleted:
         raise HTTPException(status_code=404, detail="环境不存在")
@@ -380,17 +473,19 @@ def update_environment(environment_id: int, payload: EnvironmentUpdate, _: User 
     row.port = port
     db.commit()
     db.refresh(row)
+    log_operation(db, user, "environment", "update", f"updated environment {row.name}")
     return _environment_out(row, db)
 
 
 @router.delete("/environments/{environment_id}")
-def delete_environment(environment_id: int, _: User = Depends(current_user), db: Session = Depends(get_db)):
+def delete_environment(environment_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     row = db.get(Environment, environment_id)
     if not row or row.is_deleted:
         raise HTTPException(status_code=404, detail="环境不存在")
     row.is_deleted = True
     db.commit()
     db.refresh(row)
+    log_operation(db, user, "environment", "delete", f"deleted environment {row.name}")
     return _environment_out(row, db)
 
 
@@ -431,7 +526,7 @@ def list_apis(
 
 
 @router.post("/apis")
-def create_api(payload: ApiDefinitionIn, _: User = Depends(current_user), db: Session = Depends(get_db)):
+def create_api(payload: ApiDefinitionIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     _active_project(payload.project_id, db)
     name = payload.name.strip()
     path = payload.path.strip()
@@ -459,6 +554,7 @@ def create_api(payload: ApiDefinitionIn, _: User = Depends(current_user), db: Se
     db.add(row)
     db.commit()
     db.refresh(row)
+    log_operation(db, user, "api", "create", f"created api {row.name}")
     return _api_out(row, db)
 
 
@@ -475,7 +571,7 @@ def preview_api_auth_token(payload: AuthTokenPreviewIn, _: User = Depends(curren
 
 
 @router.put("/apis/{api_id}")
-def update_api(api_id: int, payload: ApiDefinitionUpdate, _: User = Depends(current_user), db: Session = Depends(get_db)):
+def update_api(api_id: int, payload: ApiDefinitionUpdate, user: User = Depends(current_user), db: Session = Depends(get_db)):
     row = db.get(ApiDefinition, api_id)
     if not row:
         raise HTTPException(status_code=404, detail="api does not exist")
@@ -504,11 +600,12 @@ def update_api(api_id: int, payload: ApiDefinitionUpdate, _: User = Depends(curr
     row.auth_config_json = dump_json(payload.auth.model_dump() if payload.auth else {"type": "none"})
     db.commit()
     db.refresh(row)
+    log_operation(db, user, "api", "update", f"updated api {row.name}")
     return _api_out(row, db)
 
 
 @router.delete("/apis/{api_id}")
-def delete_api(api_id: int, _: User = Depends(current_user), db: Session = Depends(get_db)):
+def delete_api(api_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     row = db.get(ApiDefinition, api_id)
     if not row:
         raise HTTPException(status_code=404, detail="api does not exist")
@@ -517,6 +614,7 @@ def delete_api(api_id: int, _: User = Depends(current_user), db: Session = Depen
     data = _api_out(row, db)
     db.delete(row)
     db.commit()
+    log_operation(db, user, "api", "delete", f"deleted api {data.get('name')}")
     return data
 @router.get("/cases")
 def list_cases(
@@ -571,11 +669,12 @@ def create_case(payload: TestCaseIn, user: User = Depends(current_user), db: Ses
     db.add(row)
     db.commit()
     db.refresh(row)
+    log_operation(db, user, "case", "create", f"created case {row.name}")
     return _case_out(row, db)
 
 
 @router.put("/cases/{case_id}")
-def update_case(case_id: int, payload: TestCaseUpdate, _: User = Depends(current_user), db: Session = Depends(get_db)):
+def update_case(case_id: int, payload: TestCaseUpdate, user: User = Depends(current_user), db: Session = Depends(get_db)):
     row = db.get(TestCase, case_id)
     if not row or row.is_deleted:
         raise HTTPException(status_code=404, detail="用例不存在")
@@ -596,17 +695,19 @@ def update_case(case_id: int, payload: TestCaseUpdate, _: User = Depends(current
     row.tags = payload.tags
     db.commit()
     db.refresh(row)
+    log_operation(db, user, "case", "update", f"updated case {row.name}")
     return _case_out(row, db)
 
 
 @router.delete("/cases/{case_id}")
-def delete_case(case_id: int, _: User = Depends(current_user), db: Session = Depends(get_db)):
+def delete_case(case_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     row = db.get(TestCase, case_id)
     if not row or row.is_deleted:
         raise HTTPException(status_code=404, detail="用例不存在")
     row.is_deleted = True
     db.commit()
     db.refresh(row)
+    log_operation(db, user, "case", "delete", f"deleted case {row.name}")
     return _case_out(row, db)
 
 
@@ -681,11 +782,12 @@ def create_plan(payload: TestPlanIn, user: User = Depends(current_user), db: Ses
     db.add(row)
     db.commit()
     db.refresh(row)
+    log_operation(db, user, "plan", "create", f"created plan {row.name}")
     return _plan_out(row, db)
 
 
 @router.put("/plans/{plan_id}")
-def update_plan(plan_id: int, payload: TestPlanUpdate, _: User = Depends(current_user), db: Session = Depends(get_db)):
+def update_plan(plan_id: int, payload: TestPlanUpdate, user: User = Depends(current_user), db: Session = Depends(get_db)):
     row = db.get(TestSuite, plan_id)
     if not row or row.is_deleted:
         raise HTTPException(status_code=404, detail="test plan does not exist")
@@ -701,17 +803,19 @@ def update_plan(plan_id: int, payload: TestPlanUpdate, _: User = Depends(current
     row.last_executed_at = None
     db.commit()
     db.refresh(row)
+    log_operation(db, user, "plan", "update", f"updated plan {row.name}")
     return _plan_out(row, db)
 
 
 @router.delete("/plans/{plan_id}")
-def delete_plan(plan_id: int, _: User = Depends(current_user), db: Session = Depends(get_db)):
+def delete_plan(plan_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     row = db.get(TestSuite, plan_id)
     if not row or row.is_deleted:
         raise HTTPException(status_code=404, detail="test plan does not exist")
     row.is_deleted = True
     db.commit()
     db.refresh(row)
+    log_operation(db, user, "plan", "delete", f"deleted plan {row.name}")
     return _plan_out(row, db)
 
 
@@ -733,6 +837,7 @@ def execute_plan(plan_id: int, user: User = Depends(current_user), db: Session =
     row.last_execution_id = task.id
     row.last_status = task.status
     db.commit()
+    log_operation(db, user, "plan", "execute", f"executed plan {row.name}, task {task.id}")
     return {"id": task.id, "status": task.status}
 
 
@@ -754,5 +859,101 @@ def create_scenario(payload: ScenarioCaseIn, _: User = Depends(current_user), db
 
 
 @router.get("/logs")
-def list_logs(_: User = Depends(current_user), db: Session = Depends(get_db)):
-    return [_base(row) for row in db.query(OperationLog).order_by(OperationLog.id.desc()).limit(200).all()]
+def list_logs(
+    module: str = "",
+    action: str = "",
+    result: str = "",
+    start_time: str = "",
+    end_time: str = "",
+    page: int | None = None,
+    page_size: int | None = None,
+    _: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    query = db.query(OperationLog)
+    if module.strip():
+        query = query.filter(OperationLog.module.like(f"%{module.strip()}%"))
+    if action.strip():
+        query = query.filter(OperationLog.action.like(f"%{action.strip()}%"))
+    if result.strip():
+        query = query.filter(OperationLog.result == result.strip())
+    start = _parse_time(start_time)
+    end = _parse_time(end_time)
+    if start:
+        query = query.filter(OperationLog.create_date >= start)
+    if end:
+        query = query.filter(OperationLog.create_date <= end)
+    rows = query.order_by(OperationLog.id.desc()).all()
+    items = [_operation_log_out(row, db) for row in rows]
+    if page is None and page_size is None:
+        return items[:200]
+    return _paginate_rows(items, page or 1, page_size or 10)
+
+
+def _execution_log_rows(db: Session):
+    rows = (
+        db.query(ExecutionResult, ExecutionTask)
+        .join(ExecutionTask, ExecutionResult.task_id == ExecutionTask.id)
+        .filter(ExecutionTask.is_deleted.is_(False))
+        .order_by(ExecutionResult.id.desc())
+        .all()
+    )
+    return [(result, task) for result, task in rows]
+
+
+@router.get("/logs/executions")
+def list_execution_logs(
+    name: str = "",
+    status: str = "",
+    task_id: int | None = None,
+    page: int = 1,
+    page_size: int = 10,
+    _: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    items = []
+    for result, task in _execution_log_rows(db):
+        if task_id and task.id != task_id:
+            continue
+        if status.strip() and result.status != status.strip():
+            continue
+        item = _execution_log_out(result, task, db)
+        if name.strip() and name.strip() not in item["target_name"] and name.strip() not in item["case_name"] and name.strip() not in item["api_name"]:
+            continue
+        items.append(item)
+    return _paginate_rows(items, page, page_size)
+
+
+@router.get("/logs/exceptions")
+def list_exception_logs(
+    name: str = "",
+    status: str = "",
+    task_id: int | None = None,
+    page: int = 1,
+    page_size: int = 10,
+    _: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    items = []
+    for result, task in _execution_log_rows(db):
+        assertions = parse_json(result.assertion_results_json, [])
+        has_failed_assertion = any(not item.get("passed") for item in assertions)
+        if result.status not in {"failed", "error"} and not result.error_message and not has_failed_assertion:
+            continue
+        if task_id and task.id != task_id:
+            continue
+        if status.strip() and result.status != status.strip():
+            continue
+        item = _execution_log_out(result, task, db)
+        if name.strip() and name.strip() not in item["target_name"] and name.strip() not in item["case_name"] and name.strip() not in item["api_name"]:
+            continue
+        items.append(item)
+    return _paginate_rows(items, page, page_size)
+
+
+@router.get("/logs/executions/{result_id}")
+def get_execution_log_detail(result_id: int, _: User = Depends(current_user), db: Session = Depends(get_db)):
+    result = db.get(ExecutionResult, result_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="execution result does not exist")
+    return _execution_log_detail(result, db)

@@ -3,21 +3,28 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import current_user
-from ..models import User
+from ..models import Role, User
 from ..schemas import ChangePasswordIn, LoginIn, UserOut
 from ..security import create_session_token, hash_password, verify_password
+from ..services.menus import role_menus
+from ..services.operation_logs import log_operation
 from ..utils import fmt_time
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def user_out(user: User) -> UserOut:
+def user_out(user: User, db: Session) -> UserOut:
+    role = db.query(Role).filter(Role.code == user.role).first()
+    role_name = role.name if role else user.role
+    menus = role_menus(role, user.role)
     return UserOut(
         id=user.id,
         username=user.username,
         real_name=user.real_name,
         role=user.role,
+        role_name=role_name,
+        menus=menus,
         status=user.status,
         create_date=fmt_time(user.create_date),
         update_date=fmt_time(user.update_date),
@@ -33,13 +40,15 @@ def login(payload: LoginIn, response: Response, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="账号不可用")
     user.last_login_time = datetime.now()
     db.commit()
+    log_operation(db, user, "auth", "login", f"user {user.username} logged in")
     token = create_session_token(user.id)
     response.set_cookie("session", token, httponly=True, samesite="lax")
-    return {"token": token, "user": user_out(user)}
+    return {"token": token, "user": user_out(user, db)}
 
 
 @router.post("/logout")
-def logout(response: Response):
+def logout(response: Response, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    log_operation(db, user, "auth", "logout", f"user {user.username} logged out")
     response.delete_cookie("session")
     return {"ok": True}
 
@@ -52,9 +61,10 @@ def change_password(payload: ChangePasswordIn, user: User = Depends(current_user
         raise HTTPException(status_code=400, detail="新密码不能与原密码一致")
     user.password_hash = hash_password(payload.new_password)
     db.commit()
+    log_operation(db, user, "auth", "change_password", f"user {user.username} changed password")
     return {"ok": True}
 
 
 @router.get("/me")
-def me(user: User = Depends(current_user)):
-    return user_out(user)
+def me(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return user_out(user, db)

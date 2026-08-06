@@ -22,6 +22,18 @@ class User(Base, TimestampMixin):
     last_login_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class Role(Base, TimestampMixin):
+    __tablename__ = "role"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(64))
+    description: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+    menus_json: Mapped[str] = mapped_column(Text, default="[]")
+
+
 class Project(Base, TimestampMixin):
     __tablename__ = "project"
 

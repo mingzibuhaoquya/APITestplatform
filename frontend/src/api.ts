@@ -15,6 +15,8 @@ export type User = {
   id: number
   username: string
   real_name: string
-  role: 'admin' | 'tester'
+  role: string
+  role_name?: string
+  menus?: string[]
   status: 'active' | 'disabled'
 }

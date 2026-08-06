@@ -9,13 +9,15 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
-from app.models import Environment, ExecutionResult, ExecutionTask, Project, TestCase as TestCaseModel, TestSuite, User
+from app.models import Environment, ExecutionResult, ExecutionTask, Project, Role, TestCase as TestCaseModel, TestSuite, User
 from app.routers.auth import change_password, login
-from app.routers.crud import create_api, create_case, create_environment, create_plan, create_project, delete_api, delete_case, delete_environment, delete_plan, delete_project, execute_plan, list_apis, list_cases, list_environments, list_plans, list_projects, update_api, update_case, update_environment, update_plan, update_project
+from app.routers.crud import create_api, create_case, create_environment, create_plan, create_project, delete_api, delete_case, delete_environment, delete_plan, delete_project, execute_plan, get_execution_log_detail, list_apis, list_cases, list_environments, list_exception_logs, list_execution_logs, list_logs, list_plans, list_projects, update_api, update_case, update_environment, update_plan, update_project
 from app.routers.executions import delete_execution, list_executions
 from app.routers.mock import router as mock_router
 from app.routers.users import create_user, list_users, router as users_router, update_user, update_user_status
-from app.schemas import ApiDefinitionIn, ApiDefinitionUpdate, ChangePasswordIn, EnvironmentIn, EnvironmentUpdate, LoginIn, ProjectIn, ProjectUpdate, TestCaseIn, TestCaseUpdate, TestPlanIn, TestPlanUpdate, UserCreate, UserStatusUpdate, UserUpdate
+from app.routers.roles import create_role, delete_role, list_roles, update_role
+from app.schemas import ApiDefinitionIn, ApiDefinitionUpdate, ChangePasswordIn, EnvironmentIn, EnvironmentUpdate, LoginIn, ProjectIn, ProjectUpdate, RoleIn, RoleUpdate, TestCaseIn, TestCaseUpdate, TestPlanIn, TestPlanUpdate, UserCreate, UserStatusUpdate, UserUpdate
+from app.services.menus import ensure_default_roles
 from app.services.assertions import all_passed, run_assertions
 from app.services import executor as executor_service
 from app.services.executor import _apply_auth_config, _build_request_url, _execute, _initial_variables
@@ -385,6 +387,68 @@ def test_tester_can_manage_users_except_create(db_session):
         json={"username": "forbidden_create", "password": "123456", "real_name": "禁止创建", "role": "tester"},
     )
     assert create_response.status_code == 403
+
+
+def test_role_management_and_user_role_binding(db_session):
+    db, admin = db_session
+    ensure_default_roles(db)
+
+    listed = list_roles(page=1, page_size=10, _=admin, db=db)
+    assert {item["code"] for item in listed["items"]} >= {"admin", "tester"}
+
+    role = create_role(
+        RoleIn(code="reviewer", name="审核人员", description="只查看报告", menus=["dashboard", "reports"]),
+        admin,
+        db,
+    )
+    assert role["menus"] == ["dashboard", "reports"]
+
+    updated = update_role(
+        role["id"],
+        RoleUpdate(name="审核专员", description="查看报告和日志", menus=["dashboard", "reports", "logs"]),
+        admin,
+        db,
+    )
+    assert updated["name"] == "审核专员"
+    assert "logs" in updated["menus"]
+
+    created_user = create_user(UserCreate(username="reviewer_user", password="123456", real_name="审核", role="reviewer"), admin, db)
+    assert created_user.role == "reviewer"
+    assert created_user.role_name == "审核专员"
+
+    with pytest.raises(HTTPException) as bound_error:
+        delete_role(role["id"], admin, db)
+    assert bound_error.value.status_code == 400
+
+    db.delete(db.query(User).filter(User.username == "reviewer_user").first())
+    db.commit()
+    deleted = delete_role(role["id"], admin, db)
+    assert deleted["code"] == "reviewer"
+
+    builtin = db.query(Role).filter(Role.code == "tester").first()
+    with pytest.raises(HTTPException) as builtin_error:
+        delete_role(builtin.id, admin, db)
+    assert builtin_error.value.status_code == 400
+
+
+def test_role_menu_permission_blocks_hidden_module(db_session):
+    db, admin = db_session
+    ensure_default_roles(db)
+    role = create_role(RoleIn(code="report_only", name="报告查看", menus=["dashboard", "reports"]), admin, db)
+    user = create_user(UserCreate(username="report_only_user", password="123456", real_name="报告", role=role["code"]), admin, db)
+
+    app = FastAPI()
+
+    def override_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    app.include_router(users_router)
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {create_session_token(user.id)}"}
+
+    response = client.get("/users?page=1&page_size=10", headers=headers)
+    assert response.status_code == 403
 
 
 def test_change_password_validates_old_and_same_password(db_session):
@@ -1428,6 +1492,49 @@ def test_execution_reports_search_and_soft_delete(db_session):
     deleted = delete_execution(task["id"], admin, db)
     assert deleted["id"] == task["id"]
     assert list_executions(name="nightly", target_type="plan", page=1, page_size=10, _=admin, db=db)["total"] == 0
+
+
+def test_log_center_operation_execution_exception_and_detail(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="log_project", description="log project"), admin, db)
+    environment = create_test_environment(project["id"], admin, db)
+    api_row = create_api(ApiDefinitionIn(project_id=project["id"], environment_id=environment["id"], name="log_api", method="POST", path="/log", body={"format": "json"}), admin, db)
+    case_row = create_case(TestCaseIn(project_id=project["id"], api_id=api_row["id"], name="log_case"), admin, db)
+    plan = create_plan(TestPlanIn(project_id=project["id"], environment_id=environment["id"], api_id=api_row["id"], name="log plan", items=[case_row["id"]]), admin, db)
+    task = ExecutionTask(executor_id=admin.id, project_id=project["id"], environment_id=environment["id"], target_type="plan", target_id=plan["id"], status="failed")
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    result = ExecutionResult(
+        task_id=task.id,
+        case_id=case_row["id"],
+        status="failed",
+        request_snapshot_json=executor_service.dump_json({"method": "POST", "url": "http://example.test/log", "headers": {}, "query": {}, "body": {"name": "demo"}}),
+        response_snapshot_json=executor_service.dump_json({"status_code": 200, "text": '{"code":1}', "duration_ms": 12, "extracted_variables": []}),
+        assertion_results_json=executor_service.dump_json([{"type": "jsonpath_equal", "path": "$.code", "expected": 0, "actual": 1, "passed": False, "message": "failed"}]),
+        duration_ms=12,
+        error_message="",
+    )
+    db.add(result)
+    db.commit()
+    db.refresh(result)
+
+    operation_logs = list_logs(module="project", result="success", page=1, page_size=10, _=admin, db=db)
+    assert operation_logs["total"] >= 1
+    assert operation_logs["items"][0]["operator_name"]
+
+    execution_logs = list_execution_logs(name="log", status="failed", task_id=task.id, page=1, page_size=10, _=admin, db=db)
+    assert execution_logs["total"] == 1
+    assert execution_logs["items"][0]["case_name"] == "log_case"
+
+    exception_logs = list_exception_logs(name="log", status="failed", task_id=task.id, page=1, page_size=10, _=admin, db=db)
+    assert exception_logs["total"] == 1
+    assert exception_logs["items"][0]["failed_assertion"]["actual"] == 1
+
+    detail = get_execution_log_detail(result.id, admin, db)
+    assert detail["request_snapshot"]["body"] == {"name": "demo"}
+    assert detail["response_snapshot"]["status_code"] == 200
+    assert detail["assertion_results"][0]["expected"] == 0
 
 
 def test_html_report_formats_request_and_response_payloads():
