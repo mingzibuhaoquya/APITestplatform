@@ -63,7 +63,7 @@ def run_assertions(response: dict[str, Any], rules: list[dict[str, Any]]) -> lis
                 message = actual_message
             passed = expected_duration is not None and actual_duration is not None and actual_duration < expected_duration
         elif rule_type == "body_contains":
-            actual = response.get("text", "")
+            actual = response.get("decrypted_text", response.get("text", ""))
             passed = str(expected) in actual
         else:
             message = f"未知断言类型: {rule_type}"

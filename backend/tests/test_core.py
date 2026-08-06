@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
+from app.main import _without_assertion_operators
 from app.models import Environment, ExecutionResult, ExecutionTask, Project, Role, TestCase as TestCaseModel, TestSuite, User
 from app.routers.auth import change_password, login
 from app.routers.crud import create_api, create_case, create_environment, create_plan, create_project, delete_api, delete_case, delete_environment, delete_plan, delete_project, execute_plan, get_execution_log_detail, list_apis, list_cases, list_environments, list_exception_logs, list_execution_logs, list_logs, list_plans, list_projects, update_api, update_case, update_environment, update_plan, update_project
@@ -220,6 +221,30 @@ def test_assertion_rules():
         {"type": "body_contains", "expected": "code"},
     ])
     assert all_passed(results)
+
+
+def test_body_contains_uses_decrypted_text_when_present():
+    response = {
+        "text": '{"cipher":"encrypted-response"}',
+        "decrypted_text": '{"financialProductCode":"PD20260501"}',
+    }
+
+    results = run_assertions(response, [{"type": "body_contains", "expected": "financialProductCode"}])
+
+    assert results[0]["passed"] is True
+    assert results[0]["actual"] == response["decrypted_text"]
+
+
+def test_remove_assertion_operator_from_historical_data():
+    assertions = [
+        {"type": "status_code", "operator": "==", "expected": 200},
+        {"type": "jsonpath_exists", "path": "$.data.id"},
+    ]
+
+    assert _without_assertion_operators(assertions) == [
+        {"type": "status_code", "expected": 200},
+        {"type": "jsonpath_exists", "path": "$.data.id"},
+    ]
 
 
 def test_xmlpath_assertion_rules():
@@ -1011,7 +1036,7 @@ def test_create_and_filter_cases_by_project_and_api(db_session):
 
     second_project_paged = list_cases(project_id=second_project["id"], api_id=second_api["id"], page=1, page_size=10, _=admin, db=db)
     assert second_project_paged["total"] == 1
-    assert second_project_paged["items"][0]["assertions"] == [{"type": "body_contains", "path": "", "operator": "==", "expected": "ok"}]
+    assert second_project_paged["items"][0]["assertions"] == [{"type": "body_contains", "path": "", "expected": "ok"}]
 
     with pytest.raises(HTTPException) as mismatch_error:
         create_case(
@@ -1037,7 +1062,7 @@ def test_update_and_logically_delete_case(db_session):
             api_id=second_api["id"],
             name="updated_case",
             request_body={"updated": True},
-            assertions=[{"type": "jsonpath_equal", "path": "$.code", "operator": "==", "expected": 0}],
+            assertions=[{"type": "jsonpath_equal", "path": "$.code", "expected": 0}],
             extractors=[{"name": "userId", "path": "$.data.userId"}],
             tags="updated description",
         ),
@@ -1050,7 +1075,7 @@ def test_update_and_logically_delete_case(db_session):
     assert updated["api_name"] == "case_update_api_second"
     assert updated["name"] == "updated_case"
     assert updated["request_body"] == {"updated": True}
-    assert updated["assertions"] == [{"type": "jsonpath_equal", "path": "$.code", "operator": "==", "expected": 0}]
+    assert updated["assertions"] == [{"type": "jsonpath_equal", "path": "$.code", "expected": 0}]
     assert updated["extractors"] == [{"name": "userId", "path": "$.data.userId", "source": "jsonpath"}]
     assert updated["tags"] == "updated description"
     assert "priority" not in updated

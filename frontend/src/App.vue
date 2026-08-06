@@ -793,14 +793,18 @@
             </div>
           </a-form>
           <a-table :pagination="false" :data-source="caseList">
+            <a-table-column title="编号" width="80">
+              <template #default="{ index }">{{ caseSerialNumber(index) }}</template>
+            </a-table-column>
             <a-table-column data-index="project_name" title="项目" />
             <a-table-column data-index="api_name" title="接口" />
             <a-table-column data-index="name" title="用例名称" />
-            <a-table-column title="操作" width="270" fixed="right">
+            <a-table-column title="操作" width="330" fixed="right">
               <template #default="{ record: row }">
                 <div class="table-actions">
                   <a-button size="small" @click="openCaseDetailDialog(row)">查看</a-button>
                   <a-button size="small" @click="openEditCasePage(row)">编辑</a-button>
+                  <a-button size="small" @click="copyCase(row)">复制</a-button>
                   <a-button size="small" danger @click="deleteCase(row)">删除</a-button>
                 </div>
               </template>
@@ -910,9 +914,6 @@
                   <template #default="{ record: row }">
                     <a-input v-model:value="row.path" :disabled="!assertionNeedsPath(row.target)" :placeholder="assertionPathPlaceholder(row.target)" />
                   </template>
-                </a-table-column>
-                <a-table-column title="操作符" width="110">
-                  <template #default="{ record: row }"><a-input v-model:value="row.operator" placeholder="==" /></template>
                 </a-table-column>
                 <a-table-column title="期望值">
                   <template #default="{ record: row }">
@@ -1532,7 +1533,6 @@ type CaseAssertionRow = {
   target: AssertionTarget
   check: AssertionCheck
   path: string
-  operator: string
   expected: string | number | null
 }
 type CaseExtractorRow = { id: number; name: string; path: string; source: 'jsonpath' | 'xmlpath' | 'regex' }
@@ -2500,8 +2500,24 @@ async function login() {
     me.value = data.user
     syncAllowedTabs()
     await loadAll()
-  } catch {
-    message.error('用户名或密码错误')
+  } catch (error: any) {
+    const status = error?.response?.status
+    const detail = error?.response?.data?.detail
+    if (typeof detail === 'string' && detail.trim()) {
+      message.error(detail)
+    } else if (status === 401) {
+      message.error('用户名或密码错误')
+    } else if (status === 422) {
+      message.error('请输入用户名和密码')
+    } else if (status === 502 || status === 503 || status === 504) {
+      message.error(`服务暂时不可用（HTTP ${status}），请稍后重试`)
+    } else if (status) {
+      message.error(`登录失败（HTTP ${status}）`)
+    } else if (error?.request) {
+      message.error('无法连接到服务，请确认平台服务已启动')
+    } else {
+      message.error(error?.message || '登录请求发送失败')
+    }
   } finally {
     loginLoading.value = false
   }
@@ -3221,7 +3237,7 @@ function defaultAssertionExpected(target: AssertionTarget, check: AssertionCheck
   return ''
 }
 
-function nextCaseAssertionRow(type = 'status_code', path = '', operator = '==', expected?: string | number | null): CaseAssertionRow {
+function nextCaseAssertionRow(type = 'status_code', path = '', expected?: string | number | null): CaseAssertionRow {
   const { target, check } = assertionPartsFromType(type)
   return {
     id: caseAssertionRowId++,
@@ -3229,7 +3245,6 @@ function nextCaseAssertionRow(type = 'status_code', path = '', operator = '==', 
     target,
     check,
     path,
-    operator,
     expected: expected ?? defaultAssertionExpected(target, check)
   }
 }
@@ -4051,6 +4066,21 @@ function openEditCasePage(row: any) {
   openRuntimeTab({ name: `case-edit-${row.id}`, label: '编辑用例', closable: true })
 }
 
+function copyCase(row: any) {
+  resetCaseForm()
+  caseForm.project_id = row.project_id
+  caseForm.api_id = row.api_id
+  caseForm.name = `${row.name || '用例'} - 副本`
+  caseForm.description = row.tags || ''
+  caseForm.bodyFormat = bodyFormatFromApi(apis.value.find(item => item.id === row.api_id))
+  caseForm.bodyText = caseForm.bodyFormat === 'xml'
+    ? String(row.request_body ?? '')
+    : JSON.stringify(row.request_body ?? {}, null, 2)
+  caseForm.assertionRows = caseAssertionsToRows(row.assertions)
+  caseForm.extractorRows = caseExtractorsToRows(row.extractors)
+  openRuntimeTab({ name: 'case-create', label: '新增用例', closable: true })
+}
+
 function closeCaseEditorPage() {
   const target = active.value
   resetCaseForm()
@@ -4073,7 +4103,6 @@ function caseAssertionsToRows(assertions: any[]): CaseAssertionRow[] {
   return assertions.map(item => nextCaseAssertionRow(
     item?.type || 'status_code',
     item?.path || '',
-    item?.operator || '==',
     String(item?.expected ?? '')
   ))
 }
@@ -4094,7 +4123,6 @@ function caseAssertionRowsToPayload() {
     .map(row => ({
       type: assertionTypeFromParts(row.target, row.check),
       path: assertionNeedsPath(row.target) ? row.path.trim() : '',
-      operator: row.operator.trim() || '==',
       expected: parseAssertionExpected(row.expected)
     }))
 }
@@ -4574,15 +4602,17 @@ function clearPlanExecutionPoller(planId: number) {
   }
 }
 
-function updatePlanExecutionState(planId: number, taskId: number, status: string, row?: any) {
-  if (row) {
-    row.last_execution_id = taskId
-    row.last_status = status
-  }
-  const target = planList.value.find(item => item.id === planId)
-  if (target) {
-    target.last_execution_id = taskId
-    target.last_status = status
+function updatePlanExecutionState(planId: number, taskId: number, status: string, row?: any, results: any[] = []) {
+  const resultStatusMap = new Map(results.filter(item => item?.case_id).map(item => [item.case_id, item.status]))
+  const fallbackStatus = ['queued', 'running'].includes(status) ? status : ''
+  const plans = [row, planList.value.find(item => item.id === planId)].filter((item, index, items) => item && items.indexOf(item) === index)
+
+  for (const plan of plans) {
+    plan.last_execution_id = taskId
+    plan.last_status = status
+    for (const caseRow of plan.cases || []) {
+      caseRow.status = resultStatusMap.get(caseRow.id) || fallbackStatus
+    }
   }
 }
 
@@ -4606,7 +4636,7 @@ function pollPlanExecution(planId: number, taskId: number, row?: any) {
       const { data } = await api.get(`/executions/${taskId}`)
       const status = data?.task?.status || ''
       if (status) {
-        updatePlanExecutionState(planId, taskId, status, row)
+        updatePlanExecutionState(planId, taskId, status, row, data?.results || [])
       }
       if (terminalStatuses.has(status) || attempts >= 30) {
         clearPlanExecutionPoller(planId)

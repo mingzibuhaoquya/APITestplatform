@@ -196,7 +196,6 @@ class AssertionRule(BaseModel):
         "body_contains",
     ]
     path: str = ""
-    operator: str = "=="
     expected: Any = None
 
 

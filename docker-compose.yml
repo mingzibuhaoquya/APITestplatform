@@ -1,7 +1,9 @@
 services:
   mysql:
     image: mysql:8.4
+    command: --default-time-zone=+08:00
     environment:
+      TZ: Asia/Shanghai
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: api_test_platform
       MYSQL_USER: api_test
@@ -19,6 +21,7 @@ services:
   backend:
     build: ./backend
     environment:
+      TZ: Asia/Shanghai
       DATABASE_URL: mysql+pymysql://api_test:api_test@mysql:3306/api_test_platform?charset=utf8mb4
       APP_SECRET: change-me-in-production
       ADMIN_USERNAME: admin
@@ -35,6 +38,7 @@ services:
     build: ./backend
     command: python -m app.services.task_queue_worker
     environment:
+      TZ: Asia/Shanghai
       DATABASE_URL: mysql+pymysql://api_test:api_test@mysql:3306/api_test_platform?charset=utf8mb4
       APP_SECRET: change-me-in-production
     depends_on:

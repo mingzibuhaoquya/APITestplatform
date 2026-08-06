@@ -6,10 +6,11 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 from .config import get_settings
 from .database import Base, SessionLocal, engine
-from .models import User
+from .models import TestCase, User
 from .routers import auth, crud, executions, mock, roles, users
 from .security import hash_password
 from .services.menus import ensure_default_roles
+from .utils import dump_json, parse_json
 
 
 os.makedirs("logs", exist_ok=True)
@@ -43,6 +44,7 @@ def startup() -> None:
     _ensure_environment_deleted_column()
     _ensure_api_definition_columns()
     _ensure_test_case_columns()
+    _remove_test_case_assertion_operators()
     _ensure_test_suite_columns()
     _ensure_execution_task_columns()
     _ensure_roles()
@@ -97,6 +99,31 @@ def _ensure_test_case_columns() -> None:
             conn.execute(text("ALTER TABLE test_case DROP COLUMN status"))
         if "priority" in columns:
             conn.execute(text("ALTER TABLE test_case DROP COLUMN priority"))
+
+
+def _without_assertion_operators(assertions: object) -> object:
+    if not isinstance(assertions, list):
+        return assertions
+    return [
+        {key: value for key, value in item.items() if key != "operator"} if isinstance(item, dict) else item
+        for item in assertions
+    ]
+
+
+def _remove_test_case_assertion_operators() -> None:
+    db = SessionLocal()
+    try:
+        changed = False
+        for case in db.query(TestCase).all():
+            assertions = parse_json(case.assertions_json, [])
+            cleaned = _without_assertion_operators(assertions)
+            if cleaned != assertions:
+                case.assertions_json = dump_json(cleaned)
+                changed = True
+        if changed:
+            db.commit()
+    finally:
+        db.close()
 
 
 def _ensure_test_suite_columns() -> None:
