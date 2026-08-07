@@ -2001,6 +2001,53 @@ function parseJson(text: string, fallback: any) {
   try { return JSON.parse(text || '') } catch { return fallback }
 }
 
+function quoteBareJsonVariables(text: string) {
+  let result = ''
+  let inString = false
+  let escaped = false
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    if (inString) {
+      result += char
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (char === '"') {
+      inString = true
+      result += char
+      continue
+    }
+    if (char === '$' && text[index + 1] === '{') {
+      const end = text.indexOf('}', index + 2)
+      if (end !== -1) {
+        result += JSON.stringify(text.slice(index, end + 1))
+        index = end
+        continue
+      }
+    }
+    result += char
+  }
+  return result
+}
+
+function parseJsonAllowVariables(text: string, fallback: any) {
+  try {
+    return JSON.parse(text || '')
+  } catch {
+    try {
+      return JSON.parse(quoteBareJsonVariables(text || ''))
+    } catch {
+      return fallback
+    }
+  }
+}
+
 async function loadAll() {
   const calls = [
     api.get('/projects').then(r => projects.value = r.data),
@@ -3548,7 +3595,7 @@ function formatCaseBody() {
     }
     return
   }
-  const parsed = parseJson(caseForm.bodyText, undefined)
+  const parsed = parseJsonAllowVariables(caseForm.bodyText, undefined)
   if (parsed === undefined) {
     message.warning(caseForm.bodyFormat === 'x-www-form-data' ? '表单 Body 必须是合法 JSON 对象' : 'Body 必须是合法 JSON')
     return
@@ -4300,7 +4347,7 @@ function validateCaseForm() {
   }
   let requestBody: any = caseForm.bodyText
   if (caseForm.bodyFormat !== 'xml') {
-    requestBody = parseJson(caseForm.bodyText, undefined)
+    requestBody = parseJsonAllowVariables(caseForm.bodyText, undefined)
     if (requestBody === undefined) {
       message.warning(caseForm.bodyFormat === 'x-www-form-data' ? '表单 Body 必须是合法 JSON 对象' : 'Body 必须是合法 JSON')
       return null
