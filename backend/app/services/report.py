@@ -364,7 +364,7 @@ def build_html_report(task: Any, results: list[Any], target_name: str = "") -> s
   <header class="hero">
     <div class="brand">
       <img src="{LOGO_PATH}" alt="company logo" />
-      <span>接口自动化测试平台</span>
+      <span>测试平台</span>
     </div>
     <div class="hero-content">
       <div>

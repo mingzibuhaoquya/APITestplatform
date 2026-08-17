@@ -3,9 +3,9 @@
     <div v-if="!me" class="login-page">
       <a-card class="login-card" :bordered="false">
         <div class="login-brand">
-          <div class="login-logo"><img src="/company-logo.png" alt="接口测试平台" /></div>
+          <div class="login-logo"><img src="/company-logo.png" alt="测试平台" /></div>
           <div>
-            <h1>接口自动化测试平台</h1>
+            <h1>测试平台</h1>
             <p>面向测试团队的接口回归与质量协作平台</p>
           </div>
         </div>
@@ -40,10 +40,10 @@
         @breakpoint="handleSidebarBreakpoint"
       >
         <div class="brand" :class="{ 'brand-collapsed': sidebarCollapsed }">
-          <img src="/company-logo.png" alt="接口测试平台" />
-          <span v-if="!sidebarCollapsed">接口测试平台</span>
+          <img src="/company-logo.png" alt="测试平台" />
+          <span v-if="!sidebarCollapsed">测试平台</span>
         </div>
-        <a-menu :selected-keys="[active]" mode="inline" @select="handleMenuSelect">
+        <a-menu :selected-keys="[active]" :default-open-keys="['interface-test']" mode="inline" @select="handleMenuSelect">
           <template v-for="item in visibleMenuGroups" :key="item.key">
             <a-sub-menu v-if="item.children?.length" :key="item.key">
               <template #icon><component :is="item.icon" /></template>
@@ -59,8 +59,8 @@
         </a-menu>
       </a-layout-sider>
       <a-drawer v-else v-model:open="mobileSidebarOpen" placement="left" :closable="false" :width="232" class="mobile-nav-drawer">
-        <div class="brand"><img src="/company-logo.png" alt="接口测试平台" /><span>接口测试平台</span></div>
-        <a-menu :selected-keys="[active]" mode="inline" @select="handleMenuSelect">
+        <div class="brand"><img src="/company-logo.png" alt="测试平台" /><span>测试平台</span></div>
+        <a-menu :selected-keys="[active]" :default-open-keys="['interface-test']" mode="inline" @select="handleMenuSelect">
           <template v-for="item in visibleMenuGroups" :key="item.key">
             <a-sub-menu v-if="item.children?.length" :key="item.key">
               <template #icon><component :is="item.icon" /></template>
@@ -252,20 +252,13 @@
           <a-table :pagination="false" :data-source="roles">
             <a-table-column data-index="code" title="角色编码" width="150" />
             <a-table-column data-index="name" title="角色名称" width="150" />
-            <a-table-column data-index="description" title="描述" />
             <a-table-column title="状态" width="100">
               <template #default="{ record: row }"><a-tag :color="row.status === 'active' ? 'success' : 'warning'">{{ statusText(row.status) }}</a-tag></template>
             </a-table-column>
-            <a-table-column title="类型" width="100">
-              <template #default="{ record: row }"><a-tag :color="row.is_builtin ? 'blue' : 'default'">{{ row.is_builtin ? '内置' : '自定义' }}</a-tag></template>
-            </a-table-column>
-            <a-table-column data-index="user_count" title="用户数" width="90" />
-            <a-table-column title="菜单权限" width="240">
-              <template #default="{ record: row }">{{ roleMenuLabels(row.menus).join('、') || '-' }}</template>
-            </a-table-column>
-            <a-table-column title="操作" width="140" fixed="right">
+            <a-table-column title="操作" width="230" fixed="right">
               <template #default="{ record: row }">
                 <div class="table-actions">
+                  <a-button size="small" @click="openRolePermissionDialog(row)">菜单权限</a-button>
                   <a-button size="small" @click="openEditRoleDialog(row)">编辑</a-button>
                   <a-button size="small" danger :disabled="row.is_builtin || row.user_count > 0" @click="deleteRole(row)">删除</a-button>
                 </div>
@@ -327,6 +320,52 @@
             </a-form>
             <template #footer><a-button @click="cancelEditRole">取消</a-button><a-button type="primary" @click="updateRole">确认</a-button></template>
           </a-modal>
+
+          <a-modal v-model:open="rolePermissionDialogVisible" title="菜单权限" width="560px" @after-close="resetRolePermissionForm">
+            <div class="role-permission-role">角色：{{ rolePermissionForm.name }}</div>
+            <a-tree
+              v-model:checked-keys="rolePermissionForm.menus"
+              class="role-permission-tree"
+              checkable
+              block-node
+              default-expand-all
+              :tree-data="roleMenuTreeData"
+            />
+            <template #footer><a-button @click="cancelRolePermission">取消</a-button><a-button type="primary" @click="saveRolePermissions">确认</a-button></template>
+          </a-modal>
+        </section>
+
+        <section v-if="active === 'tickets'" class="page-view">
+          <div class="toolbar"><h2>工单管理</h2><a-button type="primary" @click="openCreateTicket"><template #icon><PlusOutlined /></template>提交工单</a-button></div>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="工单标题"><a-input v-model:value="ticketSearch.title" placeholder="请输入工单标题" allow-clear @keyup.enter="searchTickets" /></a-form-item>
+            <a-form-item label="工单类型"><a-select v-model:value="ticketSearch.category" placeholder="请选择类型" allow-clear><a-select-option value="feature">功能建议</a-select-option><a-select-option value="issue">问题反馈</a-select-option><a-select-option value="experience">体验优化</a-select-option><a-select-option value="other">其他</a-select-option></a-select></a-form-item>
+            <a-form-item label="状态"><a-select v-model:value="ticketSearch.status" placeholder="请选择状态" allow-clear><a-select-option value="pending">待处理</a-select-option><a-select-option value="processing">处理中</a-select-option><a-select-option value="resolved">已解决</a-select-option></a-select></a-form-item>
+            <div class="search-actions"><a-button type="primary" @click="searchTickets">搜索</a-button><a-button @click="resetTickets">重置</a-button></div>
+          </a-form>
+          <a-table :pagination="false" :data-source="tickets" :scroll="{ x: 1120 }">
+            <a-table-column title="编号" width="70"><template #default="{ index }">{{ (ticketPagination.page - 1) * ticketPagination.pageSize + index + 1 }}</template></a-table-column>
+            <a-table-column title="类型" width="110"><template #default="{ record: row }">{{ ticketCategoryText(row.category) }}</template></a-table-column>
+            <a-table-column data-index="title" title="工单标题" width="230" ellipsis />
+            <a-table-column title="状态" width="100"><template #default="{ record: row }"><a-tag :color="ticketStatusColor(row.status)">{{ ticketStatusText(row.status) }}</a-tag></template></a-table-column>
+            <a-table-column data-index="submitter_name" title="提交人" width="120" />
+            <a-table-column data-index="create_date" title="提交时间" width="170" />
+            <a-table-column data-index="handler_name" title="处理人" width="120" />
+            <a-table-column data-index="handled_at" title="处理时间" width="170" />
+            <a-table-column title="操作" width="90" fixed="right"><template #default="{ record: row }"><a-button size="small" @click="openTicketDetail(row)">查看</a-button></template></a-table-column>
+          </a-table>
+          <div class="pagination"><a-pagination :show-total="paginationTotal" show-less-items :current="ticketPagination.page" :page-size="ticketPagination.pageSize" :total="ticketPagination.total" @change="changeTicketPage" /></div>
+
+          <a-modal v-model:open="createTicketVisible" title="提交工单" width="640px" @after-close="resetTicketForm">
+            <a-form layout="vertical"><a-form-item label="工单类型" required><a-select v-model:value="ticketForm.category"><a-select-option value="feature">功能建议</a-select-option><a-select-option value="issue">问题反馈</a-select-option><a-select-option value="experience">体验优化</a-select-option><a-select-option value="other">其他</a-select-option></a-select></a-form-item><a-form-item label="工单标题" required><a-input v-model:value="ticketForm.title" :maxlength="200" show-count /></a-form-item><a-form-item label="建议内容" required><a-textarea v-model:value="ticketForm.content" :maxlength="5000" show-count :auto-size="{ minRows: 5, maxRows: 9 }" /></a-form-item><a-form-item label="附件"><a-upload v-model:file-list="ticketForm.files" :before-upload="validateTicketFile" :max-count="5" multiple><a-button><template #icon><FileTextOutlined /></template>选择附件</a-button></a-upload><div class="form-tip">最多 5 个附件，单个文件不超过 20MB。</div></a-form-item></a-form>
+            <template #footer><a-button @click="createTicketVisible = false">取消</a-button><a-button type="primary" :loading="ticketSubmitting" @click="submitTicket">提交</a-button></template>
+          </a-modal>
+
+          <a-modal v-model:open="ticketDetailVisible" title="工单详情" width="720px">
+            <a-descriptions v-if="ticketDetail" :column="2" bordered size="small"><a-descriptions-item label="工单类型">{{ ticketCategoryText(ticketDetail.category) }}</a-descriptions-item><a-descriptions-item label="状态"><a-tag :color="ticketStatusColor(ticketDetail.status)">{{ ticketStatusText(ticketDetail.status) }}</a-tag></a-descriptions-item><a-descriptions-item label="工单标题" :span="2">{{ ticketDetail.title }}</a-descriptions-item><a-descriptions-item label="建议内容" :span="2"><div class="ticket-content">{{ ticketDetail.content }}</div></a-descriptions-item><a-descriptions-item label="附件" :span="2"><a-space v-if="ticketDetail.attachments?.length" wrap><a-button v-for="item in ticketDetail.attachments" :key="item.id" type="link" size="small" @click="downloadTicketAttachment(ticketDetail, item)">{{ item.name }}</a-button></a-space><span v-else>-</span></a-descriptions-item><a-descriptions-item label="处理人">{{ ticketDetail.handler_name || '-' }}</a-descriptions-item><a-descriptions-item label="处理时间">{{ ticketDetail.handled_at || '-' }}</a-descriptions-item><a-descriptions-item label="处理回复" :span="2"><div class="ticket-content">{{ ticketDetail.reply || '-' }}</div></a-descriptions-item></a-descriptions>
+            <template #footer><a-button @click="ticketDetailVisible = false">关闭</a-button><a-button v-if="me?.role === 'admin'" type="primary" @click="openProcessTicket">处理工单</a-button></template>
+          </a-modal>
+          <a-modal v-model:open="processTicketVisible" title="处理工单" width="560px"><a-form layout="vertical"><a-form-item label="状态"><a-select v-model:value="ticketProcessForm.status"><a-select-option value="processing">处理中</a-select-option><a-select-option value="resolved">已解决</a-select-option></a-select></a-form-item><a-form-item label="处理回复" :required="ticketProcessForm.status === 'resolved'"><a-textarea v-model:value="ticketProcessForm.reply" :maxlength="5000" :auto-size="{ minRows: 4, maxRows: 8 }" /></a-form-item></a-form><template #footer><a-button @click="processTicketVisible = false">取消</a-button><a-button type="primary" @click="saveTicketProcess">确认</a-button></template></a-modal>
         </section>
 
         <section v-if="active === 'projects'" class="page-view">
@@ -1304,6 +1343,62 @@
           </div>
         </section>
 
+        <section v-if="active === 'ai_cases'" class="page-view ai-generation-page">
+          <div class="toolbar">
+            <div><h2>AI生成用例</h2><p class="page-subtitle">上传需求文档，使用 AI 生成测试用例 Excel 文件。</p></div>
+          </div>
+          <a-card class="ai-generation-upload" :bordered="false">
+            <a-form layout="vertical">
+              <a-form-item label="需求文档" extra="每次只能上传 1 个文档，文件大小不超过 20MB。">
+                <a-upload
+                  :file-list="aiSourceFiles"
+                  :max-count="1"
+                  :multiple="false"
+                  :show-upload-list="false"
+                  :before-upload="selectAiSourceFile"
+                >
+                  <a-button :disabled="aiGenerating"><template #icon><FileTextOutlined /></template>选择需求文档</a-button>
+                </a-upload>
+                <div v-if="aiSourceFiles.length || aiLastUploadedFilename" class="ai-selected-file">
+                  <FileTextOutlined />
+                  <span :title="aiSourceFiles[0]?.name || aiLastUploadedFilename">{{ aiSourceFiles[0]?.name || aiLastUploadedFilename }}</span>
+                  <a-button v-if="aiSourceFiles.length" type="link" size="small" :disabled="aiGenerating" @click="removeAiSourceFile">移除</a-button>
+                </div>
+              </a-form-item>
+              <a-button type="primary" :loading="aiGenerating" :disabled="!aiSourceFiles.length" @click="startAiGeneration">
+                <template #icon><PlayCircleOutlined /></template>开始生成
+              </a-button>
+            </a-form>
+          </a-card>
+
+          <div class="toolbar ai-history-toolbar"><h3>生成历史</h3><a-button @click="loadAiGenerations"><template #icon><ReloadOutlined /></template>刷新</a-button></div>
+          <a-table :pagination="false" :data-source="aiGenerations" :scroll="{ x: 1080 }" table-layout="fixed" class="ai-generation-table">
+            <a-table-column title="编号" :width="64"><template #default="{ index }">{{ aiGenerationSerialNumber(index) }}</template></a-table-column>
+            <a-table-column title="需求文档" :width="260">
+              <template #default="{ record: row }"><span class="ai-source-filename" :title="row.source_filename">{{ row.source_filename }}</span></template>
+            </a-table-column>
+            <a-table-column title="状态" :width="96">
+              <template #default="{ record: row }"><a-tag :color="aiGenerationStatusColor(row.status)">{{ aiGenerationStatusText(row.status) }}</a-tag></template>
+            </a-table-column>
+            <a-table-column data-index="creator_name" title="发起人" :width="110" />
+            <a-table-column data-index="create_date" title="创建时间" :width="168" />
+            <a-table-column title="生成文件" :width="190">
+              <template #default="{ record: row }">
+                <div v-if="row.output_files?.length" class="ai-output-files">
+                  <a-button v-for="(file, index) in row.output_files" :key="file.storage_name || index" size="small" type="link" @click="downloadAiGenerationFile(row, index)">{{ file.name }}</a-button>
+                </div>
+                <span v-else>-</span>
+              </template>
+            </a-table-column>
+            <a-table-column title="错误信息" :width="190">
+              <template #default="{ record: row }"><span class="ai-error-message" :title="row.error_message || ''">{{ row.error_message || '-' }}</span></template>
+            </a-table-column>
+          </a-table>
+          <div class="pagination">
+            <a-pagination :show-total="paginationTotal" show-less-items :current="aiGenerationPagination.page" :page-size="aiGenerationPagination.pageSize" :total="aiGenerationPagination.total" @change="changeAiGenerationPage" />
+          </div>
+        </section>
+
         <section v-if="active === 'logs'" class="page-view">
           <div class="toolbar"><h2>日志中心</h2></div>
           <a-tabs v-model:active-key="activeLogTab" class="log-tabs" @change="changeLogTab">
@@ -1512,7 +1607,6 @@ import {
   EditOutlined,
   EyeOutlined,
   FileTextOutlined,
-  FolderOpenOutlined,
   LockOutlined,
   LoginOutlined,
   LogoutOutlined,
@@ -1765,34 +1859,38 @@ const menuMeta: Record<string, AppTab> = {
   cases: { name: 'cases', label: '用例管理', closable: true },
   execute: { name: 'execute', label: '测试计划', closable: true },
   reports: { name: 'reports', label: '报告中心', closable: true },
+  ai_cases: { name: 'ai_cases', label: 'AI生成用例', closable: true },
   logs: { name: 'logs', label: '日志中心', closable: true },
   accounts: { name: 'accounts', label: '用户管理', closable: true },
-  roles: { name: 'roles', label: '角色管理', closable: true }
+  roles: { name: 'roles', label: '角色管理', closable: true },
+  tickets: { name: 'tickets', label: '工单管理', closable: true }
 }
 
 const menuTree: MenuNode[] = [
-  { key: 'dashboard', label: menuMeta.dashboard.label, icon: DashboardOutlined },
   {
-    key: 'project-env',
-    label: '项目环境',
-    icon: FolderOpenOutlined,
+    key: 'interface-test',
+    label: '接口测试',
+    icon: ApiOutlined,
     children: [
+      { key: 'dashboard', label: menuMeta.dashboard.label, icon: DashboardOutlined },
       { key: 'projects', label: menuMeta.projects.label, icon: ProjectOutlined },
-      { key: 'environments', label: menuMeta.environments.label, icon: CloudServerOutlined }
+      { key: 'environments', label: menuMeta.environments.label, icon: CloudServerOutlined },
+      { key: 'apis', label: menuMeta.apis.label, icon: ApiOutlined },
+      { key: 'cases', label: menuMeta.cases.label, icon: FileTextOutlined },
+      { key: 'execute', label: menuMeta.execute.label, icon: PlayCircleOutlined },
+      { key: 'reports', label: menuMeta.reports.label, icon: BarChartOutlined },
+      { key: 'logs', label: menuMeta.logs.label, icon: ProfileOutlined }
     ]
   },
-  { key: 'apis', label: menuMeta.apis.label, icon: ApiOutlined },
-  { key: 'cases', label: menuMeta.cases.label, icon: FileTextOutlined },
-  { key: 'execute', label: menuMeta.execute.label, icon: PlayCircleOutlined },
-  { key: 'reports', label: menuMeta.reports.label, icon: BarChartOutlined },
-  { key: 'logs', label: menuMeta.logs.label, icon: ProfileOutlined },
+  { key: 'ai_cases', label: menuMeta.ai_cases.label, icon: CheckCircleOutlined },
   {
     key: 'system',
     label: '系统管理',
     icon: SettingOutlined,
     children: [
       { key: 'accounts', label: menuMeta.accounts.label, icon: TeamOutlined },
-      { key: 'roles', label: menuMeta.roles.label, icon: SettingOutlined }
+      { key: 'roles', label: menuMeta.roles.label, icon: SettingOutlined },
+      { key: 'tickets', label: menuMeta.tickets.label, icon: FileTextOutlined }
     ]
   }
 ]
@@ -1826,6 +1924,7 @@ const isMobile = ref(false)
 const loginLoading = ref(false)
 
 const me = ref<User | null>(null)
+const sessionExpired = ref(false)
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 const users = ref<any[]>([])
 const roles = ref<any[]>([])
@@ -1864,7 +1963,16 @@ const planSearch = reactive({ project_id: undefined as number | undefined, api_i
 const planPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const reportSearch = reactive({ name: '', status: '' })
 const reportPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const aiGenerationPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const ticketSearch = reactive({ title: '', category: '', status: '' })
+const ticketPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const selectedReportIds = ref<number[]>([])
+const aiGenerations = ref<any[]>([])
+const tickets = ref<any[]>([])
+const aiSourceFiles = ref<any[]>([])
+const aiLastUploadedFilename = ref('')
+const aiGenerating = ref(false)
+let aiGenerationPoller: number | undefined
 const activeLogTab = ref('operations')
 const operationLogSearch = reactive({ module: '', action: '', result: '', start_time: '', end_time: '' })
 const executionLogSearch = reactive({ name: '', status: '' })
@@ -1877,6 +1985,10 @@ const createUserDialogVisible = ref(false)
 const editUserDialogVisible = ref(false)
 const createRoleDialogVisible = ref(false)
 const editRoleDialogVisible = ref(false)
+const rolePermissionDialogVisible = ref(false)
+const createTicketVisible = ref(false)
+const ticketDetailVisible = ref(false)
+const processTicketVisible = ref(false)
 const createProjectDialogVisible = ref(false)
 const editProjectDialogVisible = ref(false)
 const createEnvironmentDialogVisible = ref(false)
@@ -1896,6 +2008,11 @@ const userForm = reactive({ username: '', real_name: '', role: 'tester' })
 const editUserForm = reactive({ id: undefined as number | undefined, username: '', real_name: '', role: 'tester' })
 const roleForm = reactive({ code: '', name: '', description: '', status: 'active', menus: [] as string[] })
 const editRoleForm = reactive({ id: undefined as number | undefined, code: '', name: '', description: '', status: 'active', menus: [] as string[], is_builtin: false })
+const rolePermissionForm = reactive({ id: undefined as number | undefined, name: '', description: '', status: 'active', menus: [] as string[] })
+const ticketForm = reactive({ category: 'feature', title: '', content: '', files: [] as any[] })
+const ticketProcessForm = reactive({ status: 'processing', reply: '' })
+const ticketDetail = ref<any>(null)
+const ticketSubmitting = ref(false)
 const changePasswordForm = reactive({ old_password: '', new_password: '', confirm_password: '' })
 const projectForm = reactive({ name: '', description: '' })
 const editProjectForm = reactive({ id: undefined as number | undefined, name: '', description: '' })
@@ -1918,7 +2035,13 @@ const planEditors = reactive<Record<string, PlanEditor>>({})
 const avatarText = computed(() => me.value?.username.slice(0, 1).toUpperCase() || 'U')
 const activeApiEditor = computed(() => apiEditors[active.value])
 const activePlanEditor = computed(() => planEditors[active.value])
-const currentPageTitle = computed(() => activeApiEditor.value?.label || activePlanEditor.value?.label || menuMeta[active.value]?.label || '接口测试平台')
+const currentPageTitle = computed(() => activeApiEditor.value?.label || activePlanEditor.value?.label || menuMeta[active.value]?.label || '测试平台')
+const roleMenuTreeData = computed(() => roleMenus.value.map(group => ({
+  key: group.key,
+  title: group.label,
+  children: group.children?.map((child: any) => ({ key: child.key, title: child.label }))
+})))
+const roleMenuLeafKeys = computed(() => new Set(roleMenus.value.flatMap(group => group.children?.map((child: any) => child.key) || [group.key])))
 const permittedMenuKeys = computed(() => new Set(me.value?.menus?.length ? me.value.menus : Object.keys(menuMeta)))
 const visibleMenuGroups = computed(() => menuTree
   .map(item => {
@@ -2064,6 +2187,8 @@ async function loadAll() {
   calls.push(loadCases())
   calls.push(loadPlans())
   calls.push(loadReports())
+  calls.push(loadAiGenerations())
+  calls.push(loadTickets())
   calls.push(loadLogs())
   await Promise.allSettled(calls)
 }
@@ -2370,6 +2495,183 @@ async function changeReportPage(page: number) {
   await loadReports()
 }
 
+function aiGenerationSerialNumber(index: number) {
+  return (aiGenerationPagination.page - 1) * aiGenerationPagination.pageSize + index + 1
+}
+
+function aiGenerationStatusText(status: string) {
+  const labels: Record<string, string> = {
+    queued: '排队中',
+    running: '生成中',
+    succeeded: '已完成',
+    failed: '失败'
+  }
+  return labels[status] || status || '-'
+}
+
+function aiGenerationStatusColor(status: string) {
+  if (status === 'succeeded') return 'success'
+  if (status === 'failed') return 'error'
+  if (status === 'running') return 'processing'
+  return 'warning'
+}
+
+function clearAiGenerationPoller() {
+  if (aiGenerationPoller !== undefined) {
+    window.clearInterval(aiGenerationPoller)
+    aiGenerationPoller = undefined
+  }
+}
+
+function refreshAiGenerationPoller() {
+  const needsPolling = aiGenerations.value.some(row => ['queued', 'running'].includes(row.status))
+  if (needsPolling && aiGenerationPoller === undefined) {
+    aiGenerationPoller = window.setInterval(() => void loadAiGenerations(true), 3000)
+  }
+  if (!needsPolling) clearAiGenerationPoller()
+}
+
+async function loadAiGenerations(isBackground = false) {
+  const { data } = await api.get('/ai-case-generations', {
+    params: { page: aiGenerationPagination.page, page_size: aiGenerationPagination.pageSize },
+    headers: isBackground ? { 'X-Session-Activity': '0' } : undefined
+  })
+  aiGenerations.value = data.items
+  aiGenerationPagination.total = data.total
+  aiGenerationPagination.page = data.page
+  aiGenerationPagination.pageSize = data.page_size
+  refreshAiGenerationPoller()
+}
+
+async function changeAiGenerationPage(page: number) {
+  aiGenerationPagination.page = page
+  await loadAiGenerations()
+}
+
+function ticketCategoryText(category: string) {
+  return ({ feature: '功能建议', issue: '问题反馈', experience: '体验优化', other: '其他' } as Record<string, string>)[category] || category
+}
+
+function ticketStatusText(status: string) {
+  return ({ pending: '待处理', processing: '处理中', resolved: '已解决' } as Record<string, string>)[status] || status
+}
+
+function ticketStatusColor(status: string) {
+  return status === 'resolved' ? 'success' : status === 'processing' ? 'processing' : 'warning'
+}
+
+async function loadTickets() {
+  const { data } = await api.get('/tickets', { params: { ...(ticketSearch.title.trim() ? { title: ticketSearch.title.trim() } : {}), ...(ticketSearch.category ? { category: ticketSearch.category } : {}), ...(ticketSearch.status ? { status: ticketSearch.status } : {}), page: ticketPagination.page, page_size: ticketPagination.pageSize } })
+  tickets.value = data.items
+  ticketPagination.total = data.total
+  ticketPagination.page = data.page
+  ticketPagination.pageSize = data.page_size
+}
+
+async function searchTickets() { ticketPagination.page = 1; await loadTickets() }
+async function resetTickets() { ticketSearch.title = ''; ticketSearch.category = ''; ticketSearch.status = ''; ticketPagination.page = 1; await loadTickets() }
+async function changeTicketPage(page: number) { ticketPagination.page = page; await loadTickets() }
+function resetTicketForm() { ticketForm.category = 'feature'; ticketForm.title = ''; ticketForm.content = ''; ticketForm.files = [] }
+function openCreateTicket() { resetTicketForm(); createTicketVisible.value = true }
+function validateTicketFile(file: any) { if (file.size > 20 * 1024 * 1024) { message.error('单个附件不能超过 20MB'); return false }; return false }
+
+async function submitTicket() {
+  if (!ticketForm.title.trim() || !ticketForm.content.trim()) { message.warning('请填写工单标题和建议内容'); return }
+  ticketSubmitting.value = true
+  try {
+    const form = new FormData(); form.append('category', ticketForm.category); form.append('title', ticketForm.title.trim()); form.append('content', ticketForm.content.trim())
+    ticketForm.files.forEach(item => form.append('files', item.originFileObj || item))
+    await api.post('/tickets', form); createTicketVisible.value = false; ticketPagination.page = 1; await loadTickets(); message.success('工单已提交')
+  } catch (error: any) { message.error(error?.response?.data?.detail || '工单提交失败') } finally { ticketSubmitting.value = false }
+}
+
+async function openTicketDetail(row: any) { try { ticketDetail.value = (await api.get(`/tickets/${row.id}`)).data; ticketDetailVisible.value = true } catch (error: any) { message.error(error?.response?.data?.detail || '工单详情加载失败') } }
+function openProcessTicket() { if (!ticketDetail.value) return; ticketProcessForm.status = ticketDetail.value.status === 'resolved' ? 'resolved' : 'processing'; ticketProcessForm.reply = ticketDetail.value.reply || ''; processTicketVisible.value = true }
+async function saveTicketProcess() {
+  if (!ticketDetail.value) return
+  if (ticketProcessForm.status === 'resolved' && !ticketProcessForm.reply.trim()) { message.warning('标记已解决时必须填写处理回复'); return }
+  try { ticketDetail.value = (await api.put(`/tickets/${ticketDetail.value.id}/process`, { status: ticketProcessForm.status, reply: ticketProcessForm.reply.trim() })).data; processTicketVisible.value = false; await loadTickets(); message.success('工单已处理') } catch (error: any) { message.error(error?.response?.data?.detail || '工单处理失败') }
+}
+async function downloadTicketAttachment(ticket: any, item: any) {
+  try { const response = await api.get(`/tickets/${ticket.id}/attachments/${item.id}`, { responseType: 'blob' }); const url = URL.createObjectURL(response.data); const anchor = document.createElement('a'); anchor.href = url; anchor.download = item.name; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url) } catch (error: any) { message.error(error?.response?.data?.detail || '附件下载失败') }
+}
+
+function selectAiSourceFile(file: any) {
+  const rawFile = file?.originFileObj || file
+  if (!rawFile) return false
+  if (rawFile.size > 20 * 1024 * 1024) {
+    message.error('需求文档不能超过 20MB')
+    return false
+  }
+  aiSourceFiles.value = [{ ...file, originFileObj: rawFile, status: 'done' }]
+  aiLastUploadedFilename.value = rawFile.name || ''
+  return false
+}
+
+function removeAiSourceFile() {
+  aiSourceFiles.value = []
+  aiLastUploadedFilename.value = ''
+  return true
+}
+
+async function startAiGeneration() {
+  const file = aiSourceFiles.value[0]?.originFileObj
+  if (!file || aiGenerating.value) {
+    return
+  }
+  aiGenerating.value = true
+  try {
+    const form = new FormData()
+    form.append('file', file)
+    await api.post('/ai-case-generations', form)
+    aiSourceFiles.value = []
+    aiGenerationPagination.page = 1
+    await loadAiGenerations()
+    message.success('AI 生成任务已提交')
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || 'AI 生成任务提交失败')
+  } finally {
+    aiGenerating.value = false
+  }
+}
+
+async function downloadAiGenerationFile(row: any, index: number) {
+  try {
+    const file = row.output_files?.[index]
+    const response = await api.get(`/ai-case-generations/${row.id}/files/${index}`, { responseType: 'blob' })
+    const url = URL.createObjectURL(response.data)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = file?.name || '测试用例.xlsx'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '生成文件下载失败')
+  }
+}
+
+async function deleteAiGeneration(row: any) {
+  try {
+    await confirmAction('确认删除该生成历史及其保存的文件吗？删除后无法恢复。', '删除生成历史', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  try {
+    await api.delete(`/ai-case-generations/${row.id}`)
+    if (aiGenerations.value.length === 1 && aiGenerationPagination.page > 1) aiGenerationPagination.page -= 1
+    await loadAiGenerations()
+    message.success('生成历史已删除')
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '生成历史删除失败')
+  }
+}
+
 function changeSelectedReports(keys: Array<string | number>) {
   selectedReportIds.value = keys.map(key => Number(key)).filter(Boolean)
 }
@@ -2511,6 +2813,7 @@ const operationModuleMap: Record<string, string> = {
   api: '接口管理',
   case: '用例管理',
   plan: '测试计划',
+  ticket: '工单管理',
   log: '日志中心',
   system: '系统异常'
 }
@@ -2523,6 +2826,7 @@ const operationActionMap: Record<string, string> = {
   update: '编辑',
   delete: '删除',
   status: '修改状态',
+  process: '处理',
   execute: '执行',
   exception: '异常捕获'
 }
@@ -2596,7 +2900,7 @@ async function login() {
   loginLoading.value = true
   try {
     const { data } = await api.post('/auth/login', loginForm)
-    localStorage.setItem('session_token', data.token)
+    sessionExpired.value = false
     me.value = data.user
     syncAllowedTabs()
     await loadAll()
@@ -2625,12 +2929,20 @@ async function login() {
 
 async function logout() {
   await api.post('/auth/logout')
-  localStorage.removeItem('session_token')
   localStorage.removeItem('active_menu')
   localStorage.removeItem('opened_tabs')
   openedTabs.value = [menuMeta.dashboard]
   active.value = 'dashboard'
   me.value = null
+}
+
+function handleSessionExpired() {
+  if (!me.value || sessionExpired.value) return
+  sessionExpired.value = true
+  openedTabs.value = [menuMeta.dashboard]
+  active.value = 'dashboard'
+  me.value = null
+  message.warning('登录已过期，请重新登录')
 }
 
 function saveTabs() {
@@ -2935,6 +3247,45 @@ function openEditRoleDialog(role: any) {
 function cancelEditRole() {
   editRoleDialogVisible.value = false
   resetEditRoleForm()
+}
+
+function resetRolePermissionForm() {
+  rolePermissionForm.id = undefined
+  rolePermissionForm.name = ''
+  rolePermissionForm.description = ''
+  rolePermissionForm.status = 'active'
+  rolePermissionForm.menus = []
+}
+
+function openRolePermissionDialog(role: any) {
+  rolePermissionForm.id = role.id
+  rolePermissionForm.name = role.name
+  rolePermissionForm.description = role.description || ''
+  rolePermissionForm.status = role.status
+  rolePermissionForm.menus = [...(role.menus || [])]
+  rolePermissionDialogVisible.value = true
+}
+
+function cancelRolePermission() {
+  rolePermissionDialogVisible.value = false
+  resetRolePermissionForm()
+}
+
+async function saveRolePermissions() {
+  if (!rolePermissionForm.id) return
+  const menus = rolePermissionForm.menus.filter(key => roleMenuLeafKeys.value.has(key))
+  await api.put(`/roles/${rolePermissionForm.id}`, {
+    name: rolePermissionForm.name,
+    description: rolePermissionForm.description,
+    status: rolePermissionForm.status,
+    menus
+  })
+  rolePermissionDialogVisible.value = false
+  message.success('菜单权限已更新')
+  await loadRoles()
+  const { data } = await api.get('/auth/me')
+  me.value = data
+  syncAllowedTabs()
 }
 
 function roleMenuLabels(menus: string[]) {
@@ -4807,7 +5158,7 @@ function pollPlanExecution(planId: number, taskId: number, row?: any) {
     polling = true
     attempts += 1
     try {
-      const { data } = await api.get(`/executions/${taskId}`)
+      const { data } = await api.get(`/executions/${taskId}`, { headers: { 'X-Session-Activity': '0' } })
       const status = data?.task?.status || ''
       if (status) {
         updatePlanExecutionState(planId, taskId, status, row, data?.results || [])
@@ -5067,6 +5418,7 @@ async function runCase() {
 }
 
 onMounted(async () => {
+  window.addEventListener('session-expired', handleSessionExpired)
   try {
     const { data } = await api.get('/auth/me')
     me.value = data
@@ -5076,6 +5428,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('session-expired', handleSessionExpired)
   Array.from(planExecutionPollers.keys()).forEach(clearPlanExecutionPoller)
+  clearAiGenerationPoller()
 })
 </script>

@@ -22,6 +22,18 @@ class User(Base, TimestampMixin):
     last_login_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class UserSession(Base, TimestampMixin):
+    __tablename__ = "user_session"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    expire_date: Mapped[datetime] = mapped_column(DateTime, index=True)
+    last_active_date: Mapped[datetime] = mapped_column(DateTime)
+    revoked_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+
+
 class Role(Base, TimestampMixin):
     __tablename__ = "role"
 
@@ -152,6 +164,46 @@ class ExecutionResult(Base, TimestampMixin):
     assertion_results_json: Mapped[str] = mapped_column(Text().with_variant(LONGTEXT, "mysql"), default="[]")
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     error_message: Mapped[str] = mapped_column(Text().with_variant(LONGTEXT, "mysql"), default="")
+
+
+class AiCaseGeneration(Base, TimestampMixin):
+    __tablename__ = "ai_case_generation"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    creator_id: Mapped[int] = mapped_column(Integer, index=True)
+    source_filename: Mapped[str] = mapped_column(String(255))
+    dify_file_id: Mapped[str] = mapped_column(String(255), default="")
+    workflow_run_id: Mapped[str] = mapped_column(String(255), default="", index=True)
+    status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
+    output_files_json: Mapped[str] = mapped_column(Text, default="[]")
+    error_message: Mapped[str] = mapped_column(Text, default="")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class Ticket(Base, TimestampMixin):
+    __tablename__ = "ticket"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    submitter_id: Mapped[int] = mapped_column(Integer, index=True)
+    category: Mapped[str] = mapped_column(String(32), index=True)
+    title: Mapped[str] = mapped_column(String(200), index=True)
+    content: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    reply: Mapped[str] = mapped_column(Text, default="")
+    handler_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    handled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class TicketAttachment(Base, TimestampMixin):
+    __tablename__ = "ticket_attachment"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(Integer, index=True)
+    original_name: Mapped[str] = mapped_column(String(255))
+    storage_name: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    content_type: Mapped[str] = mapped_column(String(255), default="")
+    size: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class OperationLog(Base, TimestampMixin):

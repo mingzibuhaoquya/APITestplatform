@@ -92,6 +92,11 @@ class RoleListOut(BaseModel):
     page_size: int
 
 
+class TicketProcessIn(BaseModel):
+    status: Literal["processing", "resolved"]
+    reply: str = Field(max_length=5000)
+
+
 class ProjectIn(BaseModel):
     name: str
     description: str = ""

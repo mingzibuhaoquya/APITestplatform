@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 import pytest
 from html import escape
 from cryptography.hazmat.primitives import serialization
@@ -10,8 +12,8 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import _without_assertion_operators
-from app.models import Environment, ExecutionResult, ExecutionTask, Project, Role, TestCase as TestCaseModel, TestSuite, User
-from app.routers.auth import change_password, login
+from app.models import Environment, ExecutionResult, ExecutionTask, Project, Role, TestCase as TestCaseModel, TestSuite, User, UserSession
+from app.routers.auth import change_password, login, router as auth_router
 from app.routers.crud import create_api, create_case, create_environment, create_plan, create_project, delete_api, delete_case, delete_environment, delete_plan, delete_project, execute_plan, get_execution_log_detail, list_apis, list_cases, list_environments, list_exception_logs, list_execution_logs, list_logs, list_plans, list_projects, update_api, update_case, update_environment, update_plan, update_project
 from app.routers.executions import delete_execution, list_executions
 from app.routers.mock import router as mock_router
@@ -28,8 +30,10 @@ from app.services.pre_scripts import PreScriptError, run_pre_script
 from app.services.report import build_html_report
 from app.services import crypto_envelope
 from app.services.operation_logs import log_system_exception
+from app.services.ai_case_generations import _download_url
+from app.utils import parse_json
 from app.services.variables import render_variables
-from app.security import create_session_token, hash_password
+from app.security import create_user_session, hash_password, hash_session_token
 
 
 @pytest.fixture()
@@ -62,12 +66,31 @@ def create_test_environment(project_id: int, admin: User, db):
     )
 
 
+def session_cookies(db, user: User) -> dict[str, str]:
+    token = create_user_session(db, user.id)
+    db.commit()
+    return {"session": token}
+
+
 def test_render_variables_nested():
     payload = {"headers": {"Authorization": "Bearer ${token}"}, "ids": ["${user_id}"]}
     assert render_variables(payload, {"token": "abc", "user_id": 12}) == {
         "headers": {"Authorization": "Bearer abc"},
         "ids": ["12"],
     }
+
+
+def test_ai_case_permission_is_added_to_builtin_roles(db_session):
+    db, _ = db_session
+    ensure_default_roles(db)
+    roles = {role.code: role for role in db.query(Role).all()}
+
+    assert "ai_cases" in parse_json(roles["admin"].menus_json, [])
+    assert "ai_cases" in parse_json(roles["tester"].menus_json, [])
+
+
+def test_dify_localhost_file_url_uses_configured_host():
+    assert _download_url("http://localhost:8080/files/example.xlsx") == "http://host.docker.internal:8080/files/example.xlsx"
 
 
 def test_pre_script_sets_task_variables_and_generates_hashes():
@@ -320,6 +343,90 @@ def test_create_user_defaults_active_and_can_login(db_session):
     assert result["user"].username == "tester_a"
 
 
+def test_login_uses_http_only_cookie_and_server_session(db_session):
+    db, admin = db_session
+    app = FastAPI()
+
+    def override_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    app.include_router(auth_router)
+    client = TestClient(app)
+    response = client.post("/auth/login", json={"username": "admin", "password": "admin123"})
+
+    assert response.status_code == 200
+    assert "token" not in response.json()
+    raw_token = response.cookies.get("session")
+    assert raw_token
+    assert "HttpOnly" in response.headers["set-cookie"]
+    row = db.query(UserSession).filter(UserSession.user_id == admin.id).one()
+    assert row.token_hash == hash_session_token(raw_token)
+    assert row.token_hash != raw_token
+    assert client.get("/auth/me", headers={"X-Session-Activity": "1"}).status_code == 200
+
+
+def test_server_session_rejects_missing_revoked_and_expired_sessions(db_session):
+    db, admin = db_session
+    app = FastAPI()
+
+    def override_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    app.include_router(auth_router)
+    client = TestClient(app)
+    assert client.get("/auth/me").status_code == 401
+
+    now = datetime.now()
+    revoked_token = "revoked-session"
+    expired_token = "expired-session"
+    idle_token = "idle-session"
+    db.add_all([
+        UserSession(session_id="revoked", token_hash=hash_session_token(revoked_token), user_id=admin.id, expire_date=now + timedelta(hours=1), last_active_date=now, revoked_date=now),
+        UserSession(session_id="expired", token_hash=hash_session_token(expired_token), user_id=admin.id, expire_date=now - timedelta(seconds=1), last_active_date=now),
+        UserSession(session_id="idle", token_hash=hash_session_token(idle_token), user_id=admin.id, expire_date=now + timedelta(hours=1), last_active_date=now - timedelta(minutes=31)),
+    ])
+    db.commit()
+    for token in (revoked_token, expired_token, idle_token):
+        client.cookies.set("session", token)
+        assert client.get("/auth/me").status_code == 401
+
+
+def test_session_activity_logout_and_account_revocation(db_session):
+    db, admin = db_session
+    app = FastAPI()
+
+    def override_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    app.include_router(auth_router)
+    app.include_router(users_router)
+    client = TestClient(app)
+    first = create_user_session(db, admin.id)
+    second = create_user_session(db, admin.id)
+    db.commit()
+    first_row = db.query(UserSession).filter(UserSession.token_hash == hash_session_token(first)).one()
+    first_row.last_active_date = datetime.now() - timedelta(minutes=10)
+    db.commit()
+
+    client.cookies.set("session", first)
+    assert client.get("/auth/me", headers={"X-Session-Activity": "0"}).status_code == 200
+    assert db.get(UserSession, first_row.id).last_active_date < datetime.now() - timedelta(minutes=9)
+    assert client.get("/auth/me", headers={"X-Session-Activity": "1"}).status_code == 200
+    assert db.get(UserSession, first_row.id).last_active_date > datetime.now() - timedelta(minutes=1)
+
+    assert client.post("/auth/logout").status_code == 200
+    assert db.get(UserSession, first_row.id).revoked_date is not None
+    second_row = db.query(UserSession).filter(UserSession.token_hash == hash_session_token(second)).one()
+    assert second_row.revoked_date is None
+
+    client.cookies.set("session", second)
+    assert client.patch(f"/users/{admin.id}/status", json={"status": "disabled"}).status_code == 200
+    assert db.get(UserSession, second_row.id).revoked_date is not None
+
+
 def test_list_users_paginates_and_searches(db_session):
     db, admin = db_session
     for index in range(12):
@@ -389,27 +496,27 @@ def test_tester_can_manage_users_except_create(db_session):
     app.dependency_overrides[get_db] = override_db
     app.include_router(users_router)
     client = TestClient(app)
-    headers = {"Authorization": f"Bearer {create_session_token(tester.id)}"}
+    cookies = session_cookies(db, tester)
 
-    list_response = client.get("/users?page=1&page_size=10", headers=headers)
+    list_response = client.get("/users?page=1&page_size=10", cookies=cookies)
     assert list_response.status_code == 200
     assert list_response.json()["total"] == 3
 
     update_response = client.put(
         f"/users/{target.id}",
-        headers=headers,
+        cookies=cookies,
         json={"username": "managed_user_new", "real_name": "被管理用户新"},
     )
     assert update_response.status_code == 200
     assert update_response.json()["username"] == "managed_user_new"
 
-    status_response = client.patch(f"/users/{target.id}/status", headers=headers, json={"status": "disabled"})
+    status_response = client.patch(f"/users/{target.id}/status", cookies=cookies, json={"status": "disabled"})
     assert status_response.status_code == 200
     assert status_response.json()["status"] == "disabled"
 
     create_response = client.post(
         "/users",
-        headers=headers,
+        cookies=cookies,
         json={"username": "forbidden_create", "password": "123456", "real_name": "禁止创建", "role": "tester"},
     )
     assert create_response.status_code == 403
@@ -471,9 +578,9 @@ def test_role_menu_permission_blocks_hidden_module(db_session):
     app.dependency_overrides[get_db] = override_db
     app.include_router(users_router)
     client = TestClient(app)
-    headers = {"Authorization": f"Bearer {create_session_token(user.id)}"}
+    cookies = session_cookies(db, user)
 
-    response = client.get("/users?page=1&page_size=10", headers=headers)
+    response = client.get("/users?page=1&page_size=10", cookies=cookies)
     assert response.status_code == 403
 
 
@@ -495,9 +602,16 @@ def test_change_password_allows_new_password_login_only(db_session):
     db, admin = db_session
     created = create_user(UserCreate(username="password_login_user", password="123456", real_name="登录改密用户"), admin, db)
     user = db.get(User, created.id)
+    first_session = create_user_session(db, user.id)
+    second_session = create_user_session(db, user.id)
+    db.commit()
 
     result = change_password(ChangePasswordIn(old_password="123456", new_password="newpass1"), user, db)
     assert result == {"ok": True}
+    assert db.query(UserSession).filter(
+        UserSession.token_hash.in_([hash_session_token(first_session), hash_session_token(second_session)]),
+        UserSession.revoked_date.is_not(None),
+    ).count() == 2
 
     with pytest.raises(HTTPException):
         login(LoginIn(username="password_login_user", password="123456"), Response(), db)

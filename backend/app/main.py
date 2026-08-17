@@ -7,8 +7,8 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 from .config import get_settings
 from .database import Base, SessionLocal, engine
-from .models import TestCase, User
-from .routers import auth, crud, executions, mock, roles, users
+from .models import AiCaseGeneration, TestCase, Ticket, TicketAttachment, User, UserSession
+from .routers import ai_case_generations, auth, crud, executions, mock, roles, tickets, users
 from .security import hash_password
 from .services.menus import ensure_default_roles
 from .services.operation_logs import log_system_exception
@@ -22,7 +22,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 
-app = FastAPI(title="接口自动化测试平台", version="0.1.0")
+app = FastAPI(title="测试平台", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -37,6 +37,8 @@ app.include_router(roles.router)
 app.include_router(crud.router)
 app.include_router(executions.router)
 app.include_router(mock.router)
+app.include_router(ai_case_generations.router)
+app.include_router(tickets.router)
 
 
 @app.exception_handler(Exception)
