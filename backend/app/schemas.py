@@ -16,6 +16,26 @@ class MockUserLoginIn(BaseModel):
     password: str
 
 
+class MockEndpointIn(BaseModel):
+    project_id: int
+    environment_id: int
+    name: str
+    method: HttpMethod
+    path: str
+    status: Literal["active", "disabled"] = "active"
+    status_code: int = 200
+    delay_ms: int = 0
+    headers: dict[str, Any] = {}
+    response_body: str = ""
+    body_format: Literal["json", "xml", "text"] = "json"
+    sm3_enabled: bool = False
+    description: str = ""
+
+
+class MockEndpointUpdate(MockEndpointIn):
+    pass
+
+
 class ChangePasswordIn(BaseModel):
     old_password: str
     new_password: str = Field(min_length=6)

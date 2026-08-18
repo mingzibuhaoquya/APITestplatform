@@ -70,6 +70,7 @@ def startup() -> None:
     _ensure_test_suite_columns()
     _ensure_execution_task_columns()
     _ensure_execution_result_columns()
+    _ensure_mock_endpoint_columns()
     _ensure_roles()
     _ensure_admin()
 
@@ -190,6 +191,17 @@ def _ensure_execution_result_columns() -> None:
             column = columns.get(column_name)
             if column and "LONGTEXT" not in str(column["type"]).upper():
                 conn.execute(text(f"ALTER TABLE execution_result MODIFY COLUMN {column_name} LONGTEXT NOT NULL"))
+
+
+def _ensure_mock_endpoint_columns() -> None:
+    inspector = inspect(engine)
+    if "mock_endpoint" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("mock_endpoint")}
+    if "sm3_enabled" in columns:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE mock_endpoint ADD COLUMN sm3_enabled BOOL NOT NULL DEFAULT 0 AFTER body_format"))
 
 
 def _ensure_roles() -> None:

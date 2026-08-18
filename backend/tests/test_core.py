@@ -10,14 +10,14 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import _without_assertion_operators
-from app.models import Environment, ExecutionResult, ExecutionTask, Project, Role, TestCase as TestCaseModel, TestSuite, User
+from app.models import Environment, ExecutionResult, ExecutionTask, MockEndpoint, Project, Role, TestCase as TestCaseModel, TestSuite, User
 from app.routers.auth import change_password, login
 from app.routers.crud import create_api, create_case, create_environment, create_plan, create_project, delete_api, delete_case, delete_environment, delete_plan, delete_project, execute_plan, get_execution_log_detail, list_apis, list_cases, list_environments, list_exception_logs, list_execution_logs, list_logs, list_plans, list_projects, update_api, update_case, update_environment, update_plan, update_project
 from app.routers.executions import delete_execution, list_executions
-from app.routers.mock import router as mock_router
+from app.routers.mock import create_mock, delete_mock, list_mocks, router as mock_router, update_mock
 from app.routers.users import create_user, list_users, router as users_router, update_user, update_user_status
 from app.routers.roles import create_role, delete_role, list_roles, update_role
-from app.schemas import ApiDefinitionIn, ApiDefinitionUpdate, ChangePasswordIn, EncryptionConfigIn, EnvironmentIn, EnvironmentUpdate, LoginIn, ProjectIn, ProjectUpdate, RoleIn, RoleUpdate, TestCaseIn, TestCaseUpdate, TestPlanIn, TestPlanUpdate, UserCreate, UserStatusUpdate, UserUpdate
+from app.schemas import ApiDefinitionIn, ApiDefinitionUpdate, ChangePasswordIn, EncryptionConfigIn, EnvironmentIn, EnvironmentUpdate, LoginIn, MockEndpointIn, MockEndpointUpdate, ProjectIn, ProjectUpdate, RoleIn, RoleUpdate, TestCaseIn, TestCaseUpdate, TestPlanIn, TestPlanUpdate, UserCreate, UserStatusUpdate, UserUpdate
 from app.services.menus import ensure_default_roles
 from app.services.assertions import all_passed, run_assertions
 from app.services import executor as executor_service
@@ -305,6 +305,148 @@ def test_mock_user_login_requires_username_and_password():
 
     assert missing_username.status_code == 422
     assert missing_password.status_code == 422
+
+
+def test_mock_endpoint_crud_and_environment_isolation(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="mock_project", description="mock project"), admin, db)
+    first_env = create_environment(EnvironmentIn(project_id=project["id"], name="mock_env_a", protocol="http", base_url="localhost", port=8000), admin, db)
+    second_env = create_environment(EnvironmentIn(project_id=project["id"], name="mock_env_b", protocol="http", base_url="localhost", port=8000), admin, db)
+
+    first = create_mock(
+        MockEndpointIn(
+            project_id=project["id"],
+            environment_id=first_env["id"],
+            name="合同详情Mock",
+            method="POST",
+            path="api/contracts/detail",
+            status_code=200,
+            headers={"Content-Type": "application/json"},
+            response_body='{"code":0,"data":{"contractNo":"A001"}}',
+            body_format="json",
+        ),
+        admin,
+        db,
+    )
+    second = create_mock(
+        MockEndpointIn(
+            project_id=project["id"],
+            environment_id=second_env["id"],
+            name="合同详情Mock-B",
+            method="POST",
+            path="/api/contracts/detail",
+            status_code=201,
+            response_body='{"code":0,"data":{"contractNo":"B001"}}',
+            body_format="json",
+        ),
+        admin,
+        db,
+    )
+
+    assert first["path"] == "/api/contracts/detail"
+    assert second["environment_id"] == second_env["id"]
+    assert list_mocks(project_id=project["id"], environment_id=first_env["id"], name="合同", page=1, page_size=10, _=admin, db=db)["total"] == 1
+
+    with pytest.raises(HTTPException) as duplicate_error:
+        create_mock(
+            MockEndpointIn(
+                project_id=project["id"],
+                environment_id=first_env["id"],
+                name="重复Mock",
+                method="POST",
+                path="/api/contracts/detail",
+            ),
+            admin,
+            db,
+        )
+    assert duplicate_error.value.status_code == 400
+
+    updated = update_mock(
+        first["id"],
+        MockEndpointUpdate(
+            project_id=project["id"],
+            environment_id=first_env["id"],
+            name="合同详情Mock-禁用",
+            method="POST",
+            path="/api/contracts/detail",
+            status="disabled",
+            response_body='{"disabled":true}',
+        ),
+        admin,
+        db,
+    )
+    assert updated["status"] == "disabled"
+
+    deleted = delete_mock(second["id"], admin, db)
+    assert deleted["is_deleted"] is True
+
+
+def test_mock_api_serves_configured_response_without_login(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="mock_runtime_project", description="mock runtime"), admin, db)
+    environment = create_environment(EnvironmentIn(project_id=project["id"], name="mock_runtime_env", protocol="http", base_url="localhost", port=8000), admin, db)
+    create_mock(
+        MockEndpointIn(
+            project_id=project["id"],
+            environment_id=environment["id"],
+            name="订单Mock",
+            method="GET",
+            path="/api/orders/1",
+            status_code=202,
+            headers={"X-Mock-Source": "platform"},
+            response_body="<RESPONSE><STATUS>0</STATUS></RESPONSE>",
+            body_format="xml",
+        ),
+        admin,
+        db,
+    )
+
+    app = FastAPI()
+    app.include_router(mock_router)
+    app.dependency_overrides[get_db] = lambda: db
+    client = TestClient(app)
+
+    response = client.get(f"/mock-api/env/{environment['id']}/api/orders/1")
+    missing = client.post(f"/mock-api/env/{environment['id']}/api/orders/1")
+
+    assert response.status_code == 202
+    assert response.headers["x-mock-source"] == "platform"
+    assert response.headers["content-type"].startswith("application/xml")
+    assert response.text == "<RESPONSE><STATUS>0</STATUS></RESPONSE>"
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == "未匹配到 Mock 规则"
+ 
+ 
+def test_mock_api_appends_sm3_signature_when_enabled(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="mock_sm3_project", description="mock sm3"), admin, db)
+    environment = create_environment(EnvironmentIn(project_id=project["id"], name="mock_sm3_env", protocol="http", base_url="localhost", port=8000), admin, db)
+    response_body = "<RESPONSE><STATUS>0</STATUS></RESPONSE>"
+    create_mock(
+        MockEndpointIn(
+            project_id=project["id"],
+            environment_id=environment["id"],
+            name="SM3响应Mock",
+            method="POST",
+            path="/api/sm3-response",
+            status_code=200,
+            response_body=response_body,
+            body_format="xml",
+            sm3_enabled=True,
+        ),
+        admin,
+        db,
+    )
+
+    app = FastAPI()
+    app.include_router(mock_router)
+    app.dependency_overrides[get_db] = lambda: db
+    client = TestClient(app)
+
+    response = client.post(f"/mock-api/env/{environment['id']}/api/sm3-response")
+
+    assert response.status_code == 200
+    assert response.text == response_body + crypto_envelope.sm3_hex(response_body)
 
 
 def test_create_user_defaults_active_and_can_login(db_session):

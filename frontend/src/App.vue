@@ -544,6 +544,255 @@
 
         </section>
 
+        <section v-if="active === 'mocks'" class="page-view">
+          <div class="toolbar"><h2>Mock服务</h2><a-button type="primary" @click="openCreateMockDialog"><template #icon><PlusOutlined /></template>新增Mock</a-button></div>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="项目">
+              <a-select v-model:value="mockSearch.project_id" placeholder="请选择项目" allow-clear @change="changeMockSearchProject">
+                <a-select-option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item label="环境">
+              <a-select v-model:value="mockSearch.environment_id" placeholder="请先选择项目" allow-clear :disabled="!mockSearch.project_id">
+                <a-select-option v-for="e in mockSearchEnvironments" :key="e.id" :value="e.id">{{ e.name }}</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item label="名称">
+              <a-input v-model:value="mockSearch.name" placeholder="请输入Mock名称" allow-clear @keyup.enter="searchMocks" />
+            </a-form-item>
+            <a-form-item label="路径">
+              <a-input v-model:value="mockSearch.path" placeholder="请输入Mock路径" allow-clear @keyup.enter="searchMocks" />
+            </a-form-item>
+            <a-form-item label="状态">
+              <a-select v-model:value="mockSearch.status" placeholder="请选择状态" allow-clear>
+                <a-select-option value="active">启用</a-select-option>
+                <a-select-option value="disabled">禁用</a-select-option>
+              </a-select>
+            </a-form-item>
+            <div class="search-actions">
+              <a-button type="primary" @click="searchMocks">搜索</a-button>
+              <a-button @click="resetMockSearch">重置</a-button>
+            </div>
+          </a-form>
+          <a-table :pagination="false" :data-source="mockList">
+            <a-table-column data-index="project_name" title="项目" />
+            <a-table-column data-index="environment_name" title="环境" />
+            <a-table-column data-index="name" title="名称" />
+            <a-table-column data-index="method" title="方法" width="90" />
+            <a-table-column data-index="path" title="路径" />
+            <a-table-column title="Mock绝对路径" width="380">
+              <template #default="{ record: row }">
+                <a-typography-text copyable class="mock-url-text">{{ mockAbsoluteUrl(row) }}</a-typography-text>
+              </template>
+            </a-table-column>
+              <a-table-column data-index="status_code" title="HTTP状态码" width="120" />
+              <a-table-column title="SM3签名" width="110">
+                <template #default="{ record: row }">
+                  <a-tag :color="row.sm3_enabled ? 'processing' : 'default'">{{ row.sm3_enabled ? '启用' : '关闭' }}</a-tag>
+                </template>
+              </a-table-column>
+              <a-table-column title="状态" width="100">
+                <template #default="{ record: row }">
+                  <a-tag :color="row.status === 'active' ? 'success' : 'default'">{{ row.status === 'active' ? '启用' : '禁用' }}</a-tag>
+              </template>
+            </a-table-column>
+            <a-table-column data-index="update_date" title="更新时间" width="170" />
+            <a-table-column title="操作" width="240" fixed="right">
+              <template #default="{ record: row }">
+                <div class="table-actions">
+                  <a-button size="small" @click="openEditMockDialog(row)">编辑</a-button>
+                  <a-button size="small" @click="toggleMockStatus(row)">{{ row.status === 'active' ? '禁用' : '启用' }}</a-button>
+                  <a-button size="small" danger @click="deleteMock(row)">删除</a-button>
+                </div>
+              </template>
+            </a-table-column>
+          </a-table>
+          <div class="pagination">
+            <a-pagination
+              :show-total="paginationTotal"
+              show-less-items
+              :current="mockPagination.page"
+              :page-size="mockPagination.pageSize"
+              :total="mockPagination.total"
+              @change="changeMockPage"
+            />
+          </div>
+
+          <a-modal v-model:open="createMockDialogVisible" title="新增Mock" width="900px" @after-close="resetMockForm">
+            <a-form layout="vertical" class="form-grid" @submit.prevent="createMock">
+              <a-form-item label="项目">
+                <a-select v-model:value="mockForm.project_id" placeholder="请选择项目" @change="changeMockFormProject">
+                  <a-select-option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item label="环境">
+                <a-select v-model:value="mockForm.environment_id" placeholder="请先选择项目" :disabled="!mockForm.project_id">
+                  <a-select-option v-for="e in mockFormEnvironments" :key="e.id" :value="e.id">{{ e.name }}</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item label="Mock名称">
+                <a-input v-model:value="mockForm.name" placeholder="请输入Mock名称" />
+              </a-form-item>
+              <a-form-item label="方法">
+                <a-select v-model:value="mockForm.method">
+                  <a-select-option v-for="m in methods" :key="m" :value="m">{{ m }}</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item label="路径" class="wide">
+                <a-input v-model:value="mockForm.path" placeholder="/api/example" />
+              </a-form-item>
+              <a-form-item label="Mock绝对路径" class="wide">
+                <a-input :value="mockAbsoluteUrl(mockForm)" readonly placeholder="选择环境并填写路径后自动生成" />
+              </a-form-item>
+              <a-form-item label="状态">
+                <a-select v-model:value="mockForm.status">
+                  <a-select-option value="active">启用</a-select-option>
+                  <a-select-option value="disabled">禁用</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item label="HTTP状态码">
+                <a-input v-model:value="mockForm.status_code" placeholder="200" @input="mockForm.status_code = digitsOnly(mockForm.status_code)" />
+              </a-form-item>
+                <a-form-item label="延迟(ms)">
+                  <a-input v-model:value="mockForm.delay_ms" placeholder="0" @input="mockForm.delay_ms = digitsOnly(mockForm.delay_ms)" />
+                </a-form-item>
+                <a-form-item label="SM3签名">
+                  <a-checkbox v-model:checked="mockForm.sm3_enabled">启用后返回Body尾部自动追加SM3</a-checkbox>
+                </a-form-item>
+                <a-form-item label="备注" class="wide">
+                  <a-textarea v-model:value="mockForm.description" :rows="2" placeholder="请输入备注" />
+                </a-form-item>
+              <div class="wide">
+                <div class="kv-title">
+                  <h4>响应Header</h4>
+                  <a-button size="small" @click="addMockHeaderRow">添加</a-button>
+                </div>
+                <a-table :pagination="false" :data-source="mockForm.headerRows">
+                  <a-table-column title="Key">
+                    <template #default="{ record: row }"><a-input v-model:value="row.key" placeholder="Content-Type" /></template>
+                  </a-table-column>
+                  <a-table-column title="Value">
+                    <template #default="{ record: row }"><a-input v-model:value="row.value" placeholder="application/json" /></template>
+                  </a-table-column>
+                  <a-table-column title="操作" width="90">
+                    <template #default="{ index: $index }"><a-button size="small" danger @click="removeMockHeaderRow($index)">删除</a-button></template>
+                  </a-table-column>
+                </a-table>
+              </div>
+              <a-form-item label="响应Body格式">
+                <a-radio-group v-model:value="mockForm.body_format" @change="changeMockBodyFormat(mockForm)">
+                  <a-radio-button value="json">json</a-radio-button>
+                  <a-radio-button value="xml">xml</a-radio-button>
+                  <a-radio-button value="text">text</a-radio-button>
+                </a-radio-group>
+              </a-form-item>
+              <div class="wide">
+                <div class="body-editor-head">
+                  <span>响应Body</span>
+                  <a-button size="small" @click="formatMockBody(mockForm)">格式化</a-button>
+                </div>
+                <BodyCodeEditor
+                  v-model="mockForm.response_body"
+                  :language="mockForm.body_format"
+                  :placeholder="mockBodyPlaceholder(mockForm.body_format)"
+                  min-height="260px"
+                />
+              </div>
+            </a-form>
+            <template #footer>
+              <a-button @click="cancelCreateMock">取消</a-button>
+              <a-button type="primary" @click="createMock">确认</a-button>
+            </template>
+          </a-modal>
+
+          <a-modal v-model:open="editMockDialogVisible" title="编辑Mock" width="900px" @after-close="resetEditMockForm">
+            <a-form layout="vertical" class="form-grid" @submit.prevent="updateMock">
+              <a-form-item label="项目">
+                <a-select v-model:value="editMockForm.project_id" placeholder="请选择项目" @change="changeEditMockFormProject">
+                  <a-select-option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item label="环境">
+                <a-select v-model:value="editMockForm.environment_id" placeholder="请先选择项目" :disabled="!editMockForm.project_id">
+                  <a-select-option v-for="e in editMockFormEnvironments" :key="e.id" :value="e.id">{{ e.name }}</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item label="Mock名称">
+                <a-input v-model:value="editMockForm.name" placeholder="请输入Mock名称" />
+              </a-form-item>
+              <a-form-item label="方法">
+                <a-select v-model:value="editMockForm.method">
+                  <a-select-option v-for="m in methods" :key="m" :value="m">{{ m }}</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item label="路径" class="wide">
+                <a-input v-model:value="editMockForm.path" placeholder="/api/example" />
+              </a-form-item>
+              <a-form-item label="Mock绝对路径" class="wide">
+                <a-input :value="mockAbsoluteUrl(editMockForm)" readonly placeholder="选择环境并填写路径后自动生成" />
+              </a-form-item>
+              <a-form-item label="状态">
+                <a-select v-model:value="editMockForm.status">
+                  <a-select-option value="active">启用</a-select-option>
+                  <a-select-option value="disabled">禁用</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item label="HTTP状态码">
+                <a-input v-model:value="editMockForm.status_code" placeholder="200" @input="editMockForm.status_code = digitsOnly(editMockForm.status_code)" />
+              </a-form-item>
+                <a-form-item label="延迟(ms)">
+                  <a-input v-model:value="editMockForm.delay_ms" placeholder="0" @input="editMockForm.delay_ms = digitsOnly(editMockForm.delay_ms)" />
+                </a-form-item>
+                <a-form-item label="SM3签名">
+                  <a-checkbox v-model:checked="editMockForm.sm3_enabled">启用后返回Body尾部自动追加SM3</a-checkbox>
+                </a-form-item>
+                <a-form-item label="备注" class="wide">
+                  <a-textarea v-model:value="editMockForm.description" :rows="2" placeholder="请输入备注" />
+                </a-form-item>
+              <div class="wide">
+                <div class="kv-title">
+                  <h4>响应Header</h4>
+                  <a-button size="small" @click="addEditMockHeaderRow">添加</a-button>
+                </div>
+                <a-table :pagination="false" :data-source="editMockForm.headerRows">
+                  <a-table-column title="Key">
+                    <template #default="{ record: row }"><a-input v-model:value="row.key" placeholder="Content-Type" /></template>
+                  </a-table-column>
+                  <a-table-column title="Value">
+                    <template #default="{ record: row }"><a-input v-model:value="row.value" placeholder="application/json" /></template>
+                  </a-table-column>
+                  <a-table-column title="操作" width="90">
+                    <template #default="{ index: $index }"><a-button size="small" danger @click="removeEditMockHeaderRow($index)">删除</a-button></template>
+                  </a-table-column>
+                </a-table>
+              </div>
+              <a-form-item label="响应Body格式">
+                <a-radio-group v-model:value="editMockForm.body_format" @change="changeMockBodyFormat(editMockForm)">
+                  <a-radio-button value="json">json</a-radio-button>
+                  <a-radio-button value="xml">xml</a-radio-button>
+                  <a-radio-button value="text">text</a-radio-button>
+                </a-radio-group>
+              </a-form-item>
+              <div class="wide">
+                <div class="body-editor-head">
+                  <span>响应Body</span>
+                  <a-button size="small" @click="formatMockBody(editMockForm)">格式化</a-button>
+                </div>
+                <BodyCodeEditor
+                  v-model="editMockForm.response_body"
+                  :language="editMockForm.body_format"
+                  :placeholder="mockBodyPlaceholder(editMockForm.body_format)"
+                  min-height="260px"
+                />
+              </div>
+            </a-form>
+            <template #footer>
+              <a-button @click="cancelEditMock">取消</a-button>
+              <a-button type="primary" @click="updateMock">确认</a-button>
+            </template>
+          </a-modal>
+        </section>
+
         <section v-if="activeApiEditor" class="api-editor-page">
           <div class="toolbar">
             <h2>{{ activeApiEditor.label }}</h2>
@@ -1570,6 +1819,23 @@ type CaseAssertionRow = {
   expected: string | number | null
 }
 type CaseExtractorRow = { id: number; name: string; path: string; source: 'jsonpath' | 'xmlpath' | 'regex' }
+type MockBodyFormat = 'json' | 'xml' | 'text'
+type MockFormState = {
+  id?: number
+  project_id?: number
+  environment_id?: number
+  name: string
+  method: string
+  path: string
+  status: string
+  status_code: string
+  delay_ms: string
+  headerRows: KeyValueRow[]
+  response_body: string
+  body_format: MockBodyFormat
+  sm3_enabled: boolean
+  description: string
+}
 
 function confirmAction(
   content: string,
@@ -1636,9 +1902,10 @@ type ApiEditor = {
   dirty: boolean
 }
 
-type BodyEditorLanguage = ApiEditor['bodyFormat']
+type BodyEditorLanguage = ApiEditor['bodyFormat'] | 'text'
 
 function bodyEditorLanguageExtension(language: BodyEditorLanguage) {
+  if (language === 'text') return []
   return language === 'xml' ? xmlLanguage() : jsonLanguage()
 }
 
@@ -1762,6 +2029,7 @@ const menuMeta: Record<string, AppTab> = {
   projects: { name: 'projects', label: '项目管理', closable: true },
   environments: { name: 'environments', label: '环境管理', closable: true },
   apis: { name: 'apis', label: '接口管理', closable: true },
+  mocks: { name: 'mocks', label: 'Mock服务', closable: true },
   cases: { name: 'cases', label: '用例管理', closable: true },
   execute: { name: 'execute', label: '测试计划', closable: true },
   reports: { name: 'reports', label: '报告中心', closable: true },
@@ -1782,6 +2050,7 @@ const menuTree: MenuNode[] = [
     ]
   },
   { key: 'apis', label: menuMeta.apis.label, icon: ApiOutlined },
+  { key: 'mocks', label: menuMeta.mocks.label, icon: ApiOutlined },
   { key: 'cases', label: menuMeta.cases.label, icon: FileTextOutlined },
   { key: 'execute', label: menuMeta.execute.label, icon: PlayCircleOutlined },
   { key: 'reports', label: menuMeta.reports.label, icon: BarChartOutlined },
@@ -1836,6 +2105,7 @@ const environments = ref<any[]>([])
 const environmentList = ref<any[]>([])
 const apis = ref<any[]>([])
 const apiList = ref<any[]>([])
+const mockList = ref<any[]>([])
 const cases = ref<any[]>([])
 const caseList = ref<any[]>([])
 const executions = ref<any[]>([])
@@ -1858,6 +2128,8 @@ const environmentSearch = reactive({ project_id: undefined as number | undefined
 const environmentPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const apiSearch = reactive({ project_id: undefined as number | undefined, name: '', url: '' })
 const apiPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const mockSearch = reactive({ project_id: undefined as number | undefined, environment_id: undefined as number | undefined, name: '', path: '', status: '' })
+const mockPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const caseSearch = reactive({ project_id: undefined as number | undefined, api_id: undefined as number | undefined })
 const casePagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const planSearch = reactive({ project_id: undefined as number | undefined, api_id: undefined as number | undefined, name: '' })
@@ -1881,6 +2153,8 @@ const createProjectDialogVisible = ref(false)
 const editProjectDialogVisible = ref(false)
 const createEnvironmentDialogVisible = ref(false)
 const editEnvironmentDialogVisible = ref(false)
+const createMockDialogVisible = ref(false)
+const editMockDialogVisible = ref(false)
 const changePasswordDialogVisible = ref(false)
 const caseBodyDialogVisible = ref(false)
 const caseDetailDialogVisible = ref(false)
@@ -1901,6 +2175,38 @@ const projectForm = reactive({ name: '', description: '' })
 const editProjectForm = reactive({ id: undefined as number | undefined, name: '', description: '' })
 const envForm = reactive({ project_id: undefined as number | undefined, name: '', protocol: '', base_url: '', port: '' })
 const editEnvironmentForm = reactive({ id: undefined as number | undefined, project_id: undefined as number | undefined, name: '', protocol: '', base_url: '', port: '' })
+const mockForm = reactive<MockFormState>({
+  id: undefined,
+  project_id: undefined,
+  environment_id: undefined,
+  name: '',
+  method: 'GET',
+  path: '',
+  status: 'active',
+  status_code: '200',
+  delay_ms: '0',
+  headerRows: [],
+  response_body: '{\n  "code": 0,\n  "message": "success"\n}',
+  body_format: 'json',
+  sm3_enabled: false,
+  description: ''
+})
+const editMockForm = reactive<MockFormState>({
+  id: undefined,
+  project_id: undefined,
+  environment_id: undefined,
+  name: '',
+  method: 'GET',
+  path: '',
+  status: 'active',
+  status_code: '200',
+  delay_ms: '0',
+  headerRows: [],
+  response_body: '',
+  body_format: 'json',
+  sm3_enabled: false,
+  description: ''
+})
 const caseForm = reactive({
   id: undefined as number | undefined,
   project_id: undefined as number | undefined,
@@ -1968,6 +2274,9 @@ const caseBodyHelpText = computed(() => {
   return '当前接口 Body 格式为 JSON，保存前会校验 JSON 合法性。'
 })
 const planSearchApis = computed(() => apis.value.filter(item => planSearch.project_id && item.project_id === planSearch.project_id))
+const mockSearchEnvironments = computed(() => environments.value.filter(item => mockSearch.project_id && item.project_id === mockSearch.project_id))
+const mockFormEnvironments = computed(() => environments.value.filter(item => mockForm.project_id && item.project_id === mockForm.project_id))
+const editMockFormEnvironments = computed(() => environments.value.filter(item => editMockForm.project_id && item.project_id === editMockForm.project_id))
 const assertionTargets = [
   { label: 'HTTP状态码', value: 'status' },
   { label: '响应时间', value: 'duration' },
@@ -2061,6 +2370,7 @@ async function loadAll() {
   calls.push(loadProjects())
   calls.push(loadEnvironments())
   calls.push(loadApis())
+  calls.push(loadMocks())
   calls.push(loadCases())
   calls.push(loadPlans())
   calls.push(loadReports())
@@ -2240,6 +2550,53 @@ async function resetApiSearch() {
 async function changeApiPage(page: number) {
   apiPagination.page = page
   await loadApis()
+}
+
+async function loadMocks() {
+  const projectId = mockSearch.project_id
+  const environmentId = mockSearch.environment_id
+  const name = mockSearch.name.trim()
+  const path = mockSearch.path.trim()
+  const status = mockSearch.status
+  const { data } = await api.get('/mocks', {
+    params: {
+      ...(projectId ? { project_id: projectId } : {}),
+      ...(environmentId ? { environment_id: environmentId } : {}),
+      ...(name ? { name } : {}),
+      ...(path ? { path } : {}),
+      ...(status ? { status } : {}),
+      page: mockPagination.page,
+      page_size: mockPagination.pageSize
+    }
+  })
+  mockList.value = data.items
+  mockPagination.total = data.total
+  mockPagination.page = data.page
+  mockPagination.pageSize = data.page_size
+}
+
+async function searchMocks() {
+  mockPagination.page = 1
+  await loadMocks()
+}
+
+async function resetMockSearch() {
+  mockSearch.project_id = undefined
+  mockSearch.environment_id = undefined
+  mockSearch.name = ''
+  mockSearch.path = ''
+  mockSearch.status = ''
+  mockPagination.page = 1
+  await loadMocks()
+}
+
+function changeMockSearchProject() {
+  mockSearch.environment_id = undefined
+}
+
+async function changeMockPage(page: number) {
+  mockPagination.page = page
+  await loadMocks()
 }
 
 async function loadCases() {
@@ -3266,6 +3623,282 @@ async function deleteEnvironment(environment: any) {
   await api.delete(`/environments/${environment.id}`)
   message.success('环境已删除')
   await refreshEnvironmentsAfterDelete()
+}
+
+function mockContentType(format: MockBodyFormat = 'json') {
+  if (format === 'xml') return 'application/xml'
+  if (format === 'text') return 'text/plain; charset=utf-8'
+  return 'application/json'
+}
+
+function defaultMockHeaders(format: MockBodyFormat = 'json') {
+  return [nextApiRow('Content-Type', mockContentType(format))]
+}
+
+function backendOrigin() {
+  const origin = window.location.origin
+  try {
+    const url = new URL(origin)
+    if (url.port === '5173') {
+      url.port = '8000'
+      return url.origin
+    }
+  } catch {}
+  return origin
+}
+
+function mockAbsoluteUrl(row: { environment_id?: number; path?: string }) {
+  if (!row.environment_id || !String(row.path || '').trim()) return ''
+  return joinUrl(`${backendOrigin()}/mock-api/env/${row.environment_id}`, String(row.path || ''))
+}
+
+function syncMockContentType(form: MockFormState) {
+  const value = mockContentType(form.body_format)
+  const row = form.headerRows.find(item => item.key.trim().toLowerCase() === 'content-type')
+  if (row) {
+    row.value = value
+  } else {
+    form.headerRows.push(nextApiRow('Content-Type', value))
+  }
+}
+
+function changeMockBodyFormat(form: MockFormState) {
+  syncMockContentType(form)
+}
+
+function resetMockForm() {
+  mockForm.id = undefined
+  mockForm.project_id = undefined
+  mockForm.environment_id = undefined
+  mockForm.name = ''
+  mockForm.method = 'GET'
+  mockForm.path = ''
+  mockForm.status = 'active'
+  mockForm.status_code = '200'
+  mockForm.delay_ms = '0'
+  mockForm.headerRows = defaultMockHeaders()
+  mockForm.response_body = '{\n  "code": 0,\n  "message": "success"\n}'
+  mockForm.body_format = 'json'
+  mockForm.sm3_enabled = false
+  mockForm.description = ''
+}
+
+function resetEditMockForm() {
+  editMockForm.id = undefined
+  editMockForm.project_id = undefined
+  editMockForm.environment_id = undefined
+  editMockForm.name = ''
+  editMockForm.method = 'GET'
+  editMockForm.path = ''
+  editMockForm.status = 'active'
+  editMockForm.status_code = '200'
+  editMockForm.delay_ms = '0'
+  editMockForm.headerRows = []
+  editMockForm.response_body = ''
+  editMockForm.body_format = 'json'
+  editMockForm.sm3_enabled = false
+  editMockForm.description = ''
+}
+
+function openCreateMockDialog() {
+  resetMockForm()
+  createMockDialogVisible.value = true
+}
+
+function openEditMockDialog(row: any) {
+  editMockForm.id = row.id
+  editMockForm.project_id = row.project_id
+  editMockForm.environment_id = row.environment_id
+  editMockForm.name = row.name || ''
+  editMockForm.method = row.method || 'GET'
+  editMockForm.path = row.path || ''
+  editMockForm.status = row.status || 'active'
+  editMockForm.status_code = String(row.status_code || 200)
+  editMockForm.delay_ms = String(row.delay_ms || 0)
+  editMockForm.headerRows = objectToRows(row.headers, defaultMockHeaders(row.body_format || 'json'))
+  editMockForm.response_body = row.response_body || ''
+  editMockForm.body_format = ['json', 'xml', 'text'].includes(row.body_format) ? row.body_format : 'json'
+  editMockForm.sm3_enabled = !!row.sm3_enabled
+  editMockForm.description = row.description || ''
+  editMockDialogVisible.value = true
+}
+
+function cancelCreateMock() {
+  createMockDialogVisible.value = false
+  resetMockForm()
+}
+
+function cancelEditMock() {
+  editMockDialogVisible.value = false
+  resetEditMockForm()
+}
+
+function changeMockFormProject() {
+  mockForm.environment_id = undefined
+}
+
+function changeEditMockFormProject() {
+  editMockForm.environment_id = undefined
+}
+
+function addMockHeaderRow() {
+  mockForm.headerRows.push(nextApiRow('', ''))
+}
+
+function removeMockHeaderRow(index: number) {
+  mockForm.headerRows.splice(index, 1)
+}
+
+function addEditMockHeaderRow() {
+  editMockForm.headerRows.push(nextApiRow('', ''))
+}
+
+function removeEditMockHeaderRow(index: number) {
+  editMockForm.headerRows.splice(index, 1)
+}
+
+function mockBodyPlaceholder(format: MockBodyFormat) {
+  if (format === 'xml') return '<RESPONSE>\n  <STATUS>0</STATUS>\n</RESPONSE>'
+  if (format === 'text') return 'success'
+  return '{\n  "code": 0,\n  "message": "success"\n}'
+}
+
+function formatMockBody(form: MockFormState) {
+  if (form.body_format === 'xml') {
+    try {
+      form.response_body = formatXmlTextPreservingTags(form.response_body)
+      message.success('XML 已格式化')
+    } catch {
+      message.warning('XML 格式不完整，已保留原内容')
+    }
+    return
+  }
+  if (form.body_format === 'text') {
+    message.info('文本格式无需格式化')
+    return
+  }
+  const parsed = parseJson(form.response_body, undefined)
+  if (parsed === undefined) {
+    message.warning('响应Body必须是合法 JSON')
+    return
+  }
+  form.response_body = JSON.stringify(parsed, null, 2)
+  message.success('JSON 已格式化')
+}
+
+function mockPayload(form: MockFormState) {
+  const projectId = form.project_id
+  const environmentId = form.environment_id
+  const name = form.name.trim()
+  const path = form.path.trim()
+  const statusCode = Number(form.status_code || 0)
+  const delayMs = Number(form.delay_ms || 0)
+  if (!projectId) {
+    message.warning('请选择项目')
+    return null
+  }
+  if (!environmentId) {
+    message.warning('请选择环境')
+    return null
+  }
+  if (!name) {
+    message.warning('请输入Mock名称')
+    return null
+  }
+  if (!path) {
+    message.warning('请输入Mock路径')
+    return null
+  }
+  if (statusCode < 100 || statusCode > 599) {
+    message.warning('HTTP状态码必须在100-599之间')
+    return null
+  }
+  return {
+    project_id: projectId,
+    environment_id: environmentId,
+    name,
+    method: form.method,
+    path,
+    status: form.status,
+    status_code: statusCode,
+    delay_ms: delayMs,
+      headers: rowsToObject(form.headerRows),
+      response_body: form.response_body,
+      body_format: form.body_format,
+      sm3_enabled: form.sm3_enabled,
+      description: form.description.trim()
+    }
+}
+
+async function refreshMocksAfterChange() {
+  await loadMocks()
+}
+
+async function createMock() {
+  const payload = mockPayload(mockForm)
+  if (!payload) return
+  try {
+    await api.post('/mocks', payload)
+    createMockDialogVisible.value = false
+    resetMockForm()
+    message.success('Mock已创建')
+    await refreshMocksAfterChange()
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || 'Mock创建失败')
+  }
+}
+
+async function updateMock() {
+  const payload = mockPayload(editMockForm)
+  if (!payload) return
+  try {
+    await api.put(`/mocks/${editMockForm.id}`, payload)
+    editMockDialogVisible.value = false
+    resetEditMockForm()
+    message.success('Mock已更新')
+    await refreshMocksAfterChange()
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || 'Mock更新失败')
+  }
+}
+
+async function toggleMockStatus(row: any) {
+  try {
+    await api.put(`/mocks/${row.id}`, {
+      project_id: row.project_id,
+      environment_id: row.environment_id,
+      name: row.name,
+      method: row.method,
+      path: row.path,
+      status: row.status === 'active' ? 'disabled' : 'active',
+      status_code: row.status_code,
+      delay_ms: row.delay_ms,
+        headers: row.headers || {},
+        response_body: row.response_body || '',
+        body_format: row.body_format || 'json',
+        sm3_enabled: !!row.sm3_enabled,
+        description: row.description || ''
+      })
+    message.success(row.status === 'active' ? 'Mock已禁用' : 'Mock已启用')
+    await refreshMocksAfterChange()
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || 'Mock状态更新失败')
+  }
+}
+
+async function deleteMock(row: any) {
+  try {
+    await confirmAction('确认删除该Mock规则吗？', '删除Mock', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  await api.delete(`/mocks/${row.id}`)
+  message.success('Mock已删除')
+  await refreshMocksAfterChange()
 }
 
 async function refreshApisAfterChange() {

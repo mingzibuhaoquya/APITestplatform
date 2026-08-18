@@ -78,6 +78,26 @@ class ApiDefinition(Base, TimestampMixin):
     auth_config_json: Mapped[str] = mapped_column(Text, default="{}")
 
 
+class MockEndpoint(Base, TimestampMixin):
+    __tablename__ = "mock_endpoint"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(Integer, index=True)
+    environment_id: Mapped[int] = mapped_column(Integer, index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    method: Mapped[str] = mapped_column(String(16))
+    path: Mapped[str] = mapped_column(String(512))
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    status_code: Mapped[int] = mapped_column(Integer, default=200)
+    delay_ms: Mapped[int] = mapped_column(Integer, default=0)
+    headers_json: Mapped[str] = mapped_column(Text, default="{}")
+    response_body: Mapped[str] = mapped_column(Text().with_variant(LONGTEXT, "mysql"), default="")
+    body_format: Mapped[str] = mapped_column(String(32), default="json")
+    sm3_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+
+
 class TestCase(Base, TimestampMixin):
     __tablename__ = "test_case"
 

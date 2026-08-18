@@ -15,6 +15,7 @@ MENU_TREE = [
         ],
     },
     {"key": "apis", "label": "接口管理", "module": "api"},
+    {"key": "mocks", "label": "Mock服务", "module": "mock"},
     {"key": "cases", "label": "用例管理", "module": "case"},
     {"key": "execute", "label": "测试计划", "module": "execute"},
     {"key": "reports", "label": "报告中心", "module": "report"},
@@ -30,8 +31,8 @@ MENU_TREE = [
 ]
 
 DEFAULT_ROLE_MENUS = {
-    "admin": ["dashboard", "projects", "environments", "apis", "cases", "execute", "reports", "logs", "accounts", "roles"],
-    "tester": ["dashboard", "projects", "environments", "apis", "cases", "execute", "reports", "logs", "accounts"],
+    "admin": ["dashboard", "projects", "environments", "apis", "mocks", "cases", "execute", "reports", "logs", "accounts", "roles"],
+    "tester": ["dashboard", "projects", "environments", "apis", "mocks", "cases", "execute", "reports", "logs", "accounts"],
 }
 
 PATH_MENU_RULES = [
@@ -40,6 +41,7 @@ PATH_MENU_RULES = [
     ("/projects", {"projects"}),
     ("/environments", {"environments"}),
     ("/apis", {"apis"}),
+    ("/mocks", {"mocks"}),
     ("/cases", {"cases"}),
     ("/scenarios", {"cases"}),
     ("/plans", {"execute"}),
@@ -83,8 +85,15 @@ def ensure_default_roles(db: Session) -> None:
     for code, name, description, is_builtin, menus in defaults:
         role = db.query(Role).filter(Role.code == code).first()
         if role:
-            if not role.menus_json:
+            current_menus = parse_json(role.menus_json, [])
+            if not current_menus:
                 role.menus_json = dump_json(menus)
+            elif role.is_builtin:
+                merged = list(current_menus)
+                for menu in menus:
+                    if menu not in merged:
+                        merged.append(menu)
+                role.menus_json = dump_json(merged)
             role.name = role.name or name
             role.description = role.description or description
             role.is_builtin = True
