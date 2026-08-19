@@ -1628,6 +1628,12 @@ textarea.code-input,
     word-break: break-all;
 }
 
+.wrap-text {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-all;
+}
+
 .ui-screenshot-list {
     display: flex;
   flex-wrap: wrap;

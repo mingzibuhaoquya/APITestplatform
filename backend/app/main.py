@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from .config import get_settings
 from .database import Base, SessionLocal, engine
 from .models import TestCase, User
-from .routers import auth, crud, executions, mock, roles, ui, users
+from .routers import auth, crud, executions, mock, roles, ui, ui_recorder, users
 from .security import hash_password
 from .services.menus import ensure_default_roles
 from .services.operation_logs import log_system_exception
@@ -38,6 +38,7 @@ app.include_router(crud.router)
 app.include_router(executions.router)
 app.include_router(mock.router)
 app.include_router(ui.router)
+app.include_router(ui_recorder.router)
 
 
 @app.exception_handler(Exception)

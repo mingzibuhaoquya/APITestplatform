@@ -863,7 +863,7 @@
                   <a-table-column title="目标元素/地址" width="260"><template #default="{ record: row }"><a-input v-model:value="row.target" placeholder="CSS、XPath、文本，或写：点击登录按钮" /></template></a-table-column>
                   <a-table-column title="值/期望" width="220"><template #default="{ record: row }"><a-input v-model:value="row.value" placeholder="输入值、期望文本或等待毫秒" /></template></a-table-column>
                   <a-table-column title="说明" width="220"><template #default="{ record: row }"><a-input v-model:value="row.description" placeholder="步骤说明" /></template></a-table-column>
-                  <a-table-column title="操作" width="170" fixed="right"><template #default="{ index }"><div class="table-actions"><a-button size="small" @click="moveUiStep(uiCaseForm, index, -1)">上移</a-button><a-button size="small" @click="moveUiStep(uiCaseForm, index, 1)">下移</a-button><a-button size="small" danger @click="removeUiStep(uiCaseForm, index)">删除</a-button></div></template></a-table-column>
+                  <a-table-column title="操作" width="230" fixed="right"><template #default="{ record: row, index }"><div class="table-actions"><a-button size="small" @click="startUiElementPicker(uiCaseForm, row)">拾取</a-button><a-button size="small" @click="moveUiStep(uiCaseForm, index, -1)">上移</a-button><a-button size="small" @click="moveUiStep(uiCaseForm, index, 1)">下移</a-button><a-button size="small" danger @click="removeUiStep(uiCaseForm, index)">删除</a-button></div></template></a-table-column>
                 </a-table>
               </div>
             </a-form>
@@ -890,11 +890,29 @@
                   <a-table-column title="目标元素/地址" width="260"><template #default="{ record: row }"><a-input v-model:value="row.target" placeholder="CSS、XPath、文本，或写：点击登录按钮" /></template></a-table-column>
                   <a-table-column title="值/期望" width="220"><template #default="{ record: row }"><a-input v-model:value="row.value" placeholder="输入值、期望文本或等待毫秒" /></template></a-table-column>
                   <a-table-column title="说明" width="220"><template #default="{ record: row }"><a-input v-model:value="row.description" placeholder="步骤说明" /></template></a-table-column>
-                  <a-table-column title="操作" width="170" fixed="right"><template #default="{ index }"><div class="table-actions"><a-button size="small" @click="moveUiStep(editUiCaseForm, index, -1)">上移</a-button><a-button size="small" @click="moveUiStep(editUiCaseForm, index, 1)">下移</a-button><a-button size="small" danger @click="removeUiStep(editUiCaseForm, index)">删除</a-button></div></template></a-table-column>
+                  <a-table-column title="操作" width="230" fixed="right"><template #default="{ record: row, index }"><div class="table-actions"><a-button size="small" @click="startUiElementPicker(editUiCaseForm, row)">拾取</a-button><a-button size="small" @click="moveUiStep(editUiCaseForm, index, -1)">上移</a-button><a-button size="small" @click="moveUiStep(editUiCaseForm, index, 1)">下移</a-button><a-button size="small" danger @click="removeUiStep(editUiCaseForm, index)">删除</a-button></div></template></a-table-column>
                 </a-table>
               </div>
             </a-form>
             <template #footer><a-button @click="editUiCaseDialogVisible = false">取消</a-button><a-button type="primary" @click="updateUiCase">确认</a-button></template>
+          </a-modal>
+
+          <a-modal v-model:open="uiPickerDialogVisible" title="元素拾取" width="620px" @cancel="closeUiPicker">
+            <a-alert
+              class="compact-alert"
+              type="info"
+              show-icon
+              message="浏览器打开后可先正常操作页面；需要定位时，点击页面右下角“开始拾取”，再点击目标元素。"
+            />
+            <a-descriptions bordered size="small" :column="1">
+              <a-descriptions-item label="状态">{{ uiPicker.statusText }}</a-descriptions-item>
+              <a-descriptions-item label="提示">{{ uiPicker.message || '-' }}</a-descriptions-item>
+              <a-descriptions-item label="XPath"><span class="wrap-text">{{ uiPicker.xpath || '-' }}</span></a-descriptions-item>
+              <a-descriptions-item label="元素">{{ uiPicker.summaryText || '-' }}</a-descriptions-item>
+            </a-descriptions>
+            <template #footer>
+              <a-button @click="closeUiPicker">关闭会话</a-button>
+            </template>
           </a-modal>
 
           <a-modal v-model:open="uiExecutionDetailVisible" title="UI执行详情" width="900px">
@@ -2317,6 +2335,7 @@ const createMockDialogVisible = ref(false)
 const editMockDialogVisible = ref(false)
 const createUiCaseDialogVisible = ref(false)
 const editUiCaseDialogVisible = ref(false)
+const uiPickerDialogVisible = ref(false)
 const uiExecutionDetailVisible = ref(false)
 const aiSettingDialogVisible = ref(false)
 const changePasswordDialogVisible = ref(false)
@@ -2332,6 +2351,16 @@ const uiExecutionDetail = reactive<any>({ task: null, results: [] })
 const uiArtifactObjectUrls = reactive<Record<string, string>>({})
 const uiArtifactLoading = new Set<string>()
 const uiArtifactFailed = new Set<string>()
+const uiPicker = reactive({
+  sessionId: '',
+  status: '',
+  statusText: '未启动',
+  message: '',
+  xpath: '',
+  summaryText: '',
+  targetRow: null as UiStepRow | null
+})
+let uiPickerTimer: number | undefined
 const operationLogDetail = ref<any>(null)
 const executionLogDetail = ref<any>(null)
 const userForm = reactive({ username: '', real_name: '', role: 'tester' })
@@ -4071,6 +4100,121 @@ function changeMockFormProject() {
     if (target < 0 || target >= form.steps.length) return
     const [row] = form.steps.splice(index, 1)
     form.steps.splice(target, 0, row)
+  }
+
+  function resetUiPickerState() {
+    uiPicker.sessionId = ''
+    uiPicker.status = ''
+    uiPicker.statusText = '未启动'
+    uiPicker.message = ''
+    uiPicker.xpath = ''
+    uiPicker.summaryText = ''
+    uiPicker.targetRow = null
+  }
+
+  function uiPickerStatusText(status: string) {
+    const mapping: Record<string, string> = {
+      starting: '启动中',
+      ready: '待拾取',
+      picked: '已拾取',
+      closed: '已关闭',
+      error: '异常'
+    }
+    return mapping[status] || status || '未知'
+  }
+
+  function uiPickedSummary(result: any) {
+    const summary = result?.summary || {}
+    const parts = [
+      summary.tag ? `标签：${summary.tag}` : '',
+      summary.id ? `ID：${summary.id}` : '',
+      summary.name ? `Name：${summary.name}` : '',
+      summary.text ? `文本：${summary.text}` : ''
+    ].filter(Boolean)
+    return parts.join('，')
+  }
+
+  function stopUiPickerPolling() {
+    if (uiPickerTimer) {
+      window.clearInterval(uiPickerTimer)
+      uiPickerTimer = undefined
+    }
+  }
+
+  async function startUiElementPicker(form: UiCaseFormState, row: UiStepRow) {
+    if (!form.environment_id) {
+      message.warning('请先选择环境')
+      return
+    }
+    if (!form.start_url.trim()) {
+      message.warning('请先填写目标地址')
+      return
+    }
+    await closeUiPicker(false)
+    resetUiPickerState()
+    uiPicker.targetRow = row
+    uiPicker.status = 'starting'
+    uiPicker.statusText = '启动中'
+    uiPicker.message = '正在启动浏览器'
+    uiPickerDialogVisible.value = true
+    try {
+      const { data } = await api.post('/ui-recorder/sessions', {
+        environment_id: form.environment_id,
+        start_url: form.start_url.trim()
+      })
+      applyUiPickerSession(data)
+      uiPickerTimer = window.setInterval(pollUiPickerSession, 800)
+    } catch (error: any) {
+      uiPicker.status = 'error'
+      uiPicker.statusText = '异常'
+      uiPicker.message = error?.response?.data?.detail || '启动拾取会话失败'
+    }
+  }
+
+  function applyUiPickerSession(data: any) {
+    uiPicker.sessionId = data.id || uiPicker.sessionId
+    uiPicker.status = data.status || ''
+    uiPicker.statusText = uiPickerStatusText(uiPicker.status)
+    uiPicker.message = data.error || data.message || ''
+    const xpath = data.result?.xpath || ''
+    if (xpath && xpath !== uiPicker.xpath) {
+      uiPicker.xpath = xpath
+      uiPicker.summaryText = uiPickedSummary(data.result)
+      if (uiPicker.targetRow) {
+        uiPicker.targetRow.locator_type = 'xpath'
+        uiPicker.targetRow.target = xpath
+      }
+      message.success('元素已拾取，XPath 已回填')
+    }
+    if (['closed', 'error'].includes(uiPicker.status)) {
+      stopUiPickerPolling()
+    }
+  }
+
+  async function pollUiPickerSession() {
+    if (!uiPicker.sessionId) return
+    try {
+      const { data } = await api.get(`/ui-recorder/sessions/${uiPicker.sessionId}`)
+      applyUiPickerSession(data)
+    } catch (error: any) {
+      uiPicker.status = 'error'
+      uiPicker.statusText = '异常'
+      uiPicker.message = error?.response?.data?.detail || '拾取会话已断开'
+      stopUiPickerPolling()
+    }
+  }
+
+  async function closeUiPicker(closeDialog = true) {
+    stopUiPickerPolling()
+    if (uiPicker.sessionId) {
+      try {
+        await api.post(`/ui-recorder/sessions/${uiPicker.sessionId}/close`)
+      } catch {}
+    }
+    if (closeDialog) {
+      uiPickerDialogVisible.value = false
+    }
+    resetUiPickerState()
   }
 
   function uiCasePayload(form: UiCaseFormState) {
@@ -6186,6 +6330,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   Array.from(planExecutionPollers.keys()).forEach(clearPlanExecutionPoller)
+  closeUiPicker(false)
   Object.values(uiArtifactObjectUrls).forEach(url => {
     if (url) URL.revokeObjectURL(url)
   })
