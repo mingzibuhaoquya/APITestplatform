@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from .config import get_settings
 from .database import Base, SessionLocal, engine
 from .models import TestCase, User
-from .routers import auth, crud, executions, mock, roles, users
+from .routers import auth, crud, executions, mock, roles, ui, users
 from .security import hash_password
 from .services.menus import ensure_default_roles
 from .services.operation_logs import log_system_exception
@@ -37,6 +37,7 @@ app.include_router(roles.router)
 app.include_router(crud.router)
 app.include_router(executions.router)
 app.include_router(mock.router)
+app.include_router(ui.router)
 
 
 @app.exception_handler(Exception)
@@ -70,6 +71,8 @@ def startup() -> None:
     _ensure_test_suite_columns()
     _ensure_execution_task_columns()
     _ensure_execution_result_columns()
+    _ensure_ui_test_case_columns()
+    _ensure_ai_setting_columns()
     _ensure_mock_endpoint_columns()
     _ensure_roles()
     _ensure_admin()
@@ -191,6 +194,31 @@ def _ensure_execution_result_columns() -> None:
             column = columns.get(column_name)
             if column and "LONGTEXT" not in str(column["type"]).upper():
                 conn.execute(text(f"ALTER TABLE execution_result MODIFY COLUMN {column_name} LONGTEXT NOT NULL"))
+
+
+def _ensure_ui_test_case_columns() -> None:
+    inspector = inspect(engine)
+    if "ui_test_case" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("ui_test_case")}
+    with engine.begin() as conn:
+        if "headless" not in columns:
+            conn.execute(text("ALTER TABLE ui_test_case ADD COLUMN headless BOOL NOT NULL DEFAULT 1"))
+        if "wait_until" not in columns:
+            conn.execute(text("ALTER TABLE ui_test_case ADD COLUMN wait_until VARCHAR(32) NOT NULL DEFAULT 'networkidle'"))
+        if "wait_after_load_ms" not in columns:
+            conn.execute(text("ALTER TABLE ui_test_case ADD COLUMN wait_after_load_ms INT NOT NULL DEFAULT 500"))
+
+
+def _ensure_ai_setting_columns() -> None:
+    inspector = inspect(engine)
+    if "ai_setting" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("ai_setting")}
+    if "description" in columns:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE ai_setting ADD COLUMN description TEXT NOT NULL"))
 
 
 def _ensure_mock_endpoint_columns() -> None:

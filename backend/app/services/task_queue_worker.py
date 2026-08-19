@@ -7,6 +7,7 @@ from ..config import get_settings
 from ..database import SessionLocal
 from ..models import ExecutionTask
 from .executor import execute_task
+from .ui_executor import execute_ui_task
 
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,16 @@ def run_worker() -> None:
             time.sleep(settings.queue_poll_interval_seconds)
             continue
         logger.info("Executing task %s", task_id)
-        execute_task(task_id)
+        db = SessionLocal()
+        try:
+            task = db.get(ExecutionTask, task_id)
+            target_type = task.target_type if task else ""
+        finally:
+            db.close()
+        if target_type == "ui_case":
+            execute_ui_task(task_id)
+        else:
+            execute_task(task_id)
 
 
 if __name__ == "__main__":

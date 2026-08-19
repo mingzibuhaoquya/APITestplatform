@@ -17,6 +17,7 @@ MENU_TREE = [
     {"key": "apis", "label": "接口管理", "module": "api"},
     {"key": "mocks", "label": "Mock服务", "module": "mock"},
     {"key": "cases", "label": "用例管理", "module": "case"},
+    {"key": "ui-tests", "label": "UI测试", "module": "ui"},
     {"key": "execute", "label": "测试计划", "module": "execute"},
     {"key": "reports", "label": "报告中心", "module": "report"},
     {"key": "logs", "label": "日志中心", "module": "log"},
@@ -31,8 +32,8 @@ MENU_TREE = [
 ]
 
 DEFAULT_ROLE_MENUS = {
-    "admin": ["dashboard", "projects", "environments", "apis", "mocks", "cases", "execute", "reports", "logs", "accounts", "roles"],
-    "tester": ["dashboard", "projects", "environments", "apis", "mocks", "cases", "execute", "reports", "logs", "accounts"],
+    "admin": ["dashboard", "projects", "environments", "apis", "mocks", "cases", "ui-tests", "execute", "reports", "logs", "accounts", "roles"],
+    "tester": ["dashboard", "projects", "environments", "apis", "mocks", "cases", "ui-tests", "execute", "reports", "logs", "accounts"],
 }
 
 PATH_MENU_RULES = [
@@ -43,6 +44,9 @@ PATH_MENU_RULES = [
     ("/apis", {"apis"}),
     ("/mocks", {"mocks"}),
     ("/cases", {"cases"}),
+    ("/ui-cases", {"ui-tests"}),
+    ("/ui-executions", {"ui-tests", "reports"}),
+    ("/ai-settings", {"ui-tests", "roles"}),
     ("/scenarios", {"cases"}),
     ("/plans", {"execute"}),
     ("/logs", {"logs"}),

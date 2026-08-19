@@ -174,6 +174,46 @@ class ExecutionResult(Base, TimestampMixin):
     error_message: Mapped[str] = mapped_column(Text().with_variant(LONGTEXT, "mysql"), default="")
 
 
+class UiTestCase(Base, TimestampMixin):
+    __tablename__ = "ui_test_case"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(Integer, index=True)
+    environment_id: Mapped[int] = mapped_column(Integer, index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    start_url: Mapped[str] = mapped_column(String(1024), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    steps_json: Mapped[str] = mapped_column(Text().with_variant(LONGTEXT, "mysql"), default="[]")
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    headless: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
+    wait_until: Mapped[str] = mapped_column(String(32), default="networkidle")
+    wait_after_load_ms: Mapped[int] = mapped_column(Integer, default=500)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+    maintainer_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+
+
+class UiExecutionArtifact(Base, TimestampMixin):
+    __tablename__ = "ui_execution_artifact"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[int] = mapped_column(Integer, index=True)
+    result_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    step_index: Mapped[int] = mapped_column(Integer, default=0)
+    artifact_type: Mapped[str] = mapped_column(String(32), default="screenshot")
+    file_path: Mapped[str] = mapped_column(String(1024), default="")
+
+
+class AiSetting(Base, TimestampMixin):
+    __tablename__ = "ai_setting"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider_url: Mapped[str] = mapped_column(String(1024), default="")
+    model_name: Mapped[str] = mapped_column(String(128), default="")
+    api_key: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(32), default="disabled")
+    description: Mapped[str] = mapped_column(Text, default="")
+
+
 class OperationLog(Base, TimestampMixin):
     __tablename__ = "operation_log"
 

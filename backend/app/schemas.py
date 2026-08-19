@@ -279,5 +279,38 @@ class TestPlanUpdate(BaseModel):
 class ExecutionCreate(BaseModel):
     project_id: int
     environment_id: int
-    target_type: Literal["case", "scenario", "plan"]
+    target_type: Literal["case", "scenario", "plan", "ui_case"]
     target_id: int
+
+
+class UiStepIn(BaseModel):
+    action: Literal["goto", "click", "fill", "select", "wait", "assert_text", "assert_visible", "screenshot"]
+    locator_type: Literal["text", "css", "xpath", "placeholder", "role", "ai"] = "css"
+    target: str = ""
+    value: str = ""
+    description: str = ""
+
+
+class UiTestCaseIn(BaseModel):
+    project_id: int
+    environment_id: int
+    name: str
+    start_url: str = ""
+    description: str = ""
+    status: Literal["active", "disabled"] = "active"
+    headless: bool = True
+    wait_until: Literal["domcontentloaded", "load", "networkidle"] = "networkidle"
+    wait_after_load_ms: int = 500
+    steps: list[UiStepIn] = []
+
+
+class UiTestCaseUpdate(UiTestCaseIn):
+    pass
+
+
+class AiSettingIn(BaseModel):
+    provider_url: str = ""
+    model_name: str = ""
+    api_key: str = ""
+    status: Literal["active", "disabled"] = "disabled"
+    description: str = ""

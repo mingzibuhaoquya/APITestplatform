@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import current_user
-from ..models import ApiDefinition, Environment, ExecutionResult, ExecutionTask, Project, ScenarioCase, TestCase, TestSuite, User
+from ..models import ApiDefinition, Environment, ExecutionResult, ExecutionTask, Project, ScenarioCase, TestCase, TestSuite, UiTestCase, User
 from ..schemas import ExecutionCreate
 from ..utils import fmt_time, parse_json
 
@@ -25,6 +25,9 @@ def _task_target_name(row: ExecutionTask, db: Session) -> str:
         return plan.name if plan and not plan.is_deleted else ""
     if row.target_type == "case":
         case = db.get(TestCase, row.target_id)
+        return case.name if case and not case.is_deleted else ""
+    if row.target_type == "ui_case":
+        case = db.get(UiTestCase, row.target_id)
         return case.name if case and not case.is_deleted else ""
     scenario = db.get(ScenarioCase, row.target_id)
     return scenario.name if scenario else ""

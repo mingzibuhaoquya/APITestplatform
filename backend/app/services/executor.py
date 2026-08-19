@@ -8,7 +8,7 @@ import httpx
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from ..config import get_settings
-from ..models import ApiDefinition, Environment, ExecutionResult, ExecutionTask, ScenarioCase, TestCase, TestSuite
+from ..models import ApiDefinition, Environment, ExecutionResult, ExecutionTask, ScenarioCase, TestCase, TestSuite, UiTestCase
 from ..utils import dump_json, parse_json
 from .assertions import all_passed, run_assertions
 from .crypto_envelope import CryptoEnvelopeError, append_sm3_signature, decrypt_body, encrypt_body, normalize_config
@@ -130,6 +130,9 @@ def _execution_target_name(db: Session, task: ExecutionTask) -> str:
         return plan.name if plan else ""
     if task.target_type == "case":
         case = db.get(TestCase, task.target_id)
+        return case.name if case else ""
+    if task.target_type == "ui_case":
+        case = db.get(UiTestCase, task.target_id)
         return case.name if case else ""
     scenario = db.get(ScenarioCase, task.target_id)
     return scenario.name if scenario else ""

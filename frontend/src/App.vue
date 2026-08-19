@@ -793,6 +793,140 @@
           </a-modal>
         </section>
 
+        <section v-if="active === 'ui-tests'" class="page-view">
+          <div class="toolbar">
+            <h2>UI测试</h2>
+            <div class="toolbar-actions">
+              <a-button @click="openAiSettingDialog">AI配置</a-button>
+              <a-button type="primary" @click="openCreateUiCaseDialog"><template #icon><PlusOutlined /></template>新增UI用例</a-button>
+            </div>
+          </div>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="项目">
+              <a-select v-model:value="uiCaseSearch.project_id" placeholder="请选择项目" allow-clear @change="changeUiCaseSearchProject">
+                <a-select-option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item label="环境">
+              <a-select v-model:value="uiCaseSearch.environment_id" placeholder="请先选择项目" allow-clear :disabled="!uiCaseSearch.project_id">
+                <a-select-option v-for="e in uiCaseSearchEnvironments" :key="e.id" :value="e.id">{{ e.name }}</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item label="名称"><a-input v-model:value="uiCaseSearch.name" placeholder="请输入UI用例名称" allow-clear @keyup.enter="searchUiCases" /></a-form-item>
+            <a-form-item label="状态">
+              <a-select v-model:value="uiCaseSearch.status" placeholder="请选择状态" allow-clear>
+                <a-select-option value="active">启用</a-select-option>
+                <a-select-option value="disabled">禁用</a-select-option>
+              </a-select>
+            </a-form-item>
+            <div class="search-actions"><a-button type="primary" @click="searchUiCases">搜索</a-button><a-button @click="resetUiCaseSearch">重置</a-button></div>
+          </a-form>
+          <a-table :pagination="false" :data-source="uiCaseList" :scroll="{ x: 1180 }">
+            <a-table-column data-index="project_name" title="项目" width="160" />
+            <a-table-column data-index="environment_name" title="环境" width="160" />
+            <a-table-column data-index="name" title="UI用例名称" width="220" />
+            <a-table-column title="目标地址" width="300"><template #default="{ record: row }"><span class="url-cell">{{ row.start_url }}</span></template></a-table-column>
+            <a-table-column title="步骤数" width="90"><template #default="{ record: row }">{{ (row.steps || []).length }}</template></a-table-column>
+            <a-table-column title="状态" width="100"><template #default="{ record: row }"><a-tag :color="row.status === 'active' ? 'success' : 'default'">{{ row.status === 'active' ? '启用' : '禁用' }}</a-tag></template></a-table-column>
+            <a-table-column title="最近执行" width="110"><template #default="{ record: row }"><a-tag :color="executionStatusColor(row.last_status)">{{ executionStatusText(row.last_status) }}</a-tag></template></a-table-column>
+            <a-table-column data-index="update_date" title="更新时间" width="160" />
+            <a-table-column title="操作" width="260" fixed="right">
+              <template #default="{ record: row }">
+                <div class="table-actions">
+                  <a-button size="small" type="primary" @click="executeUiCase(row)">执行</a-button>
+                  <a-button size="small" @click="openEditUiCaseDialog(row)">编辑</a-button>
+                  <a-button size="small" @click="openUiExecutionDetail(row)">详情</a-button>
+                  <a-button size="small" danger @click="deleteUiCase(row)">删除</a-button>
+                </div>
+              </template>
+            </a-table-column>
+          </a-table>
+          <div class="pagination"><a-pagination :show-total="paginationTotal" show-less-items :current="uiCasePagination.page" :page-size="uiCasePagination.pageSize" :total="uiCasePagination.total" @change="changeUiCasePage" /></div>
+
+          <a-modal v-model:open="createUiCaseDialogVisible" title="新增UI用例" width="1100px" @after-close="resetUiCaseForm">
+            <a-form layout="vertical" class="form-grid" @submit.prevent="createUiCase">
+              <a-form-item label="项目"><a-select v-model:value="uiCaseForm.project_id" placeholder="请选择项目" @change="changeUiCaseFormProject"><a-select-option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option></a-select></a-form-item>
+              <a-form-item label="环境"><a-select v-model:value="uiCaseForm.environment_id" placeholder="请先选择项目" :disabled="!uiCaseForm.project_id"><a-select-option v-for="e in uiCaseFormEnvironments" :key="e.id" :value="e.id">{{ e.name }}</a-select-option></a-select></a-form-item>
+              <a-form-item label="用例名称"><a-input v-model:value="uiCaseForm.name" placeholder="请输入UI用例名称" /></a-form-item>
+              <a-form-item label="状态"><a-select v-model:value="uiCaseForm.status"><a-select-option value="active">启用</a-select-option><a-select-option value="disabled">禁用</a-select-option></a-select></a-form-item>
+              <a-form-item label="浏览器模式"><a-select v-model:value="uiCaseForm.headless"><a-select-option :value="true">无头模式</a-select-option><a-select-option :value="false">有头模式</a-select-option></a-select></a-form-item>
+              <a-form-item label="页面等待"><a-select v-model:value="uiCaseForm.wait_until"><a-select-option value="networkidle">网络空闲</a-select-option><a-select-option value="load">页面加载完成</a-select-option><a-select-option value="domcontentloaded">DOM加载完成</a-select-option></a-select></a-form-item>
+              <a-form-item label="额外等待(ms)"><a-input-number v-model:value="uiCaseForm.wait_after_load_ms" :min="0" :max="60000" :step="500" style="width: 100%" /></a-form-item>
+              <a-form-item label="目标地址" class="wide"><a-input v-model:value="uiCaseForm.start_url" placeholder="/login 或完整 URL" /></a-form-item>
+              <a-form-item label="描述" class="wide"><a-textarea v-model:value="uiCaseForm.description" :rows="2" placeholder="请输入用例说明" /></a-form-item>
+              <div class="wide">
+                <div class="kv-title"><h4>测试步骤</h4><a-button size="small" @click="addUiStep(uiCaseForm)">添加步骤</a-button></div>
+                <a-alert class="compact-alert" type="info" show-icon message="定位方式选择“AI描述”时，目标元素可填写自然语言，例如：点击登录按钮、填写用户名输入框；执行时会自动转换为可执行定位器。" />
+                <a-table :pagination="false" :data-source="uiCaseForm.steps" :row-key="(row: UiStepRow) => row.id" :scroll="{ x: 1100 }">
+                  <a-table-column title="动作" width="170"><template #default="{ record: row }"><a-select v-model:value="row.action" :popup-match-select-width="false" popup-class-name="ui-action-dropdown"><a-select-option value="goto">打开页面</a-select-option><a-select-option value="click">点击</a-select-option><a-select-option value="fill">输入</a-select-option><a-select-option value="select">选择</a-select-option><a-select-option value="wait">等待</a-select-option><a-select-option value="assert_text">断言文本</a-select-option><a-select-option value="assert_visible">断言元素</a-select-option><a-select-option value="screenshot">截图</a-select-option></a-select></template></a-table-column>
+                  <a-table-column title="定位方式" width="170"><template #default="{ record: row }"><a-select v-model:value="row.locator_type" :popup-match-select-width="false" popup-class-name="ui-locator-dropdown"><a-select-option value="css">CSS</a-select-option><a-select-option value="xpath">XPath</a-select-option><a-select-option value="text">文本</a-select-option><a-select-option value="placeholder">占位符</a-select-option><a-select-option value="role">按钮文字</a-select-option><a-select-option value="ai">AI描述</a-select-option></a-select></template></a-table-column>
+                  <a-table-column title="目标元素/地址" width="260"><template #default="{ record: row }"><a-input v-model:value="row.target" placeholder="CSS、XPath、文本，或写：点击登录按钮" /></template></a-table-column>
+                  <a-table-column title="值/期望" width="220"><template #default="{ record: row }"><a-input v-model:value="row.value" placeholder="输入值、期望文本或等待毫秒" /></template></a-table-column>
+                  <a-table-column title="说明" width="220"><template #default="{ record: row }"><a-input v-model:value="row.description" placeholder="步骤说明" /></template></a-table-column>
+                  <a-table-column title="操作" width="170" fixed="right"><template #default="{ index }"><div class="table-actions"><a-button size="small" @click="moveUiStep(uiCaseForm, index, -1)">上移</a-button><a-button size="small" @click="moveUiStep(uiCaseForm, index, 1)">下移</a-button><a-button size="small" danger @click="removeUiStep(uiCaseForm, index)">删除</a-button></div></template></a-table-column>
+                </a-table>
+              </div>
+            </a-form>
+            <template #footer><a-button @click="createUiCaseDialogVisible = false">取消</a-button><a-button type="primary" @click="createUiCase">确认</a-button></template>
+          </a-modal>
+
+          <a-modal v-model:open="editUiCaseDialogVisible" title="编辑UI用例" width="1100px" @after-close="resetEditUiCaseForm">
+            <a-form layout="vertical" class="form-grid" @submit.prevent="updateUiCase">
+              <a-form-item label="项目"><a-select v-model:value="editUiCaseForm.project_id" placeholder="请选择项目" @change="changeEditUiCaseFormProject"><a-select-option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option></a-select></a-form-item>
+              <a-form-item label="环境"><a-select v-model:value="editUiCaseForm.environment_id" placeholder="请先选择项目" :disabled="!editUiCaseForm.project_id"><a-select-option v-for="e in editUiCaseFormEnvironments" :key="e.id" :value="e.id">{{ e.name }}</a-select-option></a-select></a-form-item>
+              <a-form-item label="用例名称"><a-input v-model:value="editUiCaseForm.name" placeholder="请输入UI用例名称" /></a-form-item>
+              <a-form-item label="状态"><a-select v-model:value="editUiCaseForm.status"><a-select-option value="active">启用</a-select-option><a-select-option value="disabled">禁用</a-select-option></a-select></a-form-item>
+              <a-form-item label="浏览器模式"><a-select v-model:value="editUiCaseForm.headless"><a-select-option :value="true">无头模式</a-select-option><a-select-option :value="false">有头模式</a-select-option></a-select></a-form-item>
+              <a-form-item label="页面等待"><a-select v-model:value="editUiCaseForm.wait_until"><a-select-option value="networkidle">网络空闲</a-select-option><a-select-option value="load">页面加载完成</a-select-option><a-select-option value="domcontentloaded">DOM加载完成</a-select-option></a-select></a-form-item>
+              <a-form-item label="额外等待(ms)"><a-input-number v-model:value="editUiCaseForm.wait_after_load_ms" :min="0" :max="60000" :step="500" style="width: 100%" /></a-form-item>
+              <a-form-item label="目标地址" class="wide"><a-input v-model:value="editUiCaseForm.start_url" placeholder="/login 或完整 URL" /></a-form-item>
+              <a-form-item label="描述" class="wide"><a-textarea v-model:value="editUiCaseForm.description" :rows="2" placeholder="请输入用例说明" /></a-form-item>
+              <div class="wide">
+                <div class="kv-title"><h4>测试步骤</h4><a-button size="small" @click="addUiStep(editUiCaseForm)">添加步骤</a-button></div>
+                <a-alert class="compact-alert" type="info" show-icon message="定位方式选择“AI描述”时，目标元素可填写自然语言，例如：点击登录按钮、填写用户名输入框；执行时会自动转换为可执行定位器。" />
+                <a-table :pagination="false" :data-source="editUiCaseForm.steps" :row-key="(row: UiStepRow) => row.id" :scroll="{ x: 1100 }">
+                  <a-table-column title="动作" width="170"><template #default="{ record: row }"><a-select v-model:value="row.action" :popup-match-select-width="false" popup-class-name="ui-action-dropdown"><a-select-option value="goto">打开页面</a-select-option><a-select-option value="click">点击</a-select-option><a-select-option value="fill">输入</a-select-option><a-select-option value="select">选择</a-select-option><a-select-option value="wait">等待</a-select-option><a-select-option value="assert_text">断言文本</a-select-option><a-select-option value="assert_visible">断言元素</a-select-option><a-select-option value="screenshot">截图</a-select-option></a-select></template></a-table-column>
+                  <a-table-column title="定位方式" width="170"><template #default="{ record: row }"><a-select v-model:value="row.locator_type" :popup-match-select-width="false" popup-class-name="ui-locator-dropdown"><a-select-option value="css">CSS</a-select-option><a-select-option value="xpath">XPath</a-select-option><a-select-option value="text">文本</a-select-option><a-select-option value="placeholder">占位符</a-select-option><a-select-option value="role">按钮文字</a-select-option><a-select-option value="ai">AI描述</a-select-option></a-select></template></a-table-column>
+                  <a-table-column title="目标元素/地址" width="260"><template #default="{ record: row }"><a-input v-model:value="row.target" placeholder="CSS、XPath、文本，或写：点击登录按钮" /></template></a-table-column>
+                  <a-table-column title="值/期望" width="220"><template #default="{ record: row }"><a-input v-model:value="row.value" placeholder="输入值、期望文本或等待毫秒" /></template></a-table-column>
+                  <a-table-column title="说明" width="220"><template #default="{ record: row }"><a-input v-model:value="row.description" placeholder="步骤说明" /></template></a-table-column>
+                  <a-table-column title="操作" width="170" fixed="right"><template #default="{ index }"><div class="table-actions"><a-button size="small" @click="moveUiStep(editUiCaseForm, index, -1)">上移</a-button><a-button size="small" @click="moveUiStep(editUiCaseForm, index, 1)">下移</a-button><a-button size="small" danger @click="removeUiStep(editUiCaseForm, index)">删除</a-button></div></template></a-table-column>
+                </a-table>
+              </div>
+            </a-form>
+            <template #footer><a-button @click="editUiCaseDialogVisible = false">取消</a-button><a-button type="primary" @click="updateUiCase">确认</a-button></template>
+          </a-modal>
+
+          <a-modal v-model:open="uiExecutionDetailVisible" title="UI执行详情" width="900px">
+            <a-descriptions bordered size="small" :column="2">
+              <a-descriptions-item label="状态"><a-tag :color="executionStatusColor(uiExecutionDetail.task?.status)">{{ executionStatusText(uiExecutionDetail.task?.status) }}</a-tag></a-descriptions-item>
+              <a-descriptions-item label="用例">{{ uiExecutionDetail.task?.target_name || '-' }}</a-descriptions-item>
+            </a-descriptions>
+            <div v-for="result in uiExecutionDetail.results" :key="result.id" class="execution-result-expand log-detail-block">
+              <strong>执行步骤</strong><pre>{{ formatJson(result.response_snapshot?.steps || []) }}</pre>
+              <strong>截图</strong>
+              <div class="ui-screenshot-list">
+                <a-empty v-if="!(result.response_snapshot?.screenshots || []).length" description="暂无截图" :image-style="{ width: '44px', height: '44px' }" />
+                <a-image v-for="shot in result.response_snapshot?.screenshots || []" :key="shot.path" :src="uiArtifactUrl(shot.path)" :width="180" />
+              </div>
+              <strong>断言结果</strong><pre>{{ formatJson(result.assertion_results || []) }}</pre>
+              <strong>错误信息</strong><pre>{{ result.error_message || '-' }}</pre>
+            </div>
+            <template #footer><a-button type="primary" @click="uiExecutionDetailVisible = false">关闭</a-button></template>
+          </a-modal>
+
+          <a-modal v-model:open="aiSettingDialogVisible" title="AI配置" width="560px">
+            <a-form layout="vertical" @submit.prevent="saveAiSetting">
+              <a-form-item label="模型服务地址"><a-input v-model:value="aiSettingForm.provider_url" placeholder="https://模型网关地址/v1" /></a-form-item>
+              <a-form-item label="模型名称"><a-input v-model:value="aiSettingForm.model_name" placeholder="例如 ui-agent" /></a-form-item>
+              <a-form-item label="API Key"><a-input-password v-model:value="aiSettingForm.api_key" placeholder="留空则不修改已有 Key" /></a-form-item>
+              <a-form-item label="状态"><a-select v-model:value="aiSettingForm.status"><a-select-option value="active">启用</a-select-option><a-select-option value="disabled">禁用</a-select-option></a-select></a-form-item>
+              <a-form-item label="说明"><a-textarea v-model:value="aiSettingForm.description" :rows="3" placeholder="用于后续 AI 生成 UI 测试步骤和辅助识别元素" /></a-form-item>
+            </a-form>
+            <template #footer><a-button @click="aiSettingDialogVisible = false">取消</a-button><a-button type="primary" @click="saveAiSetting">保存</a-button></template>
+          </a-modal>
+        </section>
+
         <section v-if="activeApiEditor" class="api-editor-page">
           <div class="toolbar">
             <h2>{{ activeApiEditor.label }}</h2>
@@ -1836,6 +1970,27 @@ type MockFormState = {
   sm3_enabled: boolean
   description: string
 }
+type UiStepRow = {
+  id: number
+  action: string
+  locator_type: string
+  target: string
+  value: string
+  description: string
+}
+type UiCaseFormState = {
+  id?: number
+  project_id?: number
+  environment_id?: number
+  name: string
+  start_url: string
+  description: string
+  status: string
+  headless: boolean
+  wait_until: 'domcontentloaded' | 'load' | 'networkidle'
+  wait_after_load_ms: number
+  steps: UiStepRow[]
+}
 
 function confirmAction(
   content: string,
@@ -2031,6 +2186,7 @@ const menuMeta: Record<string, AppTab> = {
   apis: { name: 'apis', label: '接口管理', closable: true },
   mocks: { name: 'mocks', label: 'Mock服务', closable: true },
   cases: { name: 'cases', label: '用例管理', closable: true },
+  'ui-tests': { name: 'ui-tests', label: 'UI测试', closable: true },
   execute: { name: 'execute', label: '测试计划', closable: true },
   reports: { name: 'reports', label: '报告中心', closable: true },
   logs: { name: 'logs', label: '日志中心', closable: true },
@@ -2052,6 +2208,7 @@ const menuTree: MenuNode[] = [
   { key: 'apis', label: menuMeta.apis.label, icon: ApiOutlined },
   { key: 'mocks', label: menuMeta.mocks.label, icon: ApiOutlined },
   { key: 'cases', label: menuMeta.cases.label, icon: FileTextOutlined },
+  { key: 'ui-tests', label: menuMeta['ui-tests'].label, icon: PlayCircleOutlined },
   { key: 'execute', label: menuMeta.execute.label, icon: PlayCircleOutlined },
   { key: 'reports', label: menuMeta.reports.label, icon: BarChartOutlined },
   { key: 'logs', label: menuMeta.logs.label, icon: ProfileOutlined },
@@ -2106,6 +2263,7 @@ const environmentList = ref<any[]>([])
 const apis = ref<any[]>([])
 const apiList = ref<any[]>([])
 const mockList = ref<any[]>([])
+const uiCaseList = ref<any[]>([])
 const cases = ref<any[]>([])
 const caseList = ref<any[]>([])
 const executions = ref<any[]>([])
@@ -2130,6 +2288,8 @@ const apiSearch = reactive({ project_id: undefined as number | undefined, name: 
 const apiPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const mockSearch = reactive({ project_id: undefined as number | undefined, environment_id: undefined as number | undefined, name: '', path: '', status: '' })
 const mockPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const uiCaseSearch = reactive({ project_id: undefined as number | undefined, environment_id: undefined as number | undefined, name: '', status: '' })
+const uiCasePagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const caseSearch = reactive({ project_id: undefined as number | undefined, api_id: undefined as number | undefined })
 const casePagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const planSearch = reactive({ project_id: undefined as number | undefined, api_id: undefined as number | undefined, name: '' })
@@ -2155,6 +2315,10 @@ const createEnvironmentDialogVisible = ref(false)
 const editEnvironmentDialogVisible = ref(false)
 const createMockDialogVisible = ref(false)
 const editMockDialogVisible = ref(false)
+const createUiCaseDialogVisible = ref(false)
+const editUiCaseDialogVisible = ref(false)
+const uiExecutionDetailVisible = ref(false)
+const aiSettingDialogVisible = ref(false)
 const changePasswordDialogVisible = ref(false)
 const caseBodyDialogVisible = ref(false)
 const caseDetailDialogVisible = ref(false)
@@ -2164,6 +2328,10 @@ const executionLogDetailVisible = ref(false)
 const caseBodyPreview = ref('')
 const caseDetail = reactive<any>({})
 const executionDetail = reactive<any>({ task: null, results: [] })
+const uiExecutionDetail = reactive<any>({ task: null, results: [] })
+const uiArtifactObjectUrls = reactive<Record<string, string>>({})
+const uiArtifactLoading = new Set<string>()
+const uiArtifactFailed = new Set<string>()
 const operationLogDetail = ref<any>(null)
 const executionLogDetail = ref<any>(null)
 const userForm = reactive({ username: '', real_name: '', role: 'tester' })
@@ -2205,6 +2373,39 @@ const editMockForm = reactive<MockFormState>({
   response_body: '',
   body_format: 'json',
   sm3_enabled: false,
+  description: ''
+})
+const uiCaseForm = reactive<UiCaseFormState>({
+  id: undefined,
+  project_id: undefined,
+  environment_id: undefined,
+  name: '',
+  start_url: '/',
+  description: '',
+  status: 'active',
+  headless: true,
+  wait_until: 'networkidle',
+  wait_after_load_ms: 500,
+  steps: []
+})
+const editUiCaseForm = reactive<UiCaseFormState>({
+  id: undefined,
+  project_id: undefined,
+  environment_id: undefined,
+  name: '',
+  start_url: '/',
+  description: '',
+  status: 'active',
+  headless: true,
+  wait_until: 'networkidle',
+  wait_after_load_ms: 500,
+  steps: []
+})
+const aiSettingForm = reactive({
+  provider_url: '',
+  model_name: '',
+  api_key: '',
+  status: 'disabled',
   description: ''
 })
 const caseForm = reactive({
@@ -2277,6 +2478,9 @@ const planSearchApis = computed(() => apis.value.filter(item => planSearch.proje
 const mockSearchEnvironments = computed(() => environments.value.filter(item => mockSearch.project_id && item.project_id === mockSearch.project_id))
 const mockFormEnvironments = computed(() => environments.value.filter(item => mockForm.project_id && item.project_id === mockForm.project_id))
 const editMockFormEnvironments = computed(() => environments.value.filter(item => editMockForm.project_id && item.project_id === editMockForm.project_id))
+const uiCaseSearchEnvironments = computed(() => environments.value.filter(item => uiCaseSearch.project_id && item.project_id === uiCaseSearch.project_id))
+const uiCaseFormEnvironments = computed(() => environments.value.filter(item => uiCaseForm.project_id && item.project_id === uiCaseForm.project_id))
+const editUiCaseFormEnvironments = computed(() => environments.value.filter(item => editUiCaseForm.project_id && item.project_id === editUiCaseForm.project_id))
 const assertionTargets = [
   { label: 'HTTP状态码', value: 'status' },
   { label: '响应时间', value: 'duration' },
@@ -2369,9 +2573,11 @@ async function loadAll() {
   calls.push(loadRoles())
   calls.push(loadProjects())
   calls.push(loadEnvironments())
-  calls.push(loadApis())
-  calls.push(loadMocks())
-  calls.push(loadCases())
+    calls.push(loadApis())
+    calls.push(loadMocks())
+    calls.push(loadUiCases())
+    calls.push(loadAiSetting())
+    calls.push(loadCases())
   calls.push(loadPlans())
   calls.push(loadReports())
   calls.push(loadLogs())
@@ -2594,12 +2800,56 @@ function changeMockSearchProject() {
   mockSearch.environment_id = undefined
 }
 
-async function changeMockPage(page: number) {
-  mockPagination.page = page
-  await loadMocks()
-}
+  async function changeMockPage(page: number) {
+    mockPagination.page = page
+    await loadMocks()
+  }
 
-async function loadCases() {
+  async function loadUiCases() {
+    const projectId = uiCaseSearch.project_id
+    const environmentId = uiCaseSearch.environment_id
+    const name = uiCaseSearch.name.trim()
+    const status = uiCaseSearch.status
+    const { data } = await api.get('/ui-cases', {
+      params: {
+        ...(projectId ? { project_id: projectId } : {}),
+        ...(environmentId ? { environment_id: environmentId } : {}),
+        ...(name ? { name } : {}),
+        ...(status ? { status } : {}),
+        page: uiCasePagination.page,
+        page_size: uiCasePagination.pageSize
+      }
+    })
+    uiCaseList.value = data.items
+    uiCasePagination.total = data.total
+    uiCasePagination.page = data.page
+    uiCasePagination.pageSize = data.page_size
+  }
+
+  async function searchUiCases() {
+    uiCasePagination.page = 1
+    await loadUiCases()
+  }
+
+  async function resetUiCaseSearch() {
+    uiCaseSearch.project_id = undefined
+    uiCaseSearch.environment_id = undefined
+    uiCaseSearch.name = ''
+    uiCaseSearch.status = ''
+    uiCasePagination.page = 1
+    await loadUiCases()
+  }
+
+  function changeUiCaseSearchProject() {
+    uiCaseSearch.environment_id = undefined
+  }
+
+  async function changeUiCasePage(page: number) {
+    uiCasePagination.page = page
+    await loadUiCases()
+  }
+  
+  async function loadCases() {
   const projectId = caseSearch.project_id
   const apiId = caseSearch.api_id
   const { data } = await api.get('/cases', {
@@ -3737,11 +3987,237 @@ function changeMockFormProject() {
   mockForm.environment_id = undefined
 }
 
-function changeEditMockFormProject() {
-  editMockForm.environment_id = undefined
-}
+  function changeEditMockFormProject() {
+    editMockForm.environment_id = undefined
+  }
 
-function addMockHeaderRow() {
+  function defaultUiStep(action = 'goto'): UiStepRow {
+    return {
+      id: Date.now() + Math.floor(Math.random() * 1000),
+      action,
+      locator_type: action === 'goto' || action === 'wait' || action === 'screenshot' ? 'css' : 'css',
+      target: '',
+      value: action === 'wait' ? '1000' : '',
+      description: ''
+    }
+  }
+
+  function resetUiCaseForm() {
+    uiCaseForm.id = undefined
+    uiCaseForm.project_id = undefined
+    uiCaseForm.environment_id = undefined
+    uiCaseForm.name = ''
+    uiCaseForm.start_url = '/'
+    uiCaseForm.description = ''
+    uiCaseForm.status = 'active'
+    uiCaseForm.headless = true
+    uiCaseForm.wait_until = 'networkidle'
+    uiCaseForm.wait_after_load_ms = 500
+    uiCaseForm.steps = [defaultUiStep('goto')]
+  }
+
+  function resetEditUiCaseForm() {
+    editUiCaseForm.id = undefined
+    editUiCaseForm.project_id = undefined
+    editUiCaseForm.environment_id = undefined
+    editUiCaseForm.name = ''
+    editUiCaseForm.start_url = '/'
+    editUiCaseForm.description = ''
+    editUiCaseForm.status = 'active'
+    editUiCaseForm.headless = true
+    editUiCaseForm.wait_until = 'networkidle'
+    editUiCaseForm.wait_after_load_ms = 500
+    editUiCaseForm.steps = []
+  }
+
+  function openCreateUiCaseDialog() {
+    resetUiCaseForm()
+    createUiCaseDialogVisible.value = true
+  }
+
+  function openEditUiCaseDialog(row: any) {
+    editUiCaseForm.id = row.id
+    editUiCaseForm.project_id = row.project_id
+    editUiCaseForm.environment_id = row.environment_id
+    editUiCaseForm.name = row.name || ''
+    editUiCaseForm.start_url = row.start_url || '/'
+    editUiCaseForm.description = row.description || ''
+    editUiCaseForm.status = row.status || 'active'
+    editUiCaseForm.headless = row.headless !== false
+    editUiCaseForm.wait_until = row.wait_until || 'networkidle'
+    editUiCaseForm.wait_after_load_ms = Number(row.wait_after_load_ms ?? 500)
+    editUiCaseForm.steps = (row.steps || []).map((step: any) => ({ id: Date.now() + Math.floor(Math.random() * 1000), ...step }))
+    editUiCaseDialogVisible.value = true
+  }
+
+  function changeUiCaseFormProject() {
+    uiCaseForm.environment_id = undefined
+  }
+
+  function changeEditUiCaseFormProject() {
+    editUiCaseForm.environment_id = undefined
+  }
+
+  function addUiStep(form: UiCaseFormState) {
+    form.steps.push(defaultUiStep('click'))
+  }
+
+  function removeUiStep(form: UiCaseFormState, index: number) {
+    form.steps.splice(index, 1)
+  }
+
+  function moveUiStep(form: UiCaseFormState, index: number, offset: number) {
+    const target = index + offset
+    if (target < 0 || target >= form.steps.length) return
+    const [row] = form.steps.splice(index, 1)
+    form.steps.splice(target, 0, row)
+  }
+
+  function uiCasePayload(form: UiCaseFormState) {
+    if (!form.project_id) {
+      message.warning('请选择项目')
+      return null
+    }
+    if (!form.environment_id) {
+      message.warning('请选择环境')
+      return null
+    }
+    if (!form.name.trim()) {
+      message.warning('请输入UI用例名称')
+      return null
+    }
+    return {
+      project_id: form.project_id,
+      environment_id: form.environment_id,
+      name: form.name.trim(),
+      start_url: form.start_url.trim(),
+      description: form.description.trim(),
+      status: form.status,
+      headless: form.headless,
+      wait_until: form.wait_until,
+      wait_after_load_ms: Number(form.wait_after_load_ms || 0),
+      steps: form.steps.map(({ action, locator_type, target, value, description }) => ({ action, locator_type, target, value, description }))
+    }
+  }
+
+  async function createUiCase() {
+    const payload = uiCasePayload(uiCaseForm)
+    if (!payload) return
+    await api.post('/ui-cases', payload)
+    createUiCaseDialogVisible.value = false
+    resetUiCaseForm()
+    message.success('UI用例已创建')
+    await loadUiCases()
+  }
+
+  async function updateUiCase() {
+    const payload = uiCasePayload(editUiCaseForm)
+    if (!payload) return
+    await api.put(`/ui-cases/${editUiCaseForm.id}`, payload)
+    editUiCaseDialogVisible.value = false
+    resetEditUiCaseForm()
+    message.success('UI用例已更新')
+    await loadUiCases()
+  }
+
+  async function deleteUiCase(row: any) {
+    await confirmAction(`确认删除 UI 用例 ${row.name}？`, '删除UI用例', { confirmButtonText: '删除' })
+    await api.delete(`/ui-cases/${row.id}`)
+    message.success('UI用例已删除')
+    await loadUiCases()
+  }
+
+  async function executeUiCase(row: any) {
+    const { data } = await api.post(`/ui-cases/${row.id}/execute`)
+    row.last_task_id = data.id
+    row.last_status = data.status || 'queued'
+    message.success('UI执行任务已提交')
+    pollUiExecution(row, data.id)
+  }
+
+  function pollUiExecution(row: any, taskId: number) {
+    let attempts = 0
+    const timer = window.setInterval(async () => {
+      attempts += 1
+      try {
+        const { data } = await api.get(`/ui-executions/${taskId}`)
+        row.last_status = data.task?.status || row.last_status
+        if (['passed', 'failed', 'error'].includes(row.last_status) || attempts >= 60) {
+          window.clearInterval(timer)
+          if (uiExecutionDetailVisible.value && uiExecutionDetail.task?.id === taskId) {
+            uiExecutionDetail.task = data.task
+            uiExecutionDetail.results = data.results || []
+          }
+        }
+      } catch {
+        if (attempts >= 60) window.clearInterval(timer)
+      }
+    }, 1000)
+  }
+
+  async function openUiExecutionDetail(row: any) {
+    if (!row.last_task_id) {
+      message.warning('该UI用例暂无执行记录')
+      return
+    }
+    const { data } = await api.get(`/ui-executions/${row.last_task_id}`)
+    uiExecutionDetail.task = data.task
+    uiExecutionDetail.results = data.results || []
+    uiExecutionDetailVisible.value = true
+  }
+
+  async function loadAiSetting() {
+    const { data } = await api.get('/ai-settings')
+    aiSettingForm.provider_url = data.provider_url || ''
+    aiSettingForm.model_name = data.model_name || ''
+    aiSettingForm.api_key = data.api_key || ''
+    aiSettingForm.status = data.status || 'disabled'
+    aiSettingForm.description = data.description || ''
+  }
+
+  async function openAiSettingDialog() {
+    await loadAiSetting()
+    aiSettingDialogVisible.value = true
+  }
+
+  async function saveAiSetting() {
+    await api.put('/ai-settings', {
+      provider_url: aiSettingForm.provider_url.trim(),
+      model_name: aiSettingForm.model_name.trim(),
+      api_key: aiSettingForm.api_key === '******' ? '' : aiSettingForm.api_key,
+      status: aiSettingForm.status,
+      description: aiSettingForm.description.trim()
+    })
+    message.success('AI配置已保存')
+    aiSettingDialogVisible.value = false
+    await loadAiSetting()
+  }
+
+  function uiArtifactUrl(path: string) {
+    const filename = String(path || '').split(/[\\/]/).pop()
+    if (!filename) return ''
+    if (!uiArtifactObjectUrls[filename] && !uiArtifactLoading.has(filename) && !uiArtifactFailed.has(filename)) {
+      loadUiArtifact(filename)
+    }
+    return uiArtifactObjectUrls[filename] || ''
+  }
+
+  async function loadUiArtifact(filename: string) {
+    uiArtifactLoading.add(filename)
+    try {
+      const { data } = await api.get(`/ui-artifacts/${encodeURIComponent(filename)}`, { responseType: 'blob' })
+      if (uiArtifactObjectUrls[filename]) {
+        URL.revokeObjectURL(uiArtifactObjectUrls[filename])
+      }
+      uiArtifactObjectUrls[filename] = URL.createObjectURL(data)
+    } catch {
+      uiArtifactFailed.add(filename)
+    } finally {
+      uiArtifactLoading.delete(filename)
+    }
+  }
+  
+  function addMockHeaderRow() {
   mockForm.headerRows.push(nextApiRow('', ''))
 }
 
@@ -5710,5 +6186,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   Array.from(planExecutionPollers.keys()).forEach(clearPlanExecutionPoller)
+  Object.values(uiArtifactObjectUrls).forEach(url => {
+    if (url) URL.revokeObjectURL(url)
+  })
 })
 </script>

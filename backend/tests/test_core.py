@@ -10,14 +10,15 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import _without_assertion_operators
-from app.models import Environment, ExecutionResult, ExecutionTask, MockEndpoint, Project, Role, TestCase as TestCaseModel, TestSuite, User
+from app.models import Environment, ExecutionResult, ExecutionTask, MockEndpoint, Project, Role, TestCase as TestCaseModel, TestSuite, UiTestCase, User
 from app.routers.auth import change_password, login
 from app.routers.crud import create_api, create_case, create_environment, create_plan, create_project, delete_api, delete_case, delete_environment, delete_plan, delete_project, execute_plan, get_execution_log_detail, list_apis, list_cases, list_environments, list_exception_logs, list_execution_logs, list_logs, list_plans, list_projects, update_api, update_case, update_environment, update_plan, update_project
 from app.routers.executions import delete_execution, list_executions
 from app.routers.mock import create_mock, delete_mock, list_mocks, router as mock_router, update_mock
+from app.routers.ui import create_ui_case, delete_ui_case, execute_ui_case, get_ai_setting, list_ui_cases, update_ai_setting, update_ui_case
 from app.routers.users import create_user, list_users, router as users_router, update_user, update_user_status
 from app.routers.roles import create_role, delete_role, list_roles, update_role
-from app.schemas import ApiDefinitionIn, ApiDefinitionUpdate, ChangePasswordIn, EncryptionConfigIn, EnvironmentIn, EnvironmentUpdate, LoginIn, MockEndpointIn, MockEndpointUpdate, ProjectIn, ProjectUpdate, RoleIn, RoleUpdate, TestCaseIn, TestCaseUpdate, TestPlanIn, TestPlanUpdate, UserCreate, UserStatusUpdate, UserUpdate
+from app.schemas import AiSettingIn, ApiDefinitionIn, ApiDefinitionUpdate, ChangePasswordIn, EncryptionConfigIn, EnvironmentIn, EnvironmentUpdate, LoginIn, MockEndpointIn, MockEndpointUpdate, ProjectIn, ProjectUpdate, RoleIn, RoleUpdate, TestCaseIn, TestCaseUpdate, TestPlanIn, TestPlanUpdate, UiStepIn, UiTestCaseIn, UiTestCaseUpdate, UserCreate, UserStatusUpdate, UserUpdate
 from app.services.menus import ensure_default_roles
 from app.services.assertions import all_passed, run_assertions
 from app.services import executor as executor_service
@@ -29,6 +30,7 @@ from app.services.report import build_html_report
 from app.services import crypto_envelope
 from app.services.operation_logs import log_system_exception
 from app.services.variables import render_variables
+from app.services.ui_executor import _chat_completions_url, _extract_ai_locator_response, _local_ai_locator_from_candidates
 from app.security import create_session_token, hash_password
 
 
@@ -447,6 +449,106 @@ def test_mock_api_appends_sm3_signature_when_enabled(db_session):
 
     assert response.status_code == 200
     assert response.text == response_body + crypto_envelope.sm3_hex(response_body)
+
+
+def test_ui_case_crud_and_execute_task_creation(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="UI测试项目", description="用于UI自动化"), admin, db)
+    environment = create_environment(EnvironmentIn(project_id=project["id"], name="UI测试环境", protocol="http", base_url="localhost", port=5173), admin, db)
+
+    created = create_ui_case(
+        UiTestCaseIn(
+            project_id=project["id"],
+            environment_id=environment["id"],
+            name="登录页面冒烟测试",
+            start_url="/login",
+            description="打开登录页并检查按钮",
+            steps=[
+                UiStepIn(action="goto", target="/login", value="/login", description="打开登录页"),
+                UiStepIn(action="assert_text", locator_type="text", target="登录", value="登录", description="检查登录按钮"),
+            ],
+        ),
+        admin,
+        db,
+    )
+
+    assert created["name"] == "登录页面冒烟测试"
+    assert created["headless"] is True
+    assert created["wait_until"] == "networkidle"
+    assert created["wait_after_load_ms"] == 500
+    assert created["steps"][1]["action"] == "assert_text"
+    listed = list_ui_cases(project_id=project["id"], page=1, page_size=10, _=admin, db=db)
+    assert listed["total"] == 1
+
+    updated = update_ui_case(
+        created["id"],
+        UiTestCaseUpdate(
+            project_id=project["id"],
+            environment_id=environment["id"],
+            name="登录页面冒烟测试-编辑",
+            start_url="/login",
+            status="active",
+            headless=False,
+            wait_until="load",
+            wait_after_load_ms=1500,
+            steps=[UiStepIn(action="screenshot", description="保存截图")],
+        ),
+        admin,
+        db,
+    )
+    assert updated["name"] == "登录页面冒烟测试-编辑"
+    assert updated["headless"] is False
+    assert updated["wait_until"] == "load"
+    assert updated["wait_after_load_ms"] == 1500
+
+    task = execute_ui_case(created["id"], admin, db)
+    stored_task = db.get(ExecutionTask, task["id"])
+    assert stored_task.target_type == "ui_case"
+    assert stored_task.target_id == created["id"]
+
+    deleted = delete_ui_case(created["id"], admin, db)
+    assert deleted["is_deleted"] is True
+
+
+def test_ai_setting_can_be_saved_and_masked(db_session):
+    db, admin = db_session
+
+    updated = update_ai_setting(
+        AiSettingIn(
+            provider_url="https://ai.example.test/v1",
+            model_name="ui-agent",
+            api_key="secret-key",
+            status="active",
+            description="用于后续AI生成UI步骤",
+        ),
+        admin,
+        db,
+    )
+
+    assert updated["status"] == "active"
+    assert updated["api_key"] == "******"
+    current = get_ai_setting(admin, db)
+    assert current["provider_url"] == "https://ai.example.test/v1"
+    assert current["api_key"] == "******"
+
+
+def test_ui_ai_locator_helpers():
+    assert _chat_completions_url("https://ai.example.test/v1") == "https://ai.example.test/v1/chat/completions"
+    assert _chat_completions_url("https://ai.example.test/v1/chat/completions") == "https://ai.example.test/v1/chat/completions"
+
+    parsed = _extract_ai_locator_response('{"locator_type":"css","target":"#login"}')
+    assert parsed == {"locator_type": "css", "target": "#login"}
+    parsed_from_text = _extract_ai_locator_response('定位结果：{"type":"text","selector":"登录"}')
+    assert parsed_from_text == {"locator_type": "text", "target": "登录"}
+
+    candidates = [
+        {"tag": "input", "placeholder": "请输入用户名", "id": "username"},
+        {"tag": "button", "text": "登录", "role": "button"},
+    ]
+    button = _local_ai_locator_from_candidates({"target": "点击登录按钮"}, candidates)
+    assert button == {"locator_type": "role", "target": "登录", "source": "local"}
+    username = _local_ai_locator_from_candidates({"target": "填写用户名输入框"}, candidates)
+    assert username == {"locator_type": "placeholder", "target": "请输入用户名", "source": "local"}
 
 
 def test_create_user_defaults_active_and_can_login(db_session):
