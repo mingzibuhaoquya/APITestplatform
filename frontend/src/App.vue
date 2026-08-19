@@ -897,13 +897,33 @@
             <template #footer><a-button @click="editUiCaseDialogVisible = false">取消</a-button><a-button type="primary" @click="updateUiCase">确认</a-button></template>
           </a-modal>
 
-          <a-modal v-model:open="uiPickerDialogVisible" title="元素拾取" width="620px" @cancel="closeUiPicker">
+          <a-modal v-model:open="uiPickerDialogVisible" title="远程元素拾取" width="1180px" @cancel="closeUiPicker">
             <a-alert
               class="compact-alert"
               type="info"
               show-icon
-              message="浏览器打开后可先正常操作页面；需要定位时，点击页面右下角“开始拾取”，再点击目标元素。"
+              message="远程浏览器运行在服务器中。选择“操作”可点击页面并输入文本，选择“拾取”后点击目标元素会生成 XPath 并回填当前步骤。"
             />
+            <div class="remote-browser-toolbar">
+              <a-radio-group v-model:value="uiPicker.mode" button-style="solid">
+                <a-radio-button value="operate">操作</a-radio-button>
+                <a-radio-button value="pick">拾取</a-radio-button>
+              </a-radio-group>
+              <a-input v-model:value="uiPicker.inputText" placeholder="先点击输入框，再输入文本" @keyup.enter="typeUiPickerText" />
+              <a-button @click="typeUiPickerText">输入</a-button>
+              <a-button @click="pressUiPickerKey('Enter')">Enter</a-button>
+              <a-button @click="refreshUiPickerScreenshot">刷新截图</a-button>
+            </div>
+            <div class="remote-browser-frame">
+              <a-spin v-if="uiPicker.loading" />
+              <img
+                v-if="uiPicker.screenshotUrl"
+                :src="uiPicker.screenshotUrl"
+                alt="远程浏览器截图"
+                @click="handleUiPickerImageClick"
+              />
+              <a-empty v-else description="等待远程浏览器截图" />
+            </div>
             <a-descriptions bordered size="small" :column="1">
               <a-descriptions-item label="状态">{{ uiPicker.statusText }}</a-descriptions-item>
               <a-descriptions-item label="提示">{{ uiPicker.message || '-' }}</a-descriptions-item>
@@ -2358,7 +2378,13 @@ const uiPicker = reactive({
   message: '',
   xpath: '',
   summaryText: '',
-  targetRow: null as UiStepRow | null
+  targetRow: null as UiStepRow | null,
+  mode: 'operate',
+  inputText: '',
+  screenshotUrl: '',
+  viewportWidth: 1600,
+  viewportHeight: 900,
+  loading: false
 })
 let uiPickerTimer: number | undefined
 const operationLogDetail = ref<any>(null)
@@ -4103,6 +4129,9 @@ function changeMockFormProject() {
   }
 
   function resetUiPickerState() {
+    if (uiPicker.screenshotUrl) {
+      URL.revokeObjectURL(uiPicker.screenshotUrl)
+    }
     uiPicker.sessionId = ''
     uiPicker.status = ''
     uiPicker.statusText = '未启动'
@@ -4110,6 +4139,12 @@ function changeMockFormProject() {
     uiPicker.xpath = ''
     uiPicker.summaryText = ''
     uiPicker.targetRow = null
+    uiPicker.mode = 'operate'
+    uiPicker.inputText = ''
+    uiPicker.screenshotUrl = ''
+    uiPicker.viewportWidth = 1600
+    uiPicker.viewportHeight = 900
+    uiPicker.loading = false
   }
 
   function uiPickerStatusText(status: string) {
@@ -4141,6 +4176,14 @@ function changeMockFormProject() {
     }
   }
 
+  function friendlyUiPickerMessage(errorText: string, fallback = '启动拾取会话失败') {
+    const text = String(errorText || '')
+    if (/crashpad|no display|x server|headless=false|Target page|browser has been closed/i.test(text)) {
+      return '远程浏览器启动失败，请检查服务器浏览器依赖和容器运行环境。'
+    }
+    return text || fallback
+  }
+
   async function startUiElementPicker(form: UiCaseFormState, row: UiStepRow) {
     if (!form.environment_id) {
       message.warning('请先选择环境')
@@ -4155,7 +4198,7 @@ function changeMockFormProject() {
     uiPicker.targetRow = row
     uiPicker.status = 'starting'
     uiPicker.statusText = '启动中'
-    uiPicker.message = '正在启动浏览器'
+    uiPicker.message = '正在启动远程浏览器'
     uiPickerDialogVisible.value = true
     try {
       const { data } = await api.post('/ui-recorder/sessions', {
@@ -4164,10 +4207,11 @@ function changeMockFormProject() {
       })
       applyUiPickerSession(data)
       uiPickerTimer = window.setInterval(pollUiPickerSession, 800)
+      window.setTimeout(refreshUiPickerScreenshot, 800)
     } catch (error: any) {
       uiPicker.status = 'error'
       uiPicker.statusText = '异常'
-      uiPicker.message = error?.response?.data?.detail || '启动拾取会话失败'
+      uiPicker.message = friendlyUiPickerMessage(error?.response?.data?.detail, '启动拾取会话失败')
     }
   }
 
@@ -4175,7 +4219,9 @@ function changeMockFormProject() {
     uiPicker.sessionId = data.id || uiPicker.sessionId
     uiPicker.status = data.status || ''
     uiPicker.statusText = uiPickerStatusText(uiPicker.status)
-    uiPicker.message = data.error || data.message || ''
+    uiPicker.message = friendlyUiPickerMessage(data.error, data.message || '')
+    uiPicker.viewportWidth = Number(data.viewport?.width || uiPicker.viewportWidth || 1600)
+    uiPicker.viewportHeight = Number(data.viewport?.height || uiPicker.viewportHeight || 900)
     const xpath = data.result?.xpath || ''
     if (xpath && xpath !== uiPicker.xpath) {
       uiPicker.xpath = xpath
@@ -4196,6 +4242,9 @@ function changeMockFormProject() {
     try {
       const { data } = await api.get(`/ui-recorder/sessions/${uiPicker.sessionId}`)
       applyUiPickerSession(data)
+      if (['ready', 'picked'].includes(uiPicker.status) && !uiPicker.screenshotUrl && !uiPicker.loading) {
+        refreshUiPickerScreenshot()
+      }
     } catch (error: any) {
       uiPicker.status = 'error'
       uiPicker.statusText = '异常'
@@ -4215,6 +4264,71 @@ function changeMockFormProject() {
       uiPickerDialogVisible.value = false
     }
     resetUiPickerState()
+  }
+
+  async function refreshUiPickerScreenshot() {
+    if (!uiPicker.sessionId || uiPicker.loading) return
+    uiPicker.loading = true
+    try {
+      const { data } = await api.get(`/ui-recorder/sessions/${uiPicker.sessionId}/screenshot`, { responseType: 'blob' })
+      const nextUrl = URL.createObjectURL(data)
+      if (uiPicker.screenshotUrl) {
+        URL.revokeObjectURL(uiPicker.screenshotUrl)
+      }
+      uiPicker.screenshotUrl = nextUrl
+    } catch (error: any) {
+      uiPicker.message = error?.response?.data?.detail || '刷新远程浏览器截图失败'
+    } finally {
+      uiPicker.loading = false
+    }
+  }
+
+  function uiPickerPointFromEvent(event: MouseEvent) {
+    const image = event.currentTarget as HTMLImageElement
+    const rect = image.getBoundingClientRect()
+    const x = ((event.clientX - rect.left) / rect.width) * uiPicker.viewportWidth
+    const y = ((event.clientY - rect.top) / rect.height) * uiPicker.viewportHeight
+    return { x, y }
+  }
+
+  async function handleUiPickerImageClick(event: MouseEvent) {
+    if (!uiPicker.sessionId || uiPicker.loading) return
+    const point = uiPickerPointFromEvent(event)
+    try {
+      if (uiPicker.mode === 'pick') {
+        const { data } = await api.post(`/ui-recorder/sessions/${uiPicker.sessionId}/pick`, point)
+        applyUiPickerSession(data)
+      } else {
+        const { data } = await api.post(`/ui-recorder/sessions/${uiPicker.sessionId}/click`, point)
+        applyUiPickerSession(data)
+      }
+      await refreshUiPickerScreenshot()
+    } catch (error: any) {
+      uiPicker.message = error?.response?.data?.detail || '远程浏览器操作失败'
+    }
+  }
+
+  async function typeUiPickerText() {
+    if (!uiPicker.sessionId || !uiPicker.inputText) return
+    try {
+      const { data } = await api.post(`/ui-recorder/sessions/${uiPicker.sessionId}/type`, { text: uiPicker.inputText })
+      applyUiPickerSession(data)
+      uiPicker.inputText = ''
+      await refreshUiPickerScreenshot()
+    } catch (error: any) {
+      uiPicker.message = error?.response?.data?.detail || '远程浏览器输入失败'
+    }
+  }
+
+  async function pressUiPickerKey(key: string) {
+    if (!uiPicker.sessionId) return
+    try {
+      const { data } = await api.post(`/ui-recorder/sessions/${uiPicker.sessionId}/press`, { key })
+      applyUiPickerSession(data)
+      await refreshUiPickerScreenshot()
+    } catch (error: any) {
+      uiPicker.message = error?.response?.data?.detail || '远程浏览器按键失败'
+    }
   }
 
   function uiCasePayload(form: UiCaseFormState) {

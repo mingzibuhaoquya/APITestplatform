@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -7,7 +8,7 @@ from ..deps import current_user
 from ..models import Environment, User
 from ..services.operation_logs import log_operation
 from ..services.ui_executor import build_ui_url
-from ..services.ui_recorder import RecorderSession, recorder_manager
+from ..services.ui_recorder import VIEWPORT, RecorderSession, recorder_manager
 from ..utils import fmt_time
 
 
@@ -19,6 +20,19 @@ class UiRecorderSessionIn(BaseModel):
     start_url: str
 
 
+class UiRecorderPointIn(BaseModel):
+    x: float
+    y: float
+
+
+class UiRecorderTypeIn(BaseModel):
+    text: str
+
+
+class UiRecorderPressIn(BaseModel):
+    key: str = "Enter"
+
+
 def _session_out(session: RecorderSession) -> dict:
     return {
         "id": session.id,
@@ -26,9 +40,17 @@ def _session_out(session: RecorderSession) -> dict:
         "message": session.message,
         "result": session.result,
         "error": session.error,
+        "viewport": VIEWPORT,
         "create_date": fmt_time(session.created_at),
         "update_date": fmt_time(session.updated_at),
     }
+
+
+def _session_or_404(session_id: str) -> RecorderSession:
+    session = recorder_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="拾取会话不存在或已过期")
+    return session
 
 
 @router.post("/sessions")
@@ -46,9 +68,56 @@ def create_recorder_session(payload: UiRecorderSessionIn, user: User = Depends(c
 
 @router.get("/sessions/{session_id}")
 def get_recorder_session(session_id: str, _: User = Depends(current_user)):
-    session = recorder_manager.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="拾取会话不存在或已过期")
+    return _session_out(_session_or_404(session_id))
+
+
+@router.get("/sessions/{session_id}/screenshot")
+def get_recorder_screenshot(session_id: str, _: User = Depends(current_user)):
+    session = _session_or_404(session_id)
+    try:
+        image = recorder_manager.run_command(session, "screenshot", timeout=10)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(content=image, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@router.post("/sessions/{session_id}/click")
+def click_recorder_session(session_id: str, payload: UiRecorderPointIn, _: User = Depends(current_user)):
+    session = _session_or_404(session_id)
+    try:
+        recorder_manager.run_command(session, "click", payload.model_dump(), timeout=10)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _session_out(session)
+
+
+@router.post("/sessions/{session_id}/pick")
+def pick_recorder_session(session_id: str, payload: UiRecorderPointIn, _: User = Depends(current_user)):
+    session = _session_or_404(session_id)
+    try:
+        recorder_manager.run_command(session, "pick", payload.model_dump(), timeout=10)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _session_out(session)
+
+
+@router.post("/sessions/{session_id}/type")
+def type_recorder_session(session_id: str, payload: UiRecorderTypeIn, _: User = Depends(current_user)):
+    session = _session_or_404(session_id)
+    try:
+        recorder_manager.run_command(session, "type", payload.model_dump(), timeout=10)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _session_out(session)
+
+
+@router.post("/sessions/{session_id}/press")
+def press_recorder_session(session_id: str, payload: UiRecorderPressIn, _: User = Depends(current_user)):
+    session = _session_or_404(session_id)
+    try:
+        recorder_manager.run_command(session, "press", payload.model_dump(), timeout=10)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _session_out(session)
 
 
