@@ -855,7 +855,13 @@
               <a-form-item label="目标地址" class="wide"><a-input v-model:value="uiCaseForm.start_url" placeholder="/login 或完整 URL" /></a-form-item>
               <a-form-item label="描述" class="wide"><a-textarea v-model:value="uiCaseForm.description" :rows="2" placeholder="请输入用例说明" /></a-form-item>
               <div class="wide">
-                <div class="kv-title"><h4>测试步骤</h4><a-button size="small" @click="addUiStep(uiCaseForm)">添加步骤</a-button></div>
+                <div class="kv-title">
+                  <h4>测试步骤</h4>
+                  <div class="toolbar-actions">
+                    <a-button size="small" @click="startUiStepRecorder(uiCaseForm)">录制添加步骤</a-button>
+                    <a-button size="small" @click="addUiStep(uiCaseForm)">添加步骤</a-button>
+                  </div>
+                </div>
                 <a-alert class="compact-alert" type="info" show-icon message="定位方式选择“AI描述”时，目标元素可填写自然语言，例如：点击登录按钮、填写用户名输入框；执行时会自动转换为可执行定位器。" />
                 <a-table :pagination="false" :data-source="uiCaseForm.steps" :row-key="(row: UiStepRow) => row.id" :scroll="{ x: 1100 }">
                   <a-table-column title="动作" width="170"><template #default="{ record: row }"><a-select v-model:value="row.action" :popup-match-select-width="false" popup-class-name="ui-action-dropdown"><a-select-option value="goto">打开页面</a-select-option><a-select-option value="click">点击</a-select-option><a-select-option value="fill">输入</a-select-option><a-select-option value="select">选择</a-select-option><a-select-option value="wait">等待</a-select-option><a-select-option value="assert_text">断言文本</a-select-option><a-select-option value="assert_visible">断言元素</a-select-option><a-select-option value="screenshot">截图</a-select-option></a-select></template></a-table-column>
@@ -882,7 +888,13 @@
               <a-form-item label="目标地址" class="wide"><a-input v-model:value="editUiCaseForm.start_url" placeholder="/login 或完整 URL" /></a-form-item>
               <a-form-item label="描述" class="wide"><a-textarea v-model:value="editUiCaseForm.description" :rows="2" placeholder="请输入用例说明" /></a-form-item>
               <div class="wide">
-                <div class="kv-title"><h4>测试步骤</h4><a-button size="small" @click="addUiStep(editUiCaseForm)">添加步骤</a-button></div>
+                <div class="kv-title">
+                  <h4>测试步骤</h4>
+                  <div class="toolbar-actions">
+                    <a-button size="small" @click="startUiStepRecorder(editUiCaseForm)">录制添加步骤</a-button>
+                    <a-button size="small" @click="addUiStep(editUiCaseForm)">添加步骤</a-button>
+                  </div>
+                </div>
                 <a-alert class="compact-alert" type="info" show-icon message="定位方式选择“AI描述”时，目标元素可填写自然语言，例如：点击登录按钮、填写用户名输入框；执行时会自动转换为可执行定位器。" />
                 <a-table :pagination="false" :data-source="editUiCaseForm.steps" :row-key="(row: UiStepRow) => row.id" :scroll="{ x: 1100 }">
                   <a-table-column title="动作" width="170"><template #default="{ record: row }"><a-select v-model:value="row.action" :popup-match-select-width="false" popup-class-name="ui-action-dropdown"><a-select-option value="goto">打开页面</a-select-option><a-select-option value="click">点击</a-select-option><a-select-option value="fill">输入</a-select-option><a-select-option value="select">选择</a-select-option><a-select-option value="wait">等待</a-select-option><a-select-option value="assert_text">断言文本</a-select-option><a-select-option value="assert_visible">断言元素</a-select-option><a-select-option value="screenshot">截图</a-select-option></a-select></template></a-table-column>
@@ -897,21 +909,42 @@
             <template #footer><a-button @click="editUiCaseDialogVisible = false">取消</a-button><a-button type="primary" @click="updateUiCase">确认</a-button></template>
           </a-modal>
 
-          <a-modal v-model:open="uiPickerDialogVisible" title="远程元素拾取" width="1180px" @cancel="closeUiPicker">
+          <a-modal v-model:open="uiPickerDialogVisible" :title="uiPicker.targetRow ? '远程元素拾取' : '录制添加步骤'" width="1180px" @cancel="closeUiPicker">
             <a-alert
               class="compact-alert"
               type="info"
               show-icon
-              message="远程浏览器运行在服务器中。选择“操作”可点击页面并输入文本，选择“拾取”后点击目标元素会生成 XPath 并回填当前步骤。"
+              :message="uiPicker.targetRow ? '远程浏览器运行在服务器中。选择“操作”可点击页面并输入文本，选择“拾取”后点击目标元素会生成 XPath 并回填当前步骤。' : '远程浏览器运行在服务器中。先选择录制动作并点击目标元素，确认无误后再添加到步骤列表。'"
             />
             <div class="remote-browser-toolbar">
               <a-radio-group v-model:value="uiPicker.mode" button-style="solid">
                 <a-radio-button value="operate">操作</a-radio-button>
-                <a-radio-button value="pick">拾取</a-radio-button>
+                <a-radio-button value="pick">{{ uiPicker.targetRow ? '拾取' : '录制' }}</a-radio-button>
               </a-radio-group>
-              <a-input v-model:value="uiPicker.inputText" placeholder="先点击输入框，再输入文本" @keyup.enter="typeUiPickerText" />
+              <a-select v-if="!uiPicker.targetRow" v-model:value="uiPicker.recordAction" :popup-match-select-width="false" popup-class-name="ui-action-dropdown">
+                <a-select-option value="click">点击</a-select-option>
+                <a-select-option value="fill">输入</a-select-option>
+                <a-select-option value="select">选择</a-select-option>
+                <a-select-option value="assert_visible">断言元素</a-select-option>
+                <a-select-option value="assert_text">断言文本</a-select-option>
+              </a-select>
+              <a-select
+                v-if="!uiPicker.targetRow && uiPicker.recordAction === 'select' && uiPickerSelectOptions.length"
+                v-model:value="uiPicker.inputText"
+                show-search
+                :popup-match-select-width="false"
+                popup-class-name="ui-action-dropdown"
+                placeholder="请选择下拉项"
+              >
+                <a-select-option v-for="option in uiPickerSelectOptions" :key="option.key" :value="option.value">{{ option.label }}</a-select-option>
+              </a-select>
+              <a-input v-else v-model:value="uiPicker.inputText" :placeholder="uiPicker.targetRow ? '先点击输入框，再输入文本' : '输入步骤的值或期望文本'" @keyup.enter="typeUiPickerText" />
+              <a-button v-if="!uiPicker.targetRow && uiPicker.recordAction === 'select'" :disabled="!uiPicker.inputText.trim()" @click="applyUiPickerSelect">应用选择</a-button>
+              <a-button v-if="!uiPicker.targetRow" type="primary" :disabled="!canAppendRecordedUiStep" @click="confirmAppendRecordedUiStep">添加当前步骤</a-button>
               <a-button @click="typeUiPickerText">输入</a-button>
               <a-button @click="pressUiPickerKey('Enter')">Enter</a-button>
+              <a-button v-if="!uiPicker.targetRow" @click="appendUiPickerUtilityStep('wait')">添加等待</a-button>
+              <a-button v-if="!uiPicker.targetRow" @click="appendUiPickerUtilityStep('screenshot')">添加截图</a-button>
               <a-button @click="refreshUiPickerScreenshot">刷新截图</a-button>
             </div>
             <div class="remote-browser-frame">
@@ -930,6 +963,20 @@
               <a-descriptions-item label="XPath"><span class="wrap-text">{{ uiPicker.xpath || '-' }}</span></a-descriptions-item>
               <a-descriptions-item label="元素">{{ uiPicker.summaryText || '-' }}</a-descriptions-item>
             </a-descriptions>
+            <div v-if="!uiPicker.targetRow" class="recorded-steps-panel">
+              <div class="kv-title">
+                <h4>当前步骤</h4>
+                <a-tag>{{ uiPickerSteps.length }} 步</a-tag>
+              </div>
+              <a-table :pagination="false" size="small" :data-source="uiPickerSteps" :row-key="(row: UiStepRow) => row.id" :scroll="{ x: 900, y: 220 }">
+                <a-table-column title="#" width="56"><template #default="{ index }">{{ index + 1 }}</template></a-table-column>
+                <a-table-column title="动作" width="110"><template #default="{ record: row }">{{ uiActionText(row.action) }}</template></a-table-column>
+                <a-table-column title="目标" width="300"><template #default="{ record: row }"><span class="wrap-text">{{ row.target || '-' }}</span></template></a-table-column>
+                <a-table-column title="值/期望" width="180"><template #default="{ record: row }"><span class="wrap-text">{{ row.value || '-' }}</span></template></a-table-column>
+                <a-table-column title="说明"><template #default="{ record: row }">{{ row.description || '-' }}</template></a-table-column>
+                <a-table-column title="操作" width="90"><template #default="{ index }"><a-button size="small" danger @click="removeUiPickerStep(index)">删除</a-button></template></a-table-column>
+              </a-table>
+            </div>
             <template #footer>
               <a-button @click="closeUiPicker">关闭会话</a-button>
             </template>
@@ -2016,6 +2063,7 @@ type UiStepRow = {
   value: string
   description: string
 }
+type UiRecordAction = 'click' | 'fill' | 'select' | 'assert_visible' | 'assert_text'
 type UiCaseFormState = {
   id?: number
   project_id?: number
@@ -2378,8 +2426,12 @@ const uiPicker = reactive({
   message: '',
   xpath: '',
   summaryText: '',
+  lastPickKey: '',
+  pendingResult: null as any,
   targetRow: null as UiStepRow | null,
+  targetForm: null as UiCaseFormState | null,
   mode: 'operate',
+  recordAction: 'click' as UiRecordAction,
   inputText: '',
   screenshotUrl: '',
   viewportWidth: 1600,
@@ -2480,6 +2532,32 @@ const planEditors = reactive<Record<string, PlanEditor>>({})
 const avatarText = computed(() => me.value?.username.slice(0, 1).toUpperCase() || 'U')
 const activeApiEditor = computed(() => apiEditors[active.value])
 const activePlanEditor = computed(() => planEditors[active.value])
+const uiPickerSteps = computed(() => uiPicker.targetForm?.steps || [])
+const uiPickerSelectOptions = computed(() => {
+  const options = uiPicker.pendingResult?.summary?.options
+  if (!Array.isArray(options)) return []
+  return options
+    .map((option: any, index: number) => {
+      const rawValue = option?.value ?? option?.label ?? option?.text ?? option?.name ?? ''
+      const rawLabel = option?.label ?? option?.text ?? option?.name ?? option?.value ?? ''
+      const originalValue = String(rawValue ?? '').trim()
+      const label = String(rawLabel ?? originalValue).trim()
+      const value = label || originalValue
+      return {
+        key: `${index}-${value || label || 'empty'}`,
+        value,
+        label: label || value || `选项${index + 1}`,
+        originalValue,
+        selected: !!option?.selected
+      }
+    })
+    .filter(option => option.value || option.label)
+})
+const canAppendRecordedUiStep = computed(() => {
+  if (!uiPicker.pendingResult) return false
+  if (uiPicker.recordAction === 'select') return !!uiPicker.inputText.trim()
+  return true
+})
 const currentPageTitle = computed(() => activeApiEditor.value?.label || activePlanEditor.value?.label || menuMeta[active.value]?.label || '接口测试平台')
 const permittedMenuKeys = computed(() => new Set(me.value?.menus?.length ? me.value.menus : Object.keys(menuMeta)))
 const visibleMenuGroups = computed(() => menuTree
@@ -4138,8 +4216,12 @@ function changeMockFormProject() {
     uiPicker.message = ''
     uiPicker.xpath = ''
     uiPicker.summaryText = ''
+    uiPicker.lastPickKey = ''
+    uiPicker.pendingResult = null
     uiPicker.targetRow = null
+    uiPicker.targetForm = null
     uiPicker.mode = 'operate'
+    uiPicker.recordAction = 'click'
     uiPicker.inputText = ''
     uiPicker.screenshotUrl = ''
     uiPicker.viewportWidth = 1600
@@ -4184,7 +4266,103 @@ function changeMockFormProject() {
     return text || fallback
   }
 
-  async function startUiElementPicker(form: UiCaseFormState, row: UiStepRow) {
+  function uiStepDescription(action: string, result?: any) {
+    const summary = result?.summary || {}
+    const text = String(summary.text || '').trim()
+    const tag = String(summary.tag || '').trim()
+    const name = text || summary.name || summary.id || tag || '目标元素'
+    const mapping: Record<string, string> = {
+      click: `点击 ${name}`,
+      fill: `输入 ${name}`,
+      select: `选择 ${name}`,
+      assert_visible: `断言 ${name} 可见`,
+      assert_text: `断言 ${name} 文本`,
+      wait: '等待',
+      screenshot: '截图'
+    }
+    return mapping[action] || ''
+  }
+
+  function uiActionText(action: string) {
+    const mapping: Record<string, string> = {
+      goto: '打开页面',
+      click: '点击',
+      fill: '输入',
+      select: '选择',
+      wait: '等待',
+      assert_text: '断言文本',
+      assert_visible: '断言元素',
+      screenshot: '截图'
+    }
+    return mapping[action] || action || '-'
+  }
+
+  function buildRecordedUiStep(result: any) {
+    if (!uiPicker.targetForm) return
+    const action = uiPicker.recordAction
+    const xpath = result?.xpath || ''
+    if (!xpath) return
+    const step = defaultUiStep(action)
+    step.locator_type = 'xpath'
+    step.target = xpath
+    step.value = action === 'fill' || action === 'select' || action === 'assert_text' ? uiPicker.inputText.trim() : ''
+    step.description = uiStepDescription(action, result)
+    return step
+  }
+
+  function currentUiPickerSelectOption() {
+    return uiPickerSelectOptions.value.find((option: any) => option.value === uiPicker.inputText.trim())
+  }
+
+  async function applyUiPickerSelect(showSuccess = true) {
+    if (!uiPicker.sessionId || !uiPicker.pendingResult?.xpath || !uiPicker.inputText.trim()) return false
+    const option = currentUiPickerSelectOption()
+    try {
+      const { data } = await api.post(`/ui-recorder/sessions/${uiPicker.sessionId}/select`, {
+        xpath: uiPicker.pendingResult.xpath,
+        value: uiPicker.inputText.trim(),
+        label: option?.label || ''
+      })
+      uiPicker.status = data.status || uiPicker.status
+      uiPicker.statusText = uiPickerStatusText(uiPicker.status)
+      uiPicker.message = friendlyUiPickerMessage(data.error, data.message || '远程页面已完成选择')
+      await refreshUiPickerScreenshot()
+      if (showSuccess) message.success('远程页面已选择该选项')
+      return true
+    } catch (error: any) {
+      uiPicker.message = error?.response?.data?.detail || '远程页面选择失败'
+      return false
+    }
+  }
+
+  async function confirmAppendRecordedUiStep() {
+    if (!uiPicker.targetForm || !uiPicker.pendingResult) return
+    if (uiPicker.recordAction === 'select') {
+      const applied = await applyUiPickerSelect(false)
+      if (!applied) return
+    }
+    const step = buildRecordedUiStep(uiPicker.pendingResult)
+    if (!step) return
+    uiPicker.targetForm.steps.push(step)
+    uiPicker.pendingResult = null
+    message.success('已添加步骤')
+  }
+
+  function appendUiPickerUtilityStep(action: 'wait' | 'screenshot') {
+    if (!uiPicker.targetForm) return
+    const step = defaultUiStep(action)
+    step.value = action === 'wait' ? (uiPicker.inputText.trim() || '1000') : ''
+    step.description = uiStepDescription(action)
+    uiPicker.targetForm.steps.push(step)
+    message.success('已添加步骤')
+  }
+
+  function removeUiPickerStep(index: number) {
+    if (!uiPicker.targetForm) return
+    uiPicker.targetForm.steps.splice(index, 1)
+  }
+
+  async function startUiPickerSession(form: UiCaseFormState, row: UiStepRow | null) {
     if (!form.environment_id) {
       message.warning('请先选择环境')
       return
@@ -4196,6 +4374,8 @@ function changeMockFormProject() {
     await closeUiPicker(false)
     resetUiPickerState()
     uiPicker.targetRow = row
+    uiPicker.targetForm = row ? null : form
+    uiPicker.mode = row ? 'operate' : 'pick'
     uiPicker.status = 'starting'
     uiPicker.statusText = '启动中'
     uiPicker.message = '正在启动远程浏览器'
@@ -4215,6 +4395,14 @@ function changeMockFormProject() {
     }
   }
 
+  async function startUiElementPicker(form: UiCaseFormState, row: UiStepRow) {
+    await startUiPickerSession(form, row)
+  }
+
+  async function startUiStepRecorder(form: UiCaseFormState) {
+    await startUiPickerSession(form, null)
+  }
+
   function applyUiPickerSession(data: any) {
     uiPicker.sessionId = data.id || uiPicker.sessionId
     uiPicker.status = data.status || ''
@@ -4223,14 +4411,26 @@ function changeMockFormProject() {
     uiPicker.viewportWidth = Number(data.viewport?.width || uiPicker.viewportWidth || 1600)
     uiPicker.viewportHeight = Number(data.viewport?.height || uiPicker.viewportHeight || 900)
     const xpath = data.result?.xpath || ''
-    if (xpath && xpath !== uiPicker.xpath) {
+    const pickKey = uiPicker.targetRow ? xpath : `${uiPicker.recordAction}|${uiPicker.inputText.trim()}|${xpath}`
+    if (xpath && pickKey !== uiPicker.lastPickKey) {
       uiPicker.xpath = xpath
+      uiPicker.lastPickKey = pickKey
       uiPicker.summaryText = uiPickedSummary(data.result)
       if (uiPicker.targetRow) {
         uiPicker.targetRow.locator_type = 'xpath'
         uiPicker.targetRow.target = xpath
+        message.success('元素已拾取，XPath 已回填')
+      } else {
+        uiPicker.pendingResult = data.result
+        const summary = data.result?.summary || {}
+        if (summary.tag === 'select') {
+          uiPicker.recordAction = 'select'
+          const selectedOption = uiPickerSelectOptions.value.find((option: any) => option.selected)
+          const currentValue = String(summary.value ?? '').trim()
+          uiPicker.inputText = selectedOption?.value || currentValue || ''
+        }
+        message.success('元素已拾取，可点击“添加当前步骤”')
       }
-      message.success('元素已拾取，XPath 已回填')
     }
     if (['closed', 'error'].includes(uiPicker.status)) {
       stopUiPickerPolling()
@@ -4313,7 +4513,9 @@ function changeMockFormProject() {
     try {
       const { data } = await api.post(`/ui-recorder/sessions/${uiPicker.sessionId}/type`, { text: uiPicker.inputText })
       applyUiPickerSession(data)
-      uiPicker.inputText = ''
+      if (uiPicker.targetRow) {
+        uiPicker.inputText = ''
+      }
       await refreshUiPickerScreenshot()
     } catch (error: any) {
       uiPicker.message = error?.response?.data?.detail || '远程浏览器输入失败'

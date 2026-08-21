@@ -61,6 +61,14 @@ PICK_SCRIPT = r"""
     }
     return absoluteXpath(el);
   };
+  const selectOptions = el => {
+    if (!el || String(el.tagName || '').toLowerCase() !== 'select') return [];
+    return Array.from(el.options || []).map(option => ({
+      value: option.value || '',
+      label: clean(option.label || option.textContent || option.value),
+      selected: !!option.selected
+    }));
+  };
   const elementSummary = el => ({
     tag: String(el.tagName || '').toLowerCase(),
     text: clean(el.innerText || el.textContent || el.value).slice(0, 120),
@@ -68,7 +76,8 @@ PICK_SCRIPT = r"""
     name: el.getAttribute('name') || '',
     className: typeof el.className === 'string' ? el.className : '',
     type: el.getAttribute('type') || '',
-    value: el.value || ''
+    value: el.value || '',
+    options: selectOptions(el)
   });
   const target = document.elementFromPoint(x, y);
   if (!target || target === document.documentElement || target === document.body) {
@@ -132,9 +141,15 @@ class UiRecorderManager:
         session = self.get_session(session_id)
         if not session:
             return None
-        self.run_command(session, "close", {}, timeout=3)
         session.stop_event.set()
-        self._set_status(session, "closed", "远程浏览器已关闭")
+        try:
+            self.run_command(session, "close", {}, timeout=2)
+            message = "远程浏览器已关闭"
+        except RuntimeError:
+            message = "远程浏览器关闭请求已提交，后台正在清理"
+        with self._lock:
+            self._sessions.pop(session_id, None)
+        self._set_status(session, "closed", message)
         return session
 
     def run_command(self, session: RecorderSession, action: str, payload: dict[str, Any] | None = None, timeout: int = 15) -> Any:
@@ -220,6 +235,28 @@ class UiRecorderManager:
             elif action == "press":
                 page.keyboard.press(str(payload.get("key", "Enter")))
                 page.wait_for_timeout(300)
+                command.result = {"ok": True}
+            elif action == "select":
+                xpath = str(payload.get("xpath", "")).strip()
+                value = str(payload.get("value", ""))
+                label = str(payload.get("label", ""))
+                if not xpath:
+                    raise RuntimeError("请先拾取下拉框")
+                locator = page.locator(f"xpath={xpath}")
+                selected = False
+                try:
+                    locator.select_option(value)
+                    selected = True
+                except Exception:
+                    if label:
+                        locator.select_option(label=label)
+                        selected = True
+                if not selected:
+                    raise RuntimeError(f"选择下拉项失败：{label or value}")
+                locator.dispatch_event("input")
+                locator.dispatch_event("change")
+                locator.dispatch_event("blur")
+                page.wait_for_timeout(500)
                 command.result = {"ok": True}
             elif action == "close":
                 session.stop_event.set()

@@ -33,6 +33,12 @@ class UiRecorderPressIn(BaseModel):
     key: str = "Enter"
 
 
+class UiRecorderSelectIn(BaseModel):
+    xpath: str
+    value: str
+    label: str = ""
+
+
 def _session_out(session: RecorderSession) -> dict:
     return {
         "id": session.id,
@@ -116,6 +122,16 @@ def press_recorder_session(session_id: str, payload: UiRecorderPressIn, _: User 
     session = _session_or_404(session_id)
     try:
         recorder_manager.run_command(session, "press", payload.model_dump(), timeout=10)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _session_out(session)
+
+
+@router.post("/sessions/{session_id}/select")
+def select_recorder_session(session_id: str, payload: UiRecorderSelectIn, _: User = Depends(current_user)):
+    session = _session_or_404(session_id)
+    try:
+        recorder_manager.run_command(session, "select", payload.model_dump(), timeout=10)
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _session_out(session)

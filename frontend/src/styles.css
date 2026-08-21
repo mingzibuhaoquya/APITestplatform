@@ -1647,10 +1647,14 @@ textarea.code-input,
 
 .remote-browser-toolbar {
     display: grid;
-    grid-template-columns: auto minmax(220px, 1fr) auto auto auto;
+    grid-template-columns: auto auto minmax(220px, 1fr) auto auto auto auto auto auto;
     gap: 8px;
     align-items: center;
     margin: 8px 0 12px;
+}
+
+.remote-browser-toolbar .ant-select {
+    min-width: 140px;
 }
 
 .remote-browser-frame {
@@ -1658,10 +1662,10 @@ textarea.code-input,
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 420px;
-    max-height: 62vh;
+    height: min(62vh, 620px);
+    min-height: 360px;
     margin-bottom: 12px;
-    overflow: auto;
+    overflow: hidden;
     border: 1px solid #d9dff0;
     border-radius: 6px;
     background: #f8fafc;
@@ -1669,7 +1673,14 @@ textarea.code-input,
 
 .remote-browser-frame img {
     display: block;
-    width: 100%;
+    width: auto;
     height: auto;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
     cursor: crosshair;
+}
+
+.recorded-steps-panel {
+    margin-top: 12px;
 }
