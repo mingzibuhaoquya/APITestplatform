@@ -327,38 +327,35 @@ def test_api_key_config_crud_options_and_configured_flag(db_session, monkeypatch
 
 def test_knowledge_workflow_requires_enabled_api_key_config(db_session):
     db, admin = db_session
-    project = create_knowledge_project(KnowledgeProjectIn(name="工作流变量项目"), admin, db)
 
     with pytest.raises(HTTPException) as missing:
-        create_knowledge_workflow(KnowledgeWorkflowIn(project_id=project["id"], name="未登记工作流", api_key_env="DIFY_WORKFLOW_API_KEY_MISSING"), admin, db)
+        create_knowledge_workflow(KnowledgeWorkflowIn(name="未登记工作流", api_key_env="DIFY_WORKFLOW_API_KEY_MISSING"), admin, db)
     assert missing.value.status_code == 400
 
     create_api_key_config(ApiKeyConfigIn(env_key="DIFY_KNOWLEDGE_API_KEY_ONLY", display_name="知识库Key"), admin, db)
-    created = create_knowledge_workflow(KnowledgeWorkflowIn(project_id=project["id"], name="任意已登记Key工作流", api_key_env="DIFY_KNOWLEDGE_API_KEY_ONLY"), admin, db)
+    created = create_knowledge_workflow(KnowledgeWorkflowIn(name="任意已登记Key工作流", api_key_env="DIFY_KNOWLEDGE_API_KEY_ONLY"), admin, db)
     assert created["api_key_env"] == "DIFY_KNOWLEDGE_API_KEY_ONLY"
 
 
 def test_knowledge_workflow_crud_validates_project_and_duplicates(db_session):
     db, admin = db_session
-    project = create_knowledge_project(KnowledgeProjectIn(name="工作流项目"), admin, db)
     create_api_key_config(ApiKeyConfigIn(env_key="DIFY_WORKFLOW_API_KEY_FAF", display_name="FAF工作流Key"), admin, db)
     create_api_key_config(ApiKeyConfigIn(env_key="DIFY_WORKFLOW_API_KEY_OTHER", display_name="其他工作流Key"), admin, db)
 
     created = create_knowledge_workflow(
-        KnowledgeWorkflowIn(project_id=project["id"], name="FAF工作流", api_key_env="DIFY_WORKFLOW_API_KEY_FAF"),
+        KnowledgeWorkflowIn(name="FAF工作流", api_key_env="DIFY_WORKFLOW_API_KEY_FAF"),
         admin,
         db,
     )
-    assert created["project_name"] == "工作流项目"
     assert created["api_key_env"] == "DIFY_WORKFLOW_API_KEY_FAF"
 
     with pytest.raises(HTTPException) as duplicate:
-        create_knowledge_workflow(KnowledgeWorkflowIn(project_id=project["id"], name="FAF工作流", api_key_env="DIFY_WORKFLOW_API_KEY_OTHER"), admin, db)
+        create_knowledge_workflow(KnowledgeWorkflowIn(name="FAF工作流", api_key_env="DIFY_WORKFLOW_API_KEY_OTHER"), admin, db)
     assert duplicate.value.status_code == 400
 
     updated = update_knowledge_workflow(
         created["id"],
-        KnowledgeWorkflowUpdate(project_id=project["id"], name="FAF工作流2", api_key_env="DIFY_WORKFLOW_API_KEY_FAF", status="disabled", description="desc"),
+        KnowledgeWorkflowUpdate(name="FAF工作流2", api_key_env="DIFY_WORKFLOW_API_KEY_FAF", status="disabled", description="desc"),
         admin,
         db,
     )
@@ -368,7 +365,7 @@ def test_knowledge_workflow_crud_validates_project_and_duplicates(db_session):
 
     deleted = delete_knowledge_workflow(created["id"], admin, db)
     assert deleted["id"] == created["id"]
-    assert list_knowledge_workflows(project_id=project["id"], page=1, page_size=10, db=db, _=admin)["total"] == 0
+    assert list_knowledge_workflows(page=1, page_size=10, db=db, _=admin)["total"] == 0
 
 
 def test_knowledge_qa_uses_user_scoped_session_history(db_session, monkeypatch):
@@ -377,7 +374,7 @@ def test_knowledge_qa_uses_user_scoped_session_history(db_session, monkeypatch):
     create_api_key_config(ApiKeyConfigIn(env_key="DIFY_WORKFLOW_API_KEY_QA", display_name="问答工作流Key"), admin, db)
     project = create_knowledge_project(KnowledgeProjectIn(name="问答项目"), admin, db)
     workflow = create_knowledge_workflow(
-        KnowledgeWorkflowIn(project_id=project["id"], name="问答工作流", api_key_env="DIFY_WORKFLOW_API_KEY_QA"),
+        KnowledgeWorkflowIn(name="问答工作流", api_key_env="DIFY_WORKFLOW_API_KEY_QA"),
         admin,
         db,
     )
@@ -388,7 +385,7 @@ def test_knowledge_qa_uses_user_scoped_session_history(db_session, monkeypatch):
 
     calls = []
 
-    def fake_run_workflow(api_base_url, api_key, user_id, question, chat_history):
+    def fake_run_workflow(api_base_url, api_key, user_id, question, chat_history, **kwargs):
         calls.append({"api_key": api_key, "question": question, "chat_history": chat_history, "user_id": user_id})
         return {"answer": "两个字段存在联动关系。", "workflow_run_id": "run-1", "task_id": "task-1", "raw_response": {"ok": True}}
 

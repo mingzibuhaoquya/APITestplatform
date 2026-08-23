@@ -321,7 +321,6 @@ class KnowledgeProjectUpdate(BaseModel):
 
 
 class KnowledgeWorkflowIn(BaseModel):
-    project_id: int
     name: str
     api_base_url: str = ""
     api_key_env: str
@@ -330,7 +329,6 @@ class KnowledgeWorkflowIn(BaseModel):
 
 
 class KnowledgeWorkflowUpdate(BaseModel):
-    project_id: int
     name: str
     api_base_url: str = ""
     api_key_env: str = ""

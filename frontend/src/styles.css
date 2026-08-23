@@ -1738,8 +1738,6 @@ textarea.code-input,
     flex-direction: column;
   }
 
-  .page-heading .ant-btn,
-  .toolbar > .ant-btn,
   .qa-shell {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
@@ -1879,18 +1877,6 @@ textarea.code-input,
   padding: 12px;
   border-top: 1px solid var(--app-border);
 }
-.toolbar-actions,
-  .plan-page-header .ant-btn,
-  .plan-editor-header .qa-shell {
-  display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
-  min-height: 560px;
-  border: 1px solid var(--app-border);
-  border-radius: 8px;
-  overflow: hidden;
-  background: #fff;
-}
-
 .qa-sessions {
   display: flex;
   min-width: 0;
@@ -2212,4 +2198,30 @@ textarea.code-input,
 .app-data-table .ant-table-container,
 .page-view > .ant-table-wrapper .ant-table-container {
   overflow-x: auto;
+}
+
+.knowledge-qa-page {
+  overflow: hidden;
+}
+
+body:has(.knowledge-qa-page) {
+  overflow: hidden;
+}
+
+.knowledge-qa-page .qa-shell {
+  height: calc(100vh - 224px);
+  min-height: 400px;
+  grid-template-rows: 1fr;
+}
+
+.knowledge-qa-page .qa-sessions,
+.knowledge-qa-page .qa-chat {
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 680px) {
+  .knowledge-qa-page .qa-shell {
+    height: calc(100vh - 280px);
+  }
 }

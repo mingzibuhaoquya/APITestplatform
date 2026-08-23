@@ -240,6 +240,8 @@ def _ensure_knowledge_workflow_columns() -> None:
         return
     columns = {column["name"] for column in inspector.get_columns("knowledge_workflow")}
     with engine.begin() as conn:
+        if "project_id" in columns:
+            conn.execute(text("ALTER TABLE knowledge_workflow DROP COLUMN project_id"))
         if "api_key_env" not in columns:
             conn.execute(text("ALTER TABLE knowledge_workflow ADD COLUMN api_key_env VARCHAR(128) NOT NULL DEFAULT '' AFTER api_key"))
 def _ensure_api_key_configs() -> None:

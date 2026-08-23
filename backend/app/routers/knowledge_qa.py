@@ -31,7 +31,6 @@ def _workflow(db: Session, workflow_id: int, require_enabled: bool = False) -> K
         raise HTTPException(status_code=400, detail="工作流配置不存在")
     if require_enabled and row.status != "active":
         raise HTTPException(status_code=400, detail="工作流配置已禁用")
-    _project(db, row.project_id, require_enabled=require_enabled)
     return row
 
 
@@ -125,8 +124,6 @@ def list_sessions(
 def create_session(payload: KnowledgeQaSessionIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     _project(db, payload.project_id, require_enabled=True)
     workflow = _workflow(db, payload.workflow_id, require_enabled=True)
-    if workflow.project_id != payload.project_id:
-        raise HTTPException(status_code=400, detail="工作流不属于所选知识库项目")
     title = payload.title.strip() or "新会话"
     row = KnowledgeQaSession(
         user_id=user.id,
@@ -191,7 +188,16 @@ def ask(session_id: int, payload: KnowledgeQaAskIn, user: User = Depends(current
     db.refresh(user_message)
 
     try:
-        result = run_workflow(workflow.api_base_url or get_settings().dify_api_base_url, _api_key_from_env(workflow), user.id, question, chat_history)
+        project = db.get(KnowledgeProject, session.project_id)
+        project_name = project.name if project and not project.is_deleted else ""
+        result = run_workflow(
+            workflow.api_base_url or get_settings().dify_api_base_url,
+            _api_key_from_env(workflow),
+            user.id,
+            question,
+            chat_history,
+            extra_inputs={"project_name": project_name},
+        )
         assistant_message = KnowledgeQaMessage(
             session_id=session.id,
             role="assistant",

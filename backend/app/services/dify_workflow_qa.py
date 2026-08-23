@@ -25,17 +25,20 @@ def _outputs(payload: dict) -> dict:
     return outputs if isinstance(outputs, dict) else {}
 
 
-def run_workflow(api_base_url: str, api_key: str, user_id: int, question: str, chat_history: str) -> dict:
+def run_workflow(api_base_url: str, api_key: str, user_id: int, question: str, chat_history: str, extra_inputs: dict | None = None, timeout: float = 600) -> dict:
+    inputs = {
+        "user_input": question,
+        "chat_history": chat_history,
+    }
+    if extra_inputs:
+        inputs.update(extra_inputs)
     request_body = {
-        "inputs": {
-            "user_input": question,
-            "chat_history": chat_history,
-        },
+        "inputs": inputs,
         "response_mode": "blocking",
         "user": f"test-platform-{user_id}",
     }
     try:
-        with httpx.Client(timeout=600) as client:
+        with httpx.Client(timeout=timeout) as client:
             response = client.post(_api_url(api_base_url, "workflows/run"), headers=_headers(api_key), json=request_body)
             response.raise_for_status()
     except httpx.HTTPError as exc:

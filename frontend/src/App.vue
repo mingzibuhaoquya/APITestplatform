@@ -1595,11 +1595,6 @@
             <a-button type="primary" @click="openCreateKnowledgeWorkflow"><template #icon><PlusOutlined /></template>新增工作流</a-button>
           </div>
           <a-form class="search-form" layout="vertical">
-            <a-form-item label="项目">
-              <a-select v-model:value="knowledgeWorkflowSearch.project_id" placeholder="请选择项目" allow-clear>
-                <a-select-option v-for="p in knowledgeProjects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
-              </a-select>
-            </a-form-item>
             <a-form-item label="工作流名称"><a-input v-model:value="knowledgeWorkflowSearch.name" placeholder="请输入工作流名称" allow-clear @keyup.enter="searchKnowledgeWorkflows" /></a-form-item>
             <a-form-item label="状态">
               <a-select v-model:value="knowledgeWorkflowSearch.status" placeholder="请选择状态" allow-clear>
@@ -1609,9 +1604,8 @@
             </a-form-item>
             <div class="search-actions"><a-button type="primary" @click="searchKnowledgeWorkflows">搜索</a-button><a-button @click="resetKnowledgeWorkflowSearch">重置</a-button></div>
           </a-form>
-          <a-table :pagination="false" :data-source="knowledgeWorkflowList" :scroll="{ x: 1060 }">
+          <a-table :pagination="false" :data-source="knowledgeWorkflowList" :scroll="{ x: 960 }">
             <a-table-column title="编号" width="70"><template #default="{ index }">{{ knowledgeWorkflowSerialNumber(index) }}</template></a-table-column>
-            <a-table-column data-index="project_name" title="项目" width="150" />
             <a-table-column title="工作流名称"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
             <a-table-column title="API 地址"><template #default="{ record: row }"><TableText :value="row.api_base_url" /></template></a-table-column>
             <a-table-column title="API Key 环境变量"><template #default="{ record: row }"><TableText :value="row.api_key_env" /></template></a-table-column>
@@ -1620,7 +1614,7 @@
             <a-table-column title="操作" width="260" fixed="right">
               <template #default="{ record: row }">
                 <div class="table-actions">
-                  <a-button size="small" @click="checkKnowledgeWorkflow(row)">测试</a-button>
+                  <a-button size="small" :loading="knowledgeWorkflowCheckingId === row.id" @click="checkKnowledgeWorkflow(row)">测试</a-button>
                   <a-button size="small" @click="openEditKnowledgeWorkflow(row)">编辑</a-button>
                   <a-button size="small" danger @click="deleteKnowledgeWorkflow(row)">删除</a-button>
                 </div>
@@ -1631,7 +1625,6 @@
 
           <a-modal v-model:open="knowledgeWorkflowFormVisible" :title="knowledgeWorkflowForm.id ? '编辑工作流配置' : '新增工作流配置'" width="560px" @after-close="resetKnowledgeWorkflowForm">
             <a-form layout="vertical">
-              <a-form-item label="项目" required><a-select v-model:value="knowledgeWorkflowForm.project_id" placeholder="请选择项目"><a-select-option v-for="p in activeKnowledgeProjects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option></a-select></a-form-item>
               <a-form-item label="工作流名称" required><a-input v-model:value="knowledgeWorkflowForm.name" placeholder="例如：FAF知识库问答工作流" /></a-form-item>
               <a-form-item label="Dify API 地址"><a-input v-model:value="knowledgeWorkflowForm.api_base_url" placeholder="留空使用全局 DIFY_API_BASE_URL" /></a-form-item>
               <a-form-item label="API Key 环境变量名" required><a-select v-model:value="knowledgeWorkflowForm.api_key_env" placeholder="请选择 API Key 配置" show-search option-filter-prop="label" @dropdown-visible-change="handleWorkflowApiKeyDropdown"><a-select-option v-for="item in workflowApiKeyOptions" :key="item.env_key" :value="item.env_key" :label="`${item.display_name} ${item.env_key}`">{{ item.display_name }}（{{ item.env_key }}）<span class="option-status">{{ item.configured ? '' : '未配置' }}</span></a-select-option></a-select></a-form-item>
@@ -1670,7 +1663,7 @@
                 <div><strong>{{ selectedQaSession.title }}</strong><span>{{ selectedQaSession.project_name }} / {{ selectedQaSession.workflow_name }}</span></div>
                 <a-button size="small" danger @click="deleteQaSession(selectedQaSession)">删除会话</a-button>
               </div>
-              <div class="qa-messages">
+              <div ref="qaMessagesRef" class="qa-messages">
                 <template v-if="selectedQaSession">
                   <div v-for="msg in qaMessages" :key="msg.id" class="qa-message" :class="`qa-message-${msg.role}`">
                     <div class="qa-message-role">{{ msg.role === 'user' ? '我' : '助手' }}</div>
@@ -1882,7 +1875,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, defineComponent, h, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import { basicSetup } from 'codemirror'
@@ -2283,7 +2276,7 @@ const knowledgeSearch = reactive({ project_id: undefined as number | undefined, 
 const knowledgePagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const knowledgeDocumentSearch = reactive({ keyword: '', status: '' })
 const knowledgeDocumentPagination = reactive({ page: 1, pageSize: 10, total: 0 })
-const knowledgeWorkflowSearch = reactive({ project_id: undefined as number | undefined, name: '', status: '' })
+const knowledgeWorkflowSearch = reactive({ name: '', status: '' })
 const knowledgeWorkflowPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const qaSessionSearch = reactive({ project_id: undefined as number | undefined })
 const ticketSearch = reactive({ title: '', category: '', status: '' })
@@ -2337,7 +2330,7 @@ const knowledgeRetrieving = ref(false)
 const knowledgeRetrieved = ref(false)
 const knowledgeWorkflowFormVisible = ref(false)
 const qaSessionFormVisible = ref(false)
-const knowledgeWorkflowChecking = ref(false)
+const knowledgeWorkflowCheckingId = ref<number | null>(null)
 const qaAsking = ref(false)
 const createProjectDialogVisible = ref(false)
 const editProjectDialogVisible = ref(false)
@@ -2370,7 +2363,7 @@ const knowledgeForm = reactive({ id: undefined as number | undefined, project_id
 const knowledgeRetrieveForm = reactive({ query: '', top_k: 5, score_threshold: undefined as number | undefined })
 const knowledgeRetrieveResult = ref<any[]>([])
 const selectedQaSession = ref<any>(null)
-const knowledgeWorkflowForm = reactive({ id: undefined as number | undefined, project_id: undefined as number | undefined, name: '', api_base_url: '', api_key_env: '', status: 'active', description: '' })
+const knowledgeWorkflowForm = reactive({ id: undefined as number | undefined, name: '', api_base_url: '', api_key_env: '', status: 'active', description: '' })
 const qaSessionForm = reactive({ project_id: undefined as number | undefined, workflow_id: undefined as number | undefined, title: '' })
 const qaQuestion = ref('')
 const changePasswordForm = reactive({ old_password: '', new_password: '', confirm_password: '' })
@@ -2430,7 +2423,7 @@ const dashboardStats = computed(() => [
 ])
 const activeKnowledgeProjects = computed(() => knowledgeProjects.value.filter(item => item.status === 'active'))
 const activeKnowledgeWorkflows = computed(() => knowledgeWorkflows.value.filter(item => item.status === 'active'))
-const qaSessionWorkflows = computed(() => activeKnowledgeWorkflows.value.filter(item => qaSessionForm.project_id && item.project_id === qaSessionForm.project_id))
+const qaSessionWorkflows = computed(() => activeKnowledgeWorkflows.value)
 const caseSearchApis = computed(() => apis.value.filter(item => caseSearch.project_id && item.project_id === caseSearch.project_id))
 const caseFormApis = computed(() => apis.value.filter(item => caseForm.project_id && item.project_id === caseForm.project_id))
 const currentCaseApi = computed(() => selectedCaseApi())
@@ -3280,7 +3273,6 @@ async function loadKnowledgeWorkflows() {
   const [listRes, allRes] = await Promise.all([
     api.get('/knowledge-workflows', {
       params: {
-        ...(knowledgeWorkflowSearch.project_id ? { project_id: knowledgeWorkflowSearch.project_id } : {}),
         ...(name ? { name } : {}),
         ...(status ? { status } : {}),
         page: knowledgeWorkflowPagination.page,
@@ -3302,7 +3294,6 @@ async function searchKnowledgeWorkflows() {
 }
 
 async function resetKnowledgeWorkflowSearch() {
-  knowledgeWorkflowSearch.project_id = undefined
   knowledgeWorkflowSearch.name = ''
   knowledgeWorkflowSearch.status = ''
   knowledgeWorkflowPagination.page = 1
@@ -3316,7 +3307,6 @@ async function changeKnowledgeWorkflowPage(page: number) {
 
 function resetKnowledgeWorkflowForm() {
   knowledgeWorkflowForm.id = undefined
-  knowledgeWorkflowForm.project_id = undefined
   knowledgeWorkflowForm.name = ''
   knowledgeWorkflowForm.api_base_url = ''
   knowledgeWorkflowForm.api_key_env = ''
@@ -3331,7 +3321,6 @@ function openCreateKnowledgeWorkflow() {
 
 function openEditKnowledgeWorkflow(row: any) {
   knowledgeWorkflowForm.id = row.id
-  knowledgeWorkflowForm.project_id = row.project_id
   knowledgeWorkflowForm.name = row.name
   knowledgeWorkflowForm.api_base_url = row.api_base_url || ''
   knowledgeWorkflowForm.api_key_env = row.api_key_env || ''
@@ -3341,7 +3330,6 @@ function openEditKnowledgeWorkflow(row: any) {
 }
 
 function validateKnowledgeWorkflowForm() {
-  if (!knowledgeWorkflowForm.project_id) { message.warning('请选择项目'); return false }
   if (!knowledgeWorkflowForm.name.trim()) { message.warning('请输入工作流名称'); return false }
   if (!knowledgeWorkflowForm.api_key_env.trim()) { message.warning('请输入 API Key 环境变量名'); return false }
   return true
@@ -3350,7 +3338,6 @@ function validateKnowledgeWorkflowForm() {
 async function saveKnowledgeWorkflow() {
   if (!validateKnowledgeWorkflowForm()) return
   const payload = {
-    project_id: knowledgeWorkflowForm.project_id,
     name: knowledgeWorkflowForm.name.trim(),
     api_base_url: knowledgeWorkflowForm.api_base_url.trim(),
     api_key_env: knowledgeWorkflowForm.api_key_env.trim(),
@@ -3374,15 +3361,19 @@ async function saveKnowledgeWorkflow() {
 }
 
 async function checkKnowledgeWorkflow(row: any) {
-  if (knowledgeWorkflowChecking.value) return
-  knowledgeWorkflowChecking.value = true
+  if (knowledgeWorkflowCheckingId.value !== null) {
+    message.warning('上一次连接测试仍在进行中，请稍候')
+    return
+  }
+  knowledgeWorkflowCheckingId.value = row.id
   try {
     await api.post(`/knowledge-workflows/${row.id}/check`)
     message.success('工作流连接测试成功')
   } catch (error: any) {
-    message.error(error?.response?.data?.detail || '工作流连接测试失败')
+    const detail = error?.response?.data?.detail || error?.message
+    message.error(detail ? `工作流连接测试失败：${detail}` : '工作流连接测试失败')
   } finally {
-    knowledgeWorkflowChecking.value = false
+    knowledgeWorkflowCheckingId.value = null
   }
 }
 
@@ -3505,6 +3496,19 @@ async function askKnowledgeQa() {
     qaAsking.value = false
   }
 }
+
+const qaMessagesRef = ref<HTMLElement | null>(null)
+
+async function scrollQaMessagesToBottom() {
+  await nextTick()
+  const el = qaMessagesRef.value
+  if (el) el.scrollTop = el.scrollHeight
+}
+
+watch(
+  () => [qaMessages.value.length, selectedQaSession.value?.id] as const,
+  () => { void scrollQaMessagesToBottom() }
+)
 
 function apiKeyConfigSerialNumber(index: number) {
   return (apiKeyConfigPagination.page - 1) * apiKeyConfigPagination.pageSize + index + 1

@@ -222,7 +222,6 @@ class KnowledgeWorkflow(Base, TimestampMixin):
     __tablename__ = "knowledge_workflow"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    project_id: Mapped[int] = mapped_column(Integer, index=True)
     name: Mapped[str] = mapped_column(String(128), index=True)
     api_base_url: Mapped[str] = mapped_column(String(255), default="")
     api_key: Mapped[str] = mapped_column(String(255), default="")
