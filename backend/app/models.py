@@ -181,6 +181,95 @@ class AiCaseGeneration(Base, TimestampMixin):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class KnowledgeBase(Base, TimestampMixin):
+    __tablename__ = "knowledge_base"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(Integer, index=True)
+    name: Mapped[str] = mapped_column(String(128), index=True)
+    dify_dataset_id: Mapped[str] = mapped_column(String(255), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    creator_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+
+
+class KnowledgeProject(Base, TimestampMixin):
+    __tablename__ = "knowledge_project"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    creator_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+
+
+class KnowledgeQueryLog(Base, TimestampMixin):
+    __tablename__ = "knowledge_query_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    knowledge_base_id: Mapped[int] = mapped_column(Integer, index=True)
+    project_id: Mapped[int] = mapped_column(Integer, index=True)
+    query_text: Mapped[str] = mapped_column(Text)
+    hit_count: Mapped[int] = mapped_column(Integer, default=0)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    operator_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    error_message: Mapped[str] = mapped_column(Text, default="")
+
+
+class KnowledgeWorkflow(Base, TimestampMixin):
+    __tablename__ = "knowledge_workflow"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(Integer, index=True)
+    name: Mapped[str] = mapped_column(String(128), index=True)
+    api_base_url: Mapped[str] = mapped_column(String(255), default="")
+    api_key: Mapped[str] = mapped_column(String(255), default="")
+    api_key_env: Mapped[str] = mapped_column(String(128), default="")
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    creator_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+
+
+class KnowledgeQaSession(Base, TimestampMixin):
+    __tablename__ = "knowledge_qa_session"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    project_id: Mapped[int] = mapped_column(Integer, index=True)
+    workflow_id: Mapped[int] = mapped_column(Integer, index=True)
+    title: Mapped[str] = mapped_column(String(128), default="")
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+
+
+class KnowledgeQaMessage(Base, TimestampMixin):
+    __tablename__ = "knowledge_qa_message"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_id: Mapped[int] = mapped_column(Integer, index=True)
+    role: Mapped[str] = mapped_column(String(32), index=True)
+    content: Mapped[str] = mapped_column(Text().with_variant(LONGTEXT, "mysql"), default="")
+    dify_workflow_run_id: Mapped[str] = mapped_column(String(255), default="", index=True)
+    dify_task_id: Mapped[str] = mapped_column(String(255), default="", index=True)
+    raw_response_json: Mapped[str] = mapped_column(Text().with_variant(LONGTEXT, "mysql"), default="{}")
+    error_message: Mapped[str] = mapped_column(Text().with_variant(LONGTEXT, "mysql"), default="")
+
+
+class ApiKeyConfig(Base, TimestampMixin):
+    __tablename__ = "api_key_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    env_key: Mapped[str] = mapped_column(String(128), index=True)
+    display_name: Mapped[str] = mapped_column(String(128), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    creator_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+
+
 class Ticket(Base, TimestampMixin):
     __tablename__ = "ticket"
 

@@ -7,8 +7,8 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 from .config import get_settings
 from .database import Base, SessionLocal, engine
-from .models import AiCaseGeneration, TestCase, Ticket, TicketAttachment, User, UserSession
-from .routers import ai_case_generations, auth, crud, executions, mock, roles, tickets, users
+from .models import AiCaseGeneration, ApiKeyConfig, KnowledgeBase, KnowledgeProject, Project, TestCase, Ticket, TicketAttachment, User, UserSession
+from .routers import ai_case_generations, api_key_configs, auth, crud, executions, knowledge_bases, knowledge_projects, knowledge_qa, knowledge_workflows, mock, roles, tickets, users
 from .security import hash_password
 from .services.menus import ensure_default_roles
 from .services.operation_logs import log_system_exception
@@ -38,6 +38,11 @@ app.include_router(crud.router)
 app.include_router(executions.router)
 app.include_router(mock.router)
 app.include_router(ai_case_generations.router)
+app.include_router(api_key_configs.router)
+app.include_router(knowledge_projects.router)
+app.include_router(knowledge_bases.router)
+app.include_router(knowledge_workflows.router)
+app.include_router(knowledge_qa.router)
 app.include_router(tickets.router)
 
 
@@ -72,6 +77,9 @@ def startup() -> None:
     _ensure_test_suite_columns()
     _ensure_execution_task_columns()
     _ensure_execution_result_columns()
+    _migrate_knowledge_projects()
+    _ensure_knowledge_workflow_columns()
+    _ensure_api_key_configs()
     _ensure_roles()
     _ensure_admin()
 
@@ -193,6 +201,69 @@ def _ensure_execution_result_columns() -> None:
             if column and "LONGTEXT" not in str(column["type"]).upper():
                 conn.execute(text(f"ALTER TABLE execution_result MODIFY COLUMN {column_name} LONGTEXT NOT NULL"))
 
+
+def _migrate_knowledge_projects() -> None:
+    db: Session = SessionLocal()
+    try:
+        if db.query(KnowledgeProject).first() or not db.query(KnowledgeBase).first():
+            return
+        project_map: dict[int, int] = {}
+        for base in db.query(KnowledgeBase).filter(KnowledgeBase.is_deleted.is_(False)).all():
+            old_project_id = base.project_id
+            if old_project_id not in project_map:
+                old_project = db.get(Project, old_project_id)
+                name = old_project.name if old_project and not old_project.is_deleted else f"知识库项目{old_project_id}"
+                candidate = name
+                suffix = 2
+                while db.query(KnowledgeProject).filter(KnowledgeProject.name == candidate, KnowledgeProject.is_deleted.is_(False)).first():
+                    candidate = f"{name}_{suffix}"
+                    suffix += 1
+                row = KnowledgeProject(
+                    name=candidate,
+                    description="由旧版知识库绑定自动迁移",
+                    status="active",
+                    creator_id=base.creator_id,
+                    is_deleted=False,
+                )
+                db.add(row)
+                db.flush()
+                project_map[old_project_id] = row.id
+            base.project_id = project_map[old_project_id]
+        db.commit()
+    finally:
+        db.close()
+
+
+def _ensure_knowledge_workflow_columns() -> None:
+    inspector = inspect(engine)
+    if "knowledge_workflow" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("knowledge_workflow")}
+    with engine.begin() as conn:
+        if "api_key_env" not in columns:
+            conn.execute(text("ALTER TABLE knowledge_workflow ADD COLUMN api_key_env VARCHAR(128) NOT NULL DEFAULT '' AFTER api_key"))
+def _ensure_api_key_configs() -> None:
+    inspector = inspect(engine)
+    if "api_key_config" in inspector.get_table_names():
+        columns = {column["name"] for column in inspector.get_columns("api_key_config")}
+        if "category" in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE api_key_config DROP COLUMN category"))
+    defaults = [
+        ("DIFY_API_BASE_URL", "Dify API基础地址"),
+        ("DIFY_WORKFLOW_API_KEY", "Dify工作流API Key"),
+        ("DIFY_KNOWLEDGE_API_KEY", "Dify知识库API Key"),
+    ]
+    db = SessionLocal()
+    try:
+        for env_key, display_name in defaults:
+            exists = db.query(ApiKeyConfig).filter(ApiKeyConfig.env_key == env_key, ApiKeyConfig.is_deleted.is_(False)).first()
+            if exists:
+                continue
+            db.add(ApiKeyConfig(env_key=env_key, display_name=display_name, status="active", is_deleted=False))
+        db.commit()
+    finally:
+        db.close()
 
 def _ensure_roles() -> None:
     db: Session = SessionLocal()

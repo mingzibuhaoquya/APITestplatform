@@ -11,15 +11,20 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
-from app.main import _without_assertion_operators
-from app.models import Environment, ExecutionResult, ExecutionTask, Project, Role, TestCase as TestCaseModel, TestSuite, User, UserSession
+from app.main import _ensure_api_key_configs, _migrate_knowledge_projects, _without_assertion_operators
+from app.models import ApiKeyConfig, Environment, ExecutionResult, ExecutionTask, KnowledgeBase, KnowledgeProject, KnowledgeQaMessage, KnowledgeQaSession, KnowledgeQueryLog, KnowledgeWorkflow, Project, Role, TestCase as TestCaseModel, TestSuite, User, UserSession
 from app.routers.auth import change_password, login, router as auth_router
 from app.routers.crud import create_api, create_case, create_environment, create_plan, create_project, delete_api, delete_case, delete_environment, delete_plan, delete_project, execute_plan, get_execution_log_detail, list_apis, list_cases, list_environments, list_exception_logs, list_execution_logs, list_logs, list_plans, list_projects, update_api, update_case, update_environment, update_plan, update_project
 from app.routers.executions import delete_execution, list_executions
 from app.routers.mock import router as mock_router
 from app.routers.users import create_user, list_users, router as users_router, update_user, update_user_status
 from app.routers.roles import create_role, delete_role, list_roles, update_role
-from app.schemas import ApiDefinitionIn, ApiDefinitionUpdate, ChangePasswordIn, EncryptionConfigIn, EnvironmentIn, EnvironmentUpdate, LoginIn, ProjectIn, ProjectUpdate, RoleIn, RoleUpdate, TestCaseIn, TestCaseUpdate, TestPlanIn, TestPlanUpdate, UserCreate, UserStatusUpdate, UserUpdate
+from app.routers.api_key_configs import create_api_key_config, delete_api_key_config, list_api_key_config_options, list_api_key_configs, update_api_key_config
+from app.routers.knowledge_bases import create_knowledge_base, delete_knowledge_base, list_knowledge_bases, retrieve_knowledge_base, update_knowledge_base
+from app.routers.knowledge_workflows import create_knowledge_workflow, delete_knowledge_workflow, list_knowledge_workflows, update_knowledge_workflow
+from app.routers.knowledge_qa import ask as ask_knowledge_qa, create_session as create_qa_session
+from app.routers.knowledge_projects import create_knowledge_project, delete_knowledge_project, list_knowledge_projects, update_knowledge_project
+from app.schemas import ApiDefinitionIn, ApiDefinitionUpdate, ApiKeyConfigIn, ApiKeyConfigUpdate, ChangePasswordIn, EncryptionConfigIn, EnvironmentIn, EnvironmentUpdate, KnowledgeBaseIn, KnowledgeBaseUpdate, KnowledgeProjectIn, KnowledgeProjectUpdate, KnowledgeQaAskIn, KnowledgeQaSessionIn, KnowledgeRetrieveIn, KnowledgeWorkflowIn, KnowledgeWorkflowUpdate, LoginIn, ProjectIn, ProjectUpdate, RoleIn, RoleUpdate, TestCaseIn, TestCaseUpdate, TestPlanIn, TestPlanUpdate, UserCreate, UserStatusUpdate, UserUpdate
 from app.services.menus import ensure_default_roles
 from app.services.assertions import all_passed, run_assertions
 from app.services import executor as executor_service
@@ -88,6 +93,322 @@ def test_ai_case_permission_is_added_to_builtin_roles(db_session):
     assert "ai_cases" in parse_json(roles["admin"].menus_json, [])
     assert "ai_cases" in parse_json(roles["tester"].menus_json, [])
 
+
+def test_knowledge_permissions_are_added_to_builtin_roles(db_session):
+    db, _ = db_session
+    ensure_default_roles(db)
+    roles = {role.code: role for role in db.query(Role).all()}
+
+    assert "knowledge_projects" in parse_json(roles["admin"].menus_json, [])
+    assert "knowledge_bases" in parse_json(roles["admin"].menus_json, [])
+    assert "knowledge_projects" in parse_json(roles["tester"].menus_json, [])
+    assert "knowledge_bases" in parse_json(roles["tester"].menus_json, [])
+
+
+def test_knowledge_project_crud_and_delete_guard(db_session):
+    db, admin = db_session
+    created = create_knowledge_project(KnowledgeProjectIn(name="知识库项目", description="desc"), admin, db)
+    assert created["name"] == "知识库项目"
+
+    with pytest.raises(HTTPException) as duplicate:
+        create_knowledge_project(KnowledgeProjectIn(name="知识库项目"), admin, db)
+    assert duplicate.value.status_code == 400
+
+    updated = update_knowledge_project(created["id"], KnowledgeProjectUpdate(name="知识库项目2", description="new", status="disabled"), admin, db)
+    assert updated["status"] == "disabled"
+
+    updated = update_knowledge_project(created["id"], KnowledgeProjectUpdate(name="知识库项目2", description="new", status="active"), admin, db)
+    create_knowledge_base(KnowledgeBaseIn(project_id=updated["id"], name="业务知识库", dify_dataset_id="dataset-guard"), admin, db)
+    with pytest.raises(HTTPException) as guarded:
+        delete_knowledge_project(updated["id"], admin, db)
+    assert guarded.value.status_code == 400
+
+
+def test_knowledge_base_crud_validates_project_and_duplicates(db_session):
+    db, admin = db_session
+    project = create_knowledge_project(KnowledgeProjectIn(name="知识库项目", description="desc"), admin, db)
+
+    created = create_knowledge_base(
+        KnowledgeBaseIn(project_id=project["id"], name="业务知识库", dify_dataset_id="dataset-001", description="rules"),
+        admin,
+        db,
+    )
+    assert created["project_name"] == "知识库项目"
+    assert created["status"] == "active"
+
+    with pytest.raises(HTTPException) as duplicate_name:
+        create_knowledge_base(KnowledgeBaseIn(project_id=project["id"], name="业务知识库", dify_dataset_id="dataset-002"), admin, db)
+    assert duplicate_name.value.status_code == 400
+
+    with pytest.raises(HTTPException) as duplicate_dataset:
+        create_knowledge_base(KnowledgeBaseIn(project_id=project["id"], name="其他知识库", dify_dataset_id="dataset-001"), admin, db)
+    assert duplicate_dataset.value.status_code == 400
+
+    updated = update_knowledge_base(
+        created["id"],
+        KnowledgeBaseUpdate(project_id=project["id"], name="接口知识库", dify_dataset_id="dataset-003", status="disabled"),
+        admin,
+        db,
+    )
+    assert updated["name"] == "接口知识库"
+    assert updated["status"] == "disabled"
+
+    deleted = delete_knowledge_base(created["id"], admin, db)
+    assert deleted["id"] == created["id"]
+    assert list_knowledge_bases(project_id=project["id"], page=1, page_size=10, db=db, _=admin)["total"] == 0
+
+
+def test_knowledge_base_rejects_interface_project_id(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="接口项目", description="desc"), admin, db)
+
+    with pytest.raises(HTTPException) as missing:
+        create_knowledge_base(KnowledgeBaseIn(project_id=project["id"], name="业务知识库", dify_dataset_id="dataset-interface"), admin, db)
+    assert missing.value.status_code == 400
+    assert "知识库项目" in missing.value.detail
+
+
+def test_knowledge_base_rejects_disabled_project(db_session):
+    db, admin = db_session
+    project = create_knowledge_project(KnowledgeProjectIn(name="禁用项目", status="disabled"), admin, db)
+
+    with pytest.raises(HTTPException) as disabled:
+        create_knowledge_base(KnowledgeBaseIn(project_id=project["id"], name="业务知识库", dify_dataset_id="dataset-disabled"), admin, db)
+    assert disabled.value.status_code == 400
+    assert "已禁用" in disabled.value.detail
+
+
+def test_legacy_knowledge_base_project_ids_are_migrated(db_session, monkeypatch):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="旧接口项目", description="desc"), admin, db)
+    legacy = KnowledgeBase(project_id=project["id"], name="旧绑定", dify_dataset_id="legacy-dataset", creator_id=admin.id, is_deleted=False)
+    db.add(legacy)
+    db.commit()
+    db.refresh(legacy)
+
+    from app import main as main_module
+
+    class SessionProxy:
+        def __getattr__(self, name):
+            return getattr(db, name)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(main_module, "SessionLocal", lambda: SessionProxy())
+    _migrate_knowledge_projects()
+    db.refresh(legacy)
+
+    migrated_project = db.get(KnowledgeProject, legacy.project_id)
+    assert migrated_project
+    assert migrated_project.name == "旧接口项目"
+    assert list_knowledge_bases(project_id=migrated_project.id, page=1, page_size=10, db=db, _=admin)["total"] == 1
+
+
+def test_knowledge_retrieve_records_query_log(db_session, monkeypatch):
+    db, admin = db_session
+    project = create_knowledge_project(KnowledgeProjectIn(name="检索项目", description="desc"), admin, db)
+    created = create_knowledge_base(
+        KnowledgeBaseIn(project_id=project["id"], name="检索知识库", dify_dataset_id="dataset-retrieve"),
+        admin,
+        db,
+    )
+
+    def fake_retrieve(dataset_id, query, top_k, score_threshold):
+        assert dataset_id == "dataset-retrieve"
+        assert query == "登录接口规则"
+        assert top_k == 3
+        assert score_threshold == 0.2
+        return {"query": query, "hits": [{"content": "命中内容", "score": 0.91}]}, 12
+
+    monkeypatch.setattr("app.routers.knowledge_bases.retrieve", fake_retrieve)
+    result = retrieve_knowledge_base(
+        created["id"],
+        KnowledgeRetrieveIn(query="登录接口规则", top_k=3, score_threshold=0.2),
+        admin,
+        db,
+    )
+
+    assert result["duration_ms"] == 12
+    assert result["hits"][0]["content"] == "命中内容"
+    log = db.query(KnowledgeQueryLog).one()
+    assert log.knowledge_base_id == created["id"]
+    assert log.hit_count == 1
+    assert log.duration_ms == 12
+
+
+def test_knowledge_workflow_permissions_are_added_to_builtin_roles(db_session):
+    db, _ = db_session
+    ensure_default_roles(db)
+    roles = {role.code: role for role in db.query(Role).all()}
+
+    assert "knowledge_workflows" in parse_json(roles["admin"].menus_json, [])
+    assert "knowledge_qa" in parse_json(roles["admin"].menus_json, [])
+    assert "knowledge_workflows" not in parse_json(roles["tester"].menus_json, [])
+    assert "knowledge_qa" in parse_json(roles["tester"].menus_json, [])
+
+
+def test_api_key_config_permissions_are_admin_only(db_session):
+    db, _ = db_session
+    ensure_default_roles(db)
+    roles = {role.code: role for role in db.query(Role).all()}
+
+    assert "api_key_configs" in parse_json(roles["admin"].menus_json, [])
+    assert "api_key_configs" not in parse_json(roles["tester"].menus_json, [])
+
+
+def test_api_key_config_defaults_are_seeded_once(db_session, monkeypatch):
+    db, _ = db_session
+
+    from app import main as main_module
+
+    class SessionProxy:
+        def __getattr__(self, name):
+            return getattr(db, name)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(main_module, "SessionLocal", lambda: SessionProxy())
+    monkeypatch.setattr(main_module, "engine", db.get_bind())
+    _ensure_api_key_configs()
+    _ensure_api_key_configs()
+
+    rows = db.query(ApiKeyConfig).filter(ApiKeyConfig.is_deleted.is_(False)).all()
+    env_keys = [row.env_key for row in rows]
+    assert env_keys.count("DIFY_API_BASE_URL") == 1
+    assert env_keys.count("DIFY_WORKFLOW_API_KEY") == 1
+    assert env_keys.count("DIFY_KNOWLEDGE_API_KEY") == 1
+
+
+def test_api_key_config_crud_options_and_configured_flag(db_session, monkeypatch):
+    db, admin = db_session
+    monkeypatch.setenv("DIFY_WORKFLOW_API_KEY_FAF", "configured-secret")
+
+    created = create_api_key_config(
+        ApiKeyConfigIn(env_key="DIFY_WORKFLOW_API_KEY_FAF", display_name="FAF工作流Key", description="desc"),
+        admin,
+        db,
+    )
+    assert created["env_key"] == "DIFY_WORKFLOW_API_KEY_FAF"
+    assert created["configured"] is True
+    assert "configured-secret" not in str(created)
+
+    with pytest.raises(HTTPException) as invalid:
+        create_api_key_config(ApiKeyConfigIn(env_key="app-secret", display_name="错误变量"), admin, db)
+    assert invalid.value.status_code == 400
+
+    with pytest.raises(HTTPException) as duplicate:
+        create_api_key_config(ApiKeyConfigIn(env_key="DIFY_WORKFLOW_API_KEY_FAF", display_name="重复"), admin, db)
+    assert duplicate.value.status_code == 400
+
+    updated = update_api_key_config(
+        created["id"],
+        ApiKeyConfigUpdate(env_key="DIFY_WORKFLOW_API_KEY_FAF", display_name="FAF问答工作流Key", status="disabled"),
+        admin,
+        db,
+    )
+    assert updated["status"] == "disabled"
+    assert list_api_key_config_options(db=db, _=admin) == []
+
+    update_api_key_config(
+        created["id"],
+        ApiKeyConfigUpdate(env_key="DIFY_WORKFLOW_API_KEY_FAF", display_name="FAF问答工作流Key", status="active"),
+        admin,
+        db,
+    )
+    listed = list_api_key_configs(keyword="FAF", status="active", page=1, page_size=10, db=db, _=admin)
+    assert listed["total"] == 1
+
+    deleted = delete_api_key_config(created["id"], admin, db)
+    assert deleted["id"] == created["id"]
+    assert list_api_key_configs(page=1, page_size=10, db=db, _=admin)["total"] == 0
+
+
+def test_knowledge_workflow_requires_enabled_api_key_config(db_session):
+    db, admin = db_session
+    project = create_knowledge_project(KnowledgeProjectIn(name="工作流变量项目"), admin, db)
+
+    with pytest.raises(HTTPException) as missing:
+        create_knowledge_workflow(KnowledgeWorkflowIn(project_id=project["id"], name="未登记工作流", api_key_env="DIFY_WORKFLOW_API_KEY_MISSING"), admin, db)
+    assert missing.value.status_code == 400
+
+    create_api_key_config(ApiKeyConfigIn(env_key="DIFY_KNOWLEDGE_API_KEY_ONLY", display_name="知识库Key"), admin, db)
+    created = create_knowledge_workflow(KnowledgeWorkflowIn(project_id=project["id"], name="任意已登记Key工作流", api_key_env="DIFY_KNOWLEDGE_API_KEY_ONLY"), admin, db)
+    assert created["api_key_env"] == "DIFY_KNOWLEDGE_API_KEY_ONLY"
+
+
+def test_knowledge_workflow_crud_validates_project_and_duplicates(db_session):
+    db, admin = db_session
+    project = create_knowledge_project(KnowledgeProjectIn(name="工作流项目"), admin, db)
+    create_api_key_config(ApiKeyConfigIn(env_key="DIFY_WORKFLOW_API_KEY_FAF", display_name="FAF工作流Key"), admin, db)
+    create_api_key_config(ApiKeyConfigIn(env_key="DIFY_WORKFLOW_API_KEY_OTHER", display_name="其他工作流Key"), admin, db)
+
+    created = create_knowledge_workflow(
+        KnowledgeWorkflowIn(project_id=project["id"], name="FAF工作流", api_key_env="DIFY_WORKFLOW_API_KEY_FAF"),
+        admin,
+        db,
+    )
+    assert created["project_name"] == "工作流项目"
+    assert created["api_key_env"] == "DIFY_WORKFLOW_API_KEY_FAF"
+
+    with pytest.raises(HTTPException) as duplicate:
+        create_knowledge_workflow(KnowledgeWorkflowIn(project_id=project["id"], name="FAF工作流", api_key_env="DIFY_WORKFLOW_API_KEY_OTHER"), admin, db)
+    assert duplicate.value.status_code == 400
+
+    updated = update_knowledge_workflow(
+        created["id"],
+        KnowledgeWorkflowUpdate(project_id=project["id"], name="FAF工作流2", api_key_env="DIFY_WORKFLOW_API_KEY_FAF", status="disabled", description="desc"),
+        admin,
+        db,
+    )
+    assert updated["status"] == "disabled"
+    assert db.get(KnowledgeWorkflow, created["id"]).api_key == ""
+    assert db.get(KnowledgeWorkflow, created["id"]).api_key_env == "DIFY_WORKFLOW_API_KEY_FAF"
+
+    deleted = delete_knowledge_workflow(created["id"], admin, db)
+    assert deleted["id"] == created["id"]
+    assert list_knowledge_workflows(project_id=project["id"], page=1, page_size=10, db=db, _=admin)["total"] == 0
+
+
+def test_knowledge_qa_uses_user_scoped_session_history(db_session, monkeypatch):
+    monkeypatch.setenv("DIFY_WORKFLOW_API_KEY_QA", "app-qa-key")
+    db, admin = db_session
+    create_api_key_config(ApiKeyConfigIn(env_key="DIFY_WORKFLOW_API_KEY_QA", display_name="问答工作流Key"), admin, db)
+    project = create_knowledge_project(KnowledgeProjectIn(name="问答项目"), admin, db)
+    workflow = create_knowledge_workflow(
+        KnowledgeWorkflowIn(project_id=project["id"], name="问答工作流", api_key_env="DIFY_WORKFLOW_API_KEY_QA"),
+        admin,
+        db,
+    )
+    session = create_qa_session(KnowledgeQaSessionIn(project_id=project["id"], workflow_id=workflow["id"], title="追问会话"), admin, db)
+    db.add(KnowledgeQaMessage(session_id=session["id"], role="user", content="产品方案贷后类参数，都对哪些字段进行了修改"))
+    db.add(KnowledgeQaMessage(session_id=session["id"], role="assistant", content="修改了逾期利率设置和逾期利息计算。"))
+    db.commit()
+
+    calls = []
+
+    def fake_run_workflow(api_base_url, api_key, user_id, question, chat_history):
+        calls.append({"api_key": api_key, "question": question, "chat_history": chat_history, "user_id": user_id})
+        return {"answer": "两个字段存在联动关系。", "workflow_run_id": "run-1", "task_id": "task-1", "raw_response": {"ok": True}}
+
+    monkeypatch.setattr("app.routers.knowledge_qa.run_workflow", fake_run_workflow)
+    result = ask_knowledge_qa(session["id"], KnowledgeQaAskIn(question="这俩个字段有什么关联关系？"), admin, db)
+
+    assert result["assistant_message"]["content"] == "两个字段存在联动关系。"
+    assert calls[0]["api_key"] == "app-qa-key"
+    assert calls[0]["question"] == "这俩个字段有什么关联关系？"
+    assert "产品方案贷后类参数" in calls[0]["chat_history"]
+    assert "逾期利率设置" in calls[0]["chat_history"]
+    assert db.query(KnowledgeQaMessage).filter(KnowledgeQaMessage.session_id == session["id"]).count() == 4
+
+    other = User(username="other", password_hash=hash_password("x"), real_name="Other", role="tester")
+    db.add(other)
+    db.commit()
+    db.refresh(other)
+    with pytest.raises(HTTPException) as denied:
+        ask_knowledge_qa(session["id"], KnowledgeQaAskIn(question="串线了吗？"), other, db)
+    assert denied.value.status_code == 404
 
 def test_dify_localhost_file_url_uses_configured_host():
     assert _download_url("http://localhost:8080/files/example.xlsx") == "http://host.docker.internal:8080/files/example.xlsx"

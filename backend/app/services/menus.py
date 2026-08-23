@@ -21,19 +21,30 @@ MENU_TREE = [
     },
     {"key": "ai_cases", "label": "AI生成用例", "module": "ai_case_generation"},
     {
+        "key": "knowledge",
+        "label": "知识库",
+        "children": [
+            {"key": "knowledge_projects", "label": "项目配置", "module": "knowledge_project"},
+            {"key": "knowledge_bases", "label": "知识库配置", "module": "knowledge_base"},
+            {"key": "knowledge_workflows", "label": "工作流配置", "module": "knowledge_workflow"},
+            {"key": "knowledge_qa", "label": "知识问答", "module": "knowledge_qa"},
+        ],
+    },
+    {
         "key": "system",
         "label": "系统管理",
         "children": [
             {"key": "accounts", "label": "用户管理", "module": "user"},
             {"key": "roles", "label": "角色管理", "module": "role"},
             {"key": "tickets", "label": "工单管理", "module": "ticket"},
+            {"key": "api_key_configs", "label": "API Key配置", "module": "api_key_config"},
         ],
     },
 ]
 
 DEFAULT_ROLE_MENUS = {
-    "admin": ["dashboard", "projects", "environments", "apis", "cases", "execute", "reports", "logs", "ai_cases", "accounts", "roles", "tickets"],
-    "tester": ["dashboard", "projects", "environments", "apis", "cases", "execute", "reports", "logs", "ai_cases", "accounts", "tickets"],
+    "admin": ["dashboard", "projects", "environments", "apis", "cases", "execute", "reports", "logs", "ai_cases", "knowledge_projects", "knowledge_bases", "knowledge_workflows", "knowledge_qa", "accounts", "roles", "tickets", "api_key_configs"],
+    "tester": ["dashboard", "projects", "environments", "apis", "cases", "execute", "reports", "logs", "ai_cases", "knowledge_projects", "knowledge_bases", "knowledge_qa", "accounts", "tickets"],
 }
 
 PATH_MENU_RULES = [
@@ -48,7 +59,12 @@ PATH_MENU_RULES = [
     ("/logs", {"logs"}),
     ("/executions", {"execute", "reports"}),
     ("/ai-case-generations", {"ai_cases"}),
+    ("/knowledge-projects", {"knowledge_projects"}),
+    ("/knowledge-bases", {"knowledge_bases"}),
+    ("/knowledge-workflows", {"knowledge_workflows"}),
+    ("/knowledge-qa", {"knowledge_qa"}),
     ("/tickets", {"tickets"}),
+    ("/api-key-configs", {"api_key_configs"}),
 ]
 
 
@@ -91,7 +107,12 @@ def ensure_default_roles(db: Session) -> None:
             if not current_menus:
                 role.menus_json = dump_json(menus)
             elif role.code in DEFAULT_ROLE_MENUS:
-                role.menus_json = dump_json(list(dict.fromkeys([*current_menus, *menus])))
+                merged = list(dict.fromkeys([*current_menus, *menus]))
+                if role.code == "tester" and "knowledge_workflows" in merged:
+                    merged.remove("knowledge_workflows")
+                if role.code == "tester" and "api_key_configs" in merged:
+                    merged.remove("api_key_configs")
+                role.menus_json = dump_json(merged)
             role.name = role.name or name
             role.description = role.description or description
             role.is_builtin = True

@@ -346,7 +346,7 @@
           <a-table :pagination="false" :data-source="tickets" :scroll="{ x: 1120 }">
             <a-table-column title="编号" width="70"><template #default="{ index }">{{ (ticketPagination.page - 1) * ticketPagination.pageSize + index + 1 }}</template></a-table-column>
             <a-table-column title="类型" width="110"><template #default="{ record: row }">{{ ticketCategoryText(row.category) }}</template></a-table-column>
-            <a-table-column data-index="title" title="工单标题" width="230" ellipsis />
+            <a-table-column title="工单标题"><template #default="{ record: row }"><TableText :value="row.title" /></template></a-table-column>
             <a-table-column title="状态" width="100"><template #default="{ record: row }"><a-tag :color="ticketStatusColor(row.status)">{{ ticketStatusText(row.status) }}</a-tag></template></a-table-column>
             <a-table-column data-index="submitter_name" title="提交人" width="120" />
             <a-table-column data-index="create_date" title="提交时间" width="170" />
@@ -368,6 +368,36 @@
           <a-modal v-model:open="processTicketVisible" title="处理工单" width="560px"><a-form layout="vertical"><a-form-item label="状态"><a-select v-model:value="ticketProcessForm.status"><a-select-option value="processing">处理中</a-select-option><a-select-option value="resolved">已解决</a-select-option></a-select></a-form-item><a-form-item label="处理回复" :required="ticketProcessForm.status === 'resolved'"><a-textarea v-model:value="ticketProcessForm.reply" :maxlength="5000" :auto-size="{ minRows: 4, maxRows: 8 }" /></a-form-item></a-form><template #footer><a-button @click="processTicketVisible = false">取消</a-button><a-button type="primary" @click="saveTicketProcess">确认</a-button></template></a-modal>
         </section>
 
+        <section v-if="active === 'api_key_configs'" class="page-view">
+          <div class="toolbar"><h2>API Key配置</h2><a-button type="primary" @click="openCreateApiKeyConfig"><template #icon><PlusOutlined /></template>新增配置</a-button></div>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="关键字"><a-input v-model:value="apiKeyConfigSearch.keyword" placeholder="请输入中文名或环境变量名" allow-clear @keyup.enter="searchApiKeyConfigs" /></a-form-item>
+            <a-form-item label="状态"><a-select v-model:value="apiKeyConfigSearch.status" placeholder="请选择状态" allow-clear><a-select-option value="active">启用</a-select-option><a-select-option value="disabled">禁用</a-select-option></a-select></a-form-item>
+            <div class="search-actions"><a-button type="primary" @click="searchApiKeyConfigs">搜索</a-button><a-button @click="resetApiKeyConfigSearch">重置</a-button></div>
+          </a-form>
+          <a-table class="app-data-table" :pagination="false" :data-source="apiKeyConfigList" :scroll="{ x: true }">
+            <a-table-column title="编号" width="52"><template #default="{ index }">{{ apiKeyConfigSerialNumber(index) }}</template></a-table-column>
+            <a-table-column data-index="display_name" title="中文名" width="190" />
+            <a-table-column title="环境变量名"><template #default="{ record: row }"><TableText :value="row.env_key" /></template></a-table-column>
+            <a-table-column title="环境变量状态" width="130"><template #default="{ record: row }"><a-tag :color="row.configured ? 'success' : 'warning'">{{ row.configured ? '已配置' : '未配置' }}</a-tag></template></a-table-column>
+            <a-table-column title="状态" width="90"><template #default="{ record: row }"><a-tag :color="row.status === 'active' ? 'success' : 'warning'">{{ row.status === 'active' ? '启用' : '禁用' }}</a-tag></template></a-table-column>
+            <a-table-column title="备注"><template #default="{ record: row }"><TableText :value="row.description" /></template></a-table-column>
+            <a-table-column data-index="update_date" title="更新时间" width="170" />
+            <a-table-column title="操作" width="150" fixed="right"><template #default="{ record: row }"><div class="table-actions"><a-button size="small" @click="openEditApiKeyConfig(row)">编辑</a-button><a-button size="small" danger @click="deleteApiKeyConfig(row)">删除</a-button></div></template></a-table-column>
+          </a-table>
+          <div class="pagination"><a-pagination :show-total="paginationTotal" show-less-items :current="apiKeyConfigPagination.page" :page-size="apiKeyConfigPagination.pageSize" :total="apiKeyConfigPagination.total" @change="changeApiKeyConfigPage" /></div>
+
+          <a-modal v-model:open="apiKeyConfigFormVisible" :title="apiKeyConfigForm.id ? '编辑API Key配置' : '新增API Key配置'" width="560px" @after-close="resetApiKeyConfigForm">
+            <a-alert type="info" show-icon message="这里只维护环境变量名和中文名，不保存、不展示真实 API Key。" class="modal-alert" />
+            <a-form layout="vertical">
+              <a-form-item label="中文名" required><a-input v-model:value="apiKeyConfigForm.display_name" placeholder="例如：FAF知识库问答工作流Key" /></a-form-item>
+              <a-form-item label="环境变量名" required><a-input v-model:value="apiKeyConfigForm.env_key" placeholder="例如：DIFY_WORKFLOW_API_KEY_FAF" /></a-form-item>
+              <a-form-item label="状态"><a-select v-model:value="apiKeyConfigForm.status"><a-select-option value="active">启用</a-select-option><a-select-option value="disabled">禁用</a-select-option></a-select></a-form-item>
+              <a-form-item label="备注"><a-textarea v-model:value="apiKeyConfigForm.description" :auto-size="{ minRows: 2, maxRows: 4 }" placeholder="可记录用途、归属知识库或维护人" /></a-form-item>
+            </a-form>
+            <template #footer><a-button @click="apiKeyConfigFormVisible = false">取消</a-button><a-button type="primary" @click="saveApiKeyConfig">确认</a-button></template>
+          </a-modal>
+        </section>
         <section v-if="active === 'projects'" class="page-view">
           <div class="toolbar"><h2>项目管理</h2><a-button type="primary" @click="openCreateProjectDialog"><template #icon><PlusOutlined /></template>创建项目</a-button></div>
           <a-form class="search-form" layout="vertical">
@@ -380,8 +410,8 @@
             </div>
           </a-form>
           <a-table :pagination="false" :data-source="projectList">
-            <a-table-column data-index="name" title="项目" />
-            <a-table-column data-index="description" title="描述" />
+            <a-table-column title="项目"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
+            <a-table-column title="描述"><template #default="{ record: row }"><TableText :value="row.description" /></template></a-table-column>
             <a-table-column title="操作" width="190" fixed="right">
               <template #default="{ record: row }">
                 <div class="table-actions">
@@ -450,10 +480,10 @@
             </div>
           </a-form>
           <a-table :pagination="false" :data-source="environmentList">
-            <a-table-column data-index="project_name" title="项目" />
-            <a-table-column data-index="name" title="环境名称" />
+            <a-table-column title="项目"><template #default="{ record: row }"><TableText :value="row.project_name" /></template></a-table-column>
+            <a-table-column title="环境名称"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
             <a-table-column data-index="protocol" title="协议" />
-            <a-table-column data-index="base_url" title="Base URL" />
+            <a-table-column title="Base URL"><template #default="{ record: row }"><TableText :value="row.base_url" /></template></a-table-column>
             <a-table-column data-index="port" title="端口号" />
             <a-table-column title="操作" width="190" fixed="right">
               <template #default="{ record: row }">
@@ -554,11 +584,11 @@
             </div>
           </a-form>
           <a-table :pagination="false" :data-source="apiList">
-            <a-table-column data-index="project_name" title="项目" />
-            <a-table-column data-index="name" title="名称" />
-            <a-table-column data-index="description" title="接口描述" />
+            <a-table-column title="项目"><template #default="{ record: row }"><TableText :value="row.project_name" /></template></a-table-column>
+            <a-table-column title="名称"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
+            <a-table-column title="接口描述"><template #default="{ record: row }"><TableText :value="row.description" /></template></a-table-column>
             <a-table-column data-index="method" title="方法" width="100" />
-            <a-table-column data-index="path" title="路径" />
+            <a-table-column title="路径"><template #default="{ record: row }"><TableText :value="row.path" /></template></a-table-column>
             <a-table-column data-index="create_date" title="创建时间" width="170" />
             <a-table-column data-index="update_date" title="更新时间" width="170" />
             <a-table-column title="操作" width="190" fixed="right">
@@ -848,9 +878,9 @@
             <a-table-column title="编号" width="80">
               <template #default="{ index }">{{ caseSerialNumber(index) }}</template>
             </a-table-column>
-            <a-table-column data-index="project_name" title="项目" />
-            <a-table-column data-index="api_name" title="接口" />
-            <a-table-column data-index="name" title="用例名称" />
+            <a-table-column title="项目"><template #default="{ record: row }"><TableText :value="row.project_name" /></template></a-table-column>
+            <a-table-column title="接口"><template #default="{ record: row }"><TableText :value="row.api_name" /></template></a-table-column>
+            <a-table-column title="用例名称"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
             <a-table-column title="操作" width="330" fixed="right">
               <template #default="{ record: row }">
                 <div class="table-actions">
@@ -1054,10 +1084,10 @@
                 <a-empty v-if="!(row.cases || []).length" description="暂无用例" :image-style="{ width: '48px', height: '48px' }" />
               </div>
             </template>
-            <a-table-column data-index="name" title="计划名称" width="280" class-name="plan-wrap-cell" />
-            <a-table-column data-index="project_name" title="项目" width="220" class-name="plan-wrap-cell" />
-            <a-table-column data-index="environment_name" title="环境" width="220" class-name="plan-wrap-cell" />
-            <a-table-column data-index="api_name" title="包含接口" width="260" class-name="plan-wrap-cell" />
+            <a-table-column title="计划名称"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
+            <a-table-column title="项目"><template #default="{ record: row }"><TableText :value="row.project_name" /></template></a-table-column>
+            <a-table-column title="环境"><template #default="{ record: row }"><TableText :value="row.environment_name" /></template></a-table-column>
+            <a-table-column title="包含接口"><template #default="{ record: row }"><TableText :value="row.api_name" /></template></a-table-column>
             <a-table-column title="状态" width="96" align="center">
               <template #default="{ record: row }">
                 <a-tag :color="executionStatusColor(row.last_status)">{{ executionStatusText(row.last_status) }}</a-tag>
@@ -1155,8 +1185,8 @@
                   row-key="id"
                   :row-selection="{ onChange: (_keys: any[], rows: any[]) => changePlanCandidateSelection(activePlanEditor, rows) }"
                 >
-                  <a-table-column data-index="name" title="用例名称" />
-                  <a-table-column data-index="api_name" title="接口" />
+                  <a-table-column title="用例名称"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
+                  <a-table-column title="接口"><template #default="{ record: row }"><TableText :value="row.api_name" /></template></a-table-column>
                   <a-table-column title="操作" width="100">
                     <template #default="{ record: row }">
                       <a-button size="small" type="link" @click="openCaseDetailDialog(row, activePlanEditor.environment_id)">查看</a-button>
@@ -1262,17 +1292,15 @@
                 <pre>{{ formatJson(row.response_snapshot) }}</pre>
               </div>
             </template>
-            <a-table-column data-index="case_name" title="用例名称" width="240" class-name="log-ellipsis-cell" />
-            <a-table-column data-index="api_name" title="接口" width="220" class-name="log-ellipsis-cell" />
+            <a-table-column title="用例名称"><template #default="{ record: row }"><TableText :value="row.case_name" /></template></a-table-column>
+            <a-table-column title="接口"><template #default="{ record: row }"><TableText :value="row.api_name" /></template></a-table-column>
             <a-table-column title="状态" width="100">
               <template #default="{ record: row }">
                 <a-tag :color="executionStatusColor(row.status)">{{ executionStatusText(row.status) }}</a-tag>
               </template>
             </a-table-column>
             <a-table-column data-index="duration_ms" title="耗时(ms)" width="100" />
-            <a-table-column title="错误信息" width="220" class-name="log-ellipsis-cell">
-              <template #default="{ record: row }"><span :title="row.error_message || '-'">{{ row.error_message || '-' }}</span></template>
-            </a-table-column>
+            <a-table-column title="错误信息"><template #default="{ record: row }"><TableText :value="row.error_message" /></template></a-table-column>
           </a-table>
           <template #footer>
             <a-button type="primary" @click="executionDetailDialogVisible = false">关闭</a-button>
@@ -1310,9 +1338,9 @@
             :row-key="(row: any) => row.id"
             :row-selection="{ selectedRowKeys: selectedReportIds, onChange: changeSelectedReports }"
           >
-            <a-table-column data-index="target_name" title="测试计划名称" width="180" />
-            <a-table-column data-index="project_name" title="项目" />
-            <a-table-column data-index="environment_name" title="环境" />
+            <a-table-column title="测试计划名称"><template #default="{ record: row }"><TableText :value="row.target_name" /></template></a-table-column>
+            <a-table-column title="项目"><template #default="{ record: row }"><TableText :value="row.project_name" /></template></a-table-column>
+            <a-table-column title="环境"><template #default="{ record: row }"><TableText :value="row.environment_name" /></template></a-table-column>
             <a-table-column title="状态" width="100">
               <template #default="{ record: row }">
                 <a-tag :color="executionStatusColor(row.status)">{{ executionStatusText(row.status) }}</a-tag>
@@ -1399,6 +1427,275 @@
           </div>
         </section>
 
+        <section v-if="active === 'knowledge_projects'" class="page-view">
+          <div class="toolbar"><h2>项目配置</h2><a-button type="primary" @click="openCreateKnowledgeProject"><template #icon><PlusOutlined /></template>创建项目</a-button></div>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="项目名称"><a-input v-model:value="knowledgeProjectSearch.name" placeholder="请输入项目名称" allow-clear @keyup.enter="searchKnowledgeProjects" /></a-form-item>
+            <a-form-item label="状态">
+              <a-select v-model:value="knowledgeProjectSearch.status" placeholder="请选择状态" allow-clear>
+                <a-select-option value="active">启用</a-select-option>
+                <a-select-option value="disabled">禁用</a-select-option>
+              </a-select>
+            </a-form-item>
+            <div class="search-actions"><a-button type="primary" @click="searchKnowledgeProjects">搜索</a-button><a-button @click="resetKnowledgeProjectSearch">重置</a-button></div>
+          </a-form>
+          <a-table :pagination="false" :data-source="knowledgeProjectList">
+            <a-table-column title="编号" width="70"><template #default="{ index }">{{ knowledgeProjectSerialNumber(index) }}</template></a-table-column>
+            <a-table-column title="项目名称"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
+            <a-table-column title="描述"><template #default="{ record: row }"><TableText :value="row.description" /></template></a-table-column>
+            <a-table-column title="状态" width="100"><template #default="{ record: row }"><a-tag :color="row.status === 'active' ? 'success' : 'warning'">{{ row.status === 'active' ? '启用' : '禁用' }}</a-tag></template></a-table-column>
+            <a-table-column data-index="update_date" title="更新时间" width="170" />
+            <a-table-column title="操作" width="190" fixed="right">
+              <template #default="{ record: row }">
+                <div class="table-actions">
+                  <a-button size="small" @click="openEditKnowledgeProject(row)">编辑</a-button>
+                  <a-button size="small" danger @click="deleteKnowledgeProject(row)">删除</a-button>
+                </div>
+              </template>
+            </a-table-column>
+          </a-table>
+          <div class="pagination"><a-pagination :show-total="paginationTotal" show-less-items :current="knowledgeProjectPagination.page" :page-size="knowledgeProjectPagination.pageSize" :total="knowledgeProjectPagination.total" @change="changeKnowledgeProjectPage" /></div>
+
+          <a-modal v-model:open="knowledgeProjectFormVisible" :title="knowledgeProjectForm.id ? '编辑知识库项目' : '创建知识库项目'" width="460px" @after-close="resetKnowledgeProjectForm">
+            <a-form layout="vertical">
+              <a-form-item label="项目名称" required><a-input v-model:value="knowledgeProjectForm.name" placeholder="请输入项目名称" /></a-form-item>
+              <a-form-item label="描述"><a-textarea v-model:value="knowledgeProjectForm.description" :auto-size="{ minRows: 2, maxRows: 4 }" placeholder="请输入描述" /></a-form-item>
+              <a-form-item label="状态"><a-select v-model:value="knowledgeProjectForm.status"><a-select-option value="active">启用</a-select-option><a-select-option value="disabled">禁用</a-select-option></a-select></a-form-item>
+            </a-form>
+            <template #footer><a-button @click="knowledgeProjectFormVisible = false">取消</a-button><a-button type="primary" @click="saveKnowledgeProject">确认</a-button></template>
+          </a-modal>
+        </section>
+
+        <section v-if="active === 'knowledge_bases'" class="page-view knowledge-page">
+          <div class="toolbar">
+            <div><h2>知识库配置</h2><p class="page-subtitle">按知识库项目绑定 Dify 已配置知识库，查看文档并检索命中片段。</p></div>
+            <a-button type="primary" @click="openCreateKnowledgeBase"><template #icon><PlusOutlined /></template>新增绑定</a-button>
+          </div>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="项目">
+              <a-select v-model:value="knowledgeSearch.project_id" placeholder="请选择项目" allow-clear>
+                <a-select-option v-for="p in knowledgeProjects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item label="知识库名称"><a-input v-model:value="knowledgeSearch.name" placeholder="请输入知识库名称" allow-clear @keyup.enter="searchKnowledgeBases" /></a-form-item>
+            <a-form-item label="状态">
+              <a-select v-model:value="knowledgeSearch.status" placeholder="请选择状态" allow-clear>
+                <a-select-option value="active">启用</a-select-option>
+                <a-select-option value="disabled">禁用</a-select-option>
+              </a-select>
+            </a-form-item>
+            <div class="search-actions"><a-button type="primary" @click="searchKnowledgeBases">搜索</a-button><a-button @click="resetKnowledgeSearch">重置</a-button></div>
+          </a-form>
+          <a-table class="knowledge-base-table" table-layout="fixed" :pagination="false" :data-source="knowledgeBases" :scroll="{ x: 1168 }">
+            <a-table-column title="编号" width="56" class-name="knowledge-number-column"><template #default="{ index }">{{ knowledgeSerialNumber(index) }}</template></a-table-column>
+            <a-table-column data-index="project_name" title="项目" width="170" />
+            <a-table-column title="知识库名称"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
+            <a-table-column title="Dify Dataset ID" width="180">
+              <template #default="{ record: row }">
+                <a-tooltip :title="row.dify_dataset_id">
+                  <TableText :value="maskDatasetId(row.dify_dataset_id)" :max-width="180" />
+                </a-tooltip>
+              </template>
+            </a-table-column>
+            <a-table-column title="状态" width="72" class-name="knowledge-status-column"><template #default="{ record: row }"><a-tag :color="row.status === 'active' ? 'success' : 'warning'">{{ row.status === 'active' ? '启用' : '禁用' }}</a-tag></template></a-table-column>
+            <a-table-column data-index="update_date" title="更新时间" width="170" />
+            <a-table-column title="操作" width="330" fixed="right">
+              <template #default="{ record: row }">
+                <div class="table-actions">
+                  <a-button size="small" @click="openKnowledgeDocuments(row)">文档</a-button>
+                  <a-button size="small" type="primary" :disabled="row.status !== 'active'" @click="openKnowledgeRetrieve(row)">检索</a-button>
+                  <a-button size="small" @click="checkKnowledgeBase(row)">测试</a-button>
+                  <a-button size="small" @click="openEditKnowledgeBase(row)">编辑</a-button>
+                  <a-button size="small" danger @click="deleteKnowledgeBase(row)">删除</a-button>
+                </div>
+              </template>
+            </a-table-column>
+          </a-table>
+          <div class="pagination"><a-pagination :show-total="paginationTotal" show-less-items :current="knowledgePagination.page" :page-size="knowledgePagination.pageSize" :total="knowledgePagination.total" @change="changeKnowledgePage" /></div>
+
+          <a-modal v-model:open="knowledgeFormVisible" :title="knowledgeForm.id ? '编辑知识库绑定' : '新增知识库绑定'" width="560px" @after-close="resetKnowledgeForm">
+            <a-form layout="vertical">
+              <a-form-item label="项目" required><a-select v-model:value="knowledgeForm.project_id" placeholder="请选择项目"><a-select-option v-for="p in activeKnowledgeProjects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option></a-select></a-form-item>
+              <a-form-item label="知识库名称" required><a-input v-model:value="knowledgeForm.name" placeholder="例如：支付业务规则" /></a-form-item>
+              <a-form-item label="Dify 知识库" required>
+                <a-select
+                  v-model:value="knowledgeForm.dify_dataset_id"
+                  show-search
+                  allow-clear
+                  :loading="difyDatasetsLoading"
+                  placeholder="请选择 Dify 知识库"
+                  :filter-option="filterDifyDatasetOption"
+                  @dropdown-visible-change="handleDifyDatasetDropdown"
+                  @change="changeDifyDataset"
+                >
+                  <a-select-option v-for="item in difyDatasets" :key="item.id" :value="item.id" :title="item.name">
+                    {{ item.name }}
+                  </a-select-option>
+                </a-select>
+                <div v-if="knowledgeForm.dify_dataset_id" class="form-tip">Dataset ID：{{ knowledgeForm.dify_dataset_id }}</div>
+              </a-form-item>
+              <a-form-item label="状态"><a-select v-model:value="knowledgeForm.status"><a-select-option value="active">启用</a-select-option><a-select-option value="disabled">禁用</a-select-option></a-select></a-form-item>
+              <a-form-item label="备注"><a-textarea v-model:value="knowledgeForm.description" :auto-size="{ minRows: 2, maxRows: 4 }" placeholder="可记录知识库用途或维护人" /></a-form-item>
+            </a-form>
+            <template #footer>
+              <a-button @click="knowledgeFormVisible = false">取消</a-button>
+              <a-button :loading="knowledgeChecking" @click="checkKnowledgeForm">连接测试</a-button>
+              <a-button type="primary" @click="saveKnowledgeBase">确认</a-button>
+            </template>
+          </a-modal>
+
+          <a-drawer v-model:open="knowledgeDocumentsVisible" width="760" :title="`${selectedKnowledgeBase?.name || '知识库'}文档`">
+            <a-form class="search-form compact-search-form" layout="vertical">
+              <a-form-item label="关键词"><a-input v-model:value="knowledgeDocumentSearch.keyword" placeholder="请输入文档关键词" allow-clear @keyup.enter="searchKnowledgeDocuments" /></a-form-item>
+                            <a-form-item label="索引状态">
+                <a-select v-model:value="knowledgeDocumentSearch.status" placeholder="请选择索引状态" allow-clear>
+                  <a-select-option value="completed">索引完成</a-select-option>
+                  <a-select-option value="indexing">索引中</a-select-option>
+                  <a-select-option value="processing">处理中</a-select-option>
+                  <a-select-option value="error">索引异常</a-select-option>
+                  <a-select-option value="failed">索引失败</a-select-option>
+                  <a-select-option value="paused">已暂停</a-select-option>
+                </a-select>
+              </a-form-item>
+              <div class="search-actions"><a-button type="primary" @click="searchKnowledgeDocuments">搜索</a-button><a-button @click="resetKnowledgeDocuments">重置</a-button></div>
+            </a-form>
+            <a-table :pagination="false" :data-source="knowledgeDocuments" :loading="knowledgeDocumentsLoading" :scroll="{ x: 720 }">
+              <a-table-column title="文档名称"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
+              <a-table-column data-index="indexing_status" title="索引状态" width="120" />
+              <a-table-column title="启用" width="80"><template #default="{ record: row }"><a-tag :color="row.enabled ? 'success' : 'warning'">{{ row.enabled ? '是' : '否' }}</a-tag></template></a-table-column>
+              <a-table-column data-index="word_count" title="字数" width="90" />
+              <a-table-column data-index="hit_count" title="命中" width="90" />
+              <a-table-column data-index="update_date" title="更新时间" width="160" />
+            </a-table>
+            <div class="pagination"><a-pagination :show-total="paginationTotal" show-less-items :current="knowledgeDocumentPagination.page" :page-size="knowledgeDocumentPagination.pageSize" :total="knowledgeDocumentPagination.total" @change="changeKnowledgeDocumentPage" /></div>
+          </a-drawer>
+
+          <a-modal v-model:open="knowledgeRetrieveVisible" :title="`${selectedKnowledgeBase?.name || '知识库'}检索`" width="780px">
+            <a-form layout="vertical">
+              <a-form-item label="检索内容" required><a-textarea v-model:value="knowledgeRetrieveForm.query" :auto-size="{ minRows: 3, maxRows: 6 }" placeholder="请输入要检索的问题或关键词" /></a-form-item>
+              <div class="knowledge-retrieve-options">
+                <a-form-item label="Top K"><a-input-number v-model:value="knowledgeRetrieveForm.top_k" :min="1" :max="10" /></a-form-item>
+                <a-form-item label="分数阈值"><a-input-number v-model:value="knowledgeRetrieveForm.score_threshold" :min="0" :max="1" :step="0.05" placeholder="可选" /></a-form-item>
+              </div>
+            </a-form>
+            <div v-if="knowledgeRetrieveResult.length" class="knowledge-hit-list">
+              <div v-for="(hit, index) in knowledgeRetrieveResult" :key="hit.segment_id || index" class="knowledge-hit-item">
+                <div class="knowledge-hit-head"><strong>命中 {{ index + 1 }}</strong><a-tag color="blue">score {{ formatScore(hit.score) }}</a-tag><span>{{ hit.document_name || hit.document_id || '-' }}</span></div>
+                <p>{{ hit.content }}</p>
+              </div>
+            </div>
+            <a-empty v-else-if="knowledgeRetrieved" description="暂无命中结果" />
+            <template #footer><a-button @click="knowledgeRetrieveVisible = false">关闭</a-button><a-button type="primary" :loading="knowledgeRetrieving" @click="runKnowledgeRetrieve">开始检索</a-button></template>
+          </a-modal>
+        </section>
+
+        <section v-if="active === 'knowledge_workflows'" class="page-view knowledge-page">
+          <div class="toolbar">
+            <div><h2>工作流配置</h2><p class="page-subtitle">绑定 Dify Workflow，供知识问答页面调用。</p></div>
+            <a-button type="primary" @click="openCreateKnowledgeWorkflow"><template #icon><PlusOutlined /></template>新增工作流</a-button>
+          </div>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="项目">
+              <a-select v-model:value="knowledgeWorkflowSearch.project_id" placeholder="请选择项目" allow-clear>
+                <a-select-option v-for="p in knowledgeProjects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item label="工作流名称"><a-input v-model:value="knowledgeWorkflowSearch.name" placeholder="请输入工作流名称" allow-clear @keyup.enter="searchKnowledgeWorkflows" /></a-form-item>
+            <a-form-item label="状态">
+              <a-select v-model:value="knowledgeWorkflowSearch.status" placeholder="请选择状态" allow-clear>
+                <a-select-option value="active">启用</a-select-option>
+                <a-select-option value="disabled">禁用</a-select-option>
+              </a-select>
+            </a-form-item>
+            <div class="search-actions"><a-button type="primary" @click="searchKnowledgeWorkflows">搜索</a-button><a-button @click="resetKnowledgeWorkflowSearch">重置</a-button></div>
+          </a-form>
+          <a-table :pagination="false" :data-source="knowledgeWorkflowList" :scroll="{ x: 1060 }">
+            <a-table-column title="编号" width="70"><template #default="{ index }">{{ knowledgeWorkflowSerialNumber(index) }}</template></a-table-column>
+            <a-table-column data-index="project_name" title="项目" width="150" />
+            <a-table-column title="工作流名称"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
+            <a-table-column title="API 地址"><template #default="{ record: row }"><TableText :value="row.api_base_url" /></template></a-table-column>
+            <a-table-column title="API Key 环境变量"><template #default="{ record: row }"><TableText :value="row.api_key_env" /></template></a-table-column>
+            <a-table-column title="状态" width="90"><template #default="{ record: row }"><a-tag :color="row.status === 'active' ? 'success' : 'warning'">{{ row.status === 'active' ? '启用' : '禁用' }}</a-tag></template></a-table-column>
+            <a-table-column data-index="update_date" title="更新时间" width="170" />
+            <a-table-column title="操作" width="260" fixed="right">
+              <template #default="{ record: row }">
+                <div class="table-actions">
+                  <a-button size="small" @click="checkKnowledgeWorkflow(row)">测试</a-button>
+                  <a-button size="small" @click="openEditKnowledgeWorkflow(row)">编辑</a-button>
+                  <a-button size="small" danger @click="deleteKnowledgeWorkflow(row)">删除</a-button>
+                </div>
+              </template>
+            </a-table-column>
+          </a-table>
+          <div class="pagination"><a-pagination :show-total="paginationTotal" show-less-items :current="knowledgeWorkflowPagination.page" :page-size="knowledgeWorkflowPagination.pageSize" :total="knowledgeWorkflowPagination.total" @change="changeKnowledgeWorkflowPage" /></div>
+
+          <a-modal v-model:open="knowledgeWorkflowFormVisible" :title="knowledgeWorkflowForm.id ? '编辑工作流配置' : '新增工作流配置'" width="560px" @after-close="resetKnowledgeWorkflowForm">
+            <a-form layout="vertical">
+              <a-form-item label="项目" required><a-select v-model:value="knowledgeWorkflowForm.project_id" placeholder="请选择项目"><a-select-option v-for="p in activeKnowledgeProjects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option></a-select></a-form-item>
+              <a-form-item label="工作流名称" required><a-input v-model:value="knowledgeWorkflowForm.name" placeholder="例如：FAF知识库问答工作流" /></a-form-item>
+              <a-form-item label="Dify API 地址"><a-input v-model:value="knowledgeWorkflowForm.api_base_url" placeholder="留空使用全局 DIFY_API_BASE_URL" /></a-form-item>
+              <a-form-item label="API Key 环境变量名" required><a-select v-model:value="knowledgeWorkflowForm.api_key_env" placeholder="请选择 API Key 配置" show-search option-filter-prop="label" @dropdown-visible-change="handleWorkflowApiKeyDropdown"><a-select-option v-for="item in workflowApiKeyOptions" :key="item.env_key" :value="item.env_key" :label="`${item.display_name} ${item.env_key}`">{{ item.display_name }}（{{ item.env_key }}）<span class="option-status">{{ item.configured ? '' : '未配置' }}</span></a-select-option></a-select></a-form-item>
+              <a-form-item label="状态"><a-select v-model:value="knowledgeWorkflowForm.status"><a-select-option value="active">启用</a-select-option><a-select-option value="disabled">禁用</a-select-option></a-select></a-form-item>
+              <a-form-item label="备注"><a-textarea v-model:value="knowledgeWorkflowForm.description" :auto-size="{ minRows: 2, maxRows: 4 }" placeholder="可记录工作流用途或 Dify 配置说明" /></a-form-item>
+            </a-form>
+            <template #footer>
+              <a-button @click="knowledgeWorkflowFormVisible = false">取消</a-button>
+              <a-button type="primary" @click="saveKnowledgeWorkflow">确认</a-button>
+            </template>
+          </a-modal>
+        </section>
+
+        <section v-if="active === 'knowledge_qa'" class="page-view knowledge-qa-page">
+          <div class="toolbar">
+            <div><h2>知识问答</h2><p class="page-subtitle">基于 Dify Workflow 进行知识库问答，同一会话内支持连续追问。</p></div>
+            <a-button type="primary" @click="openCreateQaSession"><template #icon><PlusOutlined /></template>新建会话</a-button>
+          </div>
+          <div class="qa-shell">
+            <aside class="qa-sessions">
+              <div class="qa-session-filter">
+                <a-select v-model:value="qaSessionSearch.project_id" placeholder="项目" allow-clear @change="searchQaSessions">
+                  <a-select-option v-for="p in knowledgeProjects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
+                </a-select>
+              </div>
+              <div class="qa-session-list">
+                <button v-for="session in qaSessions" :key="session.id" class="qa-session-item" :class="{ active: selectedQaSession?.id === session.id }" @click="selectQaSession(session)">
+                  <strong>{{ session.title }}</strong>
+                  <span>{{ session.project_name }} / {{ session.workflow_name }}</span>
+                </button>
+                <a-empty v-if="!qaSessions.length" description="暂无会话" />
+              </div>
+            </aside>
+            <main class="qa-chat">
+              <div v-if="selectedQaSession" class="qa-chat-head">
+                <div><strong>{{ selectedQaSession.title }}</strong><span>{{ selectedQaSession.project_name }} / {{ selectedQaSession.workflow_name }}</span></div>
+                <a-button size="small" danger @click="deleteQaSession(selectedQaSession)">删除会话</a-button>
+              </div>
+              <div class="qa-messages">
+                <template v-if="selectedQaSession">
+                  <div v-for="msg in qaMessages" :key="msg.id" class="qa-message" :class="`qa-message-${msg.role}`">
+                    <div class="qa-message-role">{{ msg.role === 'user' ? '我' : '助手' }}</div>
+                    <div class="qa-message-content">{{ msg.error_message || msg.content }}</div>
+                  </div>
+                  <a-empty v-if="!qaMessages.length" description="当前会话暂无消息" />
+                </template>
+                <a-empty v-else description="请选择或新建会话" />
+              </div>
+              <div class="qa-input-bar">
+                <a-textarea v-model:value="qaQuestion" :disabled="!selectedQaSession" :auto-size="{ minRows: 2, maxRows: 5 }" placeholder="请输入问题" @keydown.ctrl.enter.prevent="askKnowledgeQa" />
+                <a-button type="primary" :disabled="!selectedQaSession" :loading="qaAsking" @click="askKnowledgeQa">发送</a-button>
+              </div>
+            </main>
+          </div>
+
+          <a-modal v-model:open="qaSessionFormVisible" title="新建知识问答会话" width="520px" @after-close="resetQaSessionForm">
+            <a-form layout="vertical">
+              <a-form-item label="项目" required><a-select v-model:value="qaSessionForm.project_id" placeholder="请选择项目" @change="changeQaSessionProject"><a-select-option v-for="p in activeKnowledgeProjects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option></a-select></a-form-item>
+              <a-form-item label="工作流" required><a-select v-model:value="qaSessionForm.workflow_id" placeholder="请选择工作流"><a-select-option v-for="w in qaSessionWorkflows" :key="w.id" :value="w.id">{{ w.name }}</a-select-option></a-select></a-form-item>
+              <a-form-item label="会话标题"><a-input v-model:value="qaSessionForm.title" placeholder="留空则用第一条问题自动命名" /></a-form-item>
+            </a-form>
+            <template #footer><a-button @click="qaSessionFormVisible = false">取消</a-button><a-button type="primary" @click="createQaSession">确认</a-button></template>
+          </a-modal>
+        </section>
         <section v-if="active === 'logs'" class="page-view">
           <div class="toolbar"><h2>日志中心</h2></div>
           <a-tabs v-model:active-key="activeLogTab" class="log-tabs" @change="changeLogTab">
@@ -1458,9 +1755,9 @@
                 </div>
               </a-form>
               <a-table :pagination="false" :data-source="executionLogs" :scroll="{ x: 1160 }" class="log-table">
-                <a-table-column data-index="target_name" title="计划/目标" width="220" class-name="log-ellipsis-cell" />
-                <a-table-column data-index="case_name" title="用例" width="220" class-name="log-ellipsis-cell" />
-                <a-table-column data-index="api_name" title="接口" width="200" class-name="log-ellipsis-cell" />
+                <a-table-column title="计划/目标"><template #default="{ record: row }"><TableText :value="row.target_name" /></template></a-table-column>
+                <a-table-column title="用例"><template #default="{ record: row }"><TableText :value="row.case_name" /></template></a-table-column>
+                <a-table-column title="接口"><template #default="{ record: row }"><TableText :value="row.api_name" /></template></a-table-column>
                 <a-table-column data-index="environment_name" title="环境" width="130" />
                 <a-table-column title="状态" width="100">
                   <template #default="{ record: row }"><a-tag :color="executionStatusColor(row.status)">{{ executionStatusText(row.status) }}</a-tag></template>
@@ -1494,15 +1791,13 @@
                 </div>
               </a-form>
               <a-table :pagination="false" :data-source="exceptionLogs" :scroll="{ x: 1060 }" class="log-table">
-                <a-table-column data-index="path" title="请求路径" width="280" class-name="log-ellipsis-cell" />
+                <a-table-column title="请求路径"><template #default="{ record: row }"><TableText :value="row.path" /></template></a-table-column>
                 <a-table-column data-index="method" title="方法" width="90" />
-                <a-table-column data-index="error_type" title="异常类型" width="180" class-name="log-ellipsis-cell" />
+                <a-table-column title="异常类型"><template #default="{ record: row }"><TableText :value="row.error_type" /></template></a-table-column>
                 <a-table-column title="结果" width="90">
                   <template #default="{ record: row }"><a-tag color="error">{{ operationResultText(row.result) }}</a-tag></template>
                 </a-table-column>
-                <a-table-column title="异常摘要" width="360" class-name="log-ellipsis-cell">
-                  <template #default="{ record: row }"><span :title="row.error_message || '-'">{{ row.error_message || '-' }}</span></template>
-                </a-table-column>
+                <a-table-column title="异常摘要"><template #default="{ record: row }"><TableText :value="row.error_message" /></template></a-table-column>
                 <a-table-column data-index="ip" title="IP" width="130" />
                 <a-table-column data-index="create_date" title="时间" width="160" />
                 <a-table-column title="操作" width="90">
@@ -1625,6 +1920,7 @@ import {
   UserOutlined
 } from '@ant-design/icons-vue'
 import { api, type User } from './api'
+import TableText from './components/TableText.vue'
 
 const appTheme = {
   token: {
@@ -1860,10 +2156,15 @@ const menuMeta: Record<string, AppTab> = {
   execute: { name: 'execute', label: '测试计划', closable: true },
   reports: { name: 'reports', label: '报告中心', closable: true },
   ai_cases: { name: 'ai_cases', label: 'AI生成用例', closable: true },
+  knowledge_projects: { name: 'knowledge_projects', label: '项目配置', closable: true },
+  knowledge_bases: { name: 'knowledge_bases', label: '知识库配置', closable: true },
+  knowledge_workflows: { name: 'knowledge_workflows', label: '工作流配置', closable: true },
+  knowledge_qa: { name: 'knowledge_qa', label: '知识问答', closable: true },
   logs: { name: 'logs', label: '日志中心', closable: true },
   accounts: { name: 'accounts', label: '用户管理', closable: true },
   roles: { name: 'roles', label: '角色管理', closable: true },
-  tickets: { name: 'tickets', label: '工单管理', closable: true }
+  tickets: { name: 'tickets', label: '工单管理', closable: true },
+  api_key_configs: { name: 'api_key_configs', label: 'API Key配置', closable: true }
 }
 
 const menuTree: MenuNode[] = [
@@ -1884,13 +2185,25 @@ const menuTree: MenuNode[] = [
   },
   { key: 'ai_cases', label: menuMeta.ai_cases.label, icon: CheckCircleOutlined },
   {
+    key: 'knowledge',
+    label: '知识库',
+    icon: FileTextOutlined,
+    children: [
+      { key: 'knowledge_projects', label: menuMeta.knowledge_projects.label, icon: ProjectOutlined },
+      { key: 'knowledge_bases', label: menuMeta.knowledge_bases.label, icon: FileTextOutlined },
+      { key: 'knowledge_workflows', label: menuMeta.knowledge_workflows.label, icon: PlayCircleOutlined },
+      { key: 'knowledge_qa', label: menuMeta.knowledge_qa.label, icon: CheckCircleOutlined }
+    ]
+  },
+  {
     key: 'system',
     label: '系统管理',
     icon: SettingOutlined,
     children: [
       { key: 'accounts', label: menuMeta.accounts.label, icon: TeamOutlined },
       { key: 'roles', label: menuMeta.roles.label, icon: SettingOutlined },
-      { key: 'tickets', label: menuMeta.tickets.label, icon: FileTextOutlined }
+      { key: 'tickets', label: menuMeta.tickets.label, icon: FileTextOutlined },
+      { key: 'api_key_configs', label: menuMeta.api_key_configs.label, icon: LockOutlined }
     ]
   }
 ]
@@ -1964,11 +2277,34 @@ const planPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const reportSearch = reactive({ name: '', status: '' })
 const reportPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const aiGenerationPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const knowledgeProjectSearch = reactive({ name: '', status: '' })
+const knowledgeProjectPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const knowledgeSearch = reactive({ project_id: undefined as number | undefined, name: '', status: '' })
+const knowledgePagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const knowledgeDocumentSearch = reactive({ keyword: '', status: '' })
+const knowledgeDocumentPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const knowledgeWorkflowSearch = reactive({ project_id: undefined as number | undefined, name: '', status: '' })
+const knowledgeWorkflowPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const qaSessionSearch = reactive({ project_id: undefined as number | undefined })
 const ticketSearch = reactive({ title: '', category: '', status: '' })
+const apiKeyConfigSearch = reactive({ keyword: '', status: '' })
 const ticketPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const apiKeyConfigPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const selectedReportIds = ref<number[]>([])
 const aiGenerations = ref<any[]>([])
+const knowledgeProjects = ref<any[]>([])
+const knowledgeProjectList = ref<any[]>([])
+const knowledgeBases = ref<any[]>([])
+const knowledgeDocuments = ref<any[]>([])
+const difyDatasets = ref<any[]>([])
+const knowledgeWorkflows = ref<any[]>([])
+const knowledgeWorkflowList = ref<any[]>([])
+const qaSessions = ref<any[]>([])
+const qaMessages = ref<any[]>([])
 const tickets = ref<any[]>([])
+const apiKeyConfigs = ref<any[]>([])
+const apiKeyConfigList = ref<any[]>([])
+const workflowApiKeyOptions = ref<any[]>([])
 const aiSourceFiles = ref<any[]>([])
 const aiLastUploadedFilename = ref('')
 const aiGenerating = ref(false)
@@ -1989,6 +2325,20 @@ const rolePermissionDialogVisible = ref(false)
 const createTicketVisible = ref(false)
 const ticketDetailVisible = ref(false)
 const processTicketVisible = ref(false)
+const apiKeyConfigFormVisible = ref(false)
+const knowledgeFormVisible = ref(false)
+const knowledgeProjectFormVisible = ref(false)
+const knowledgeDocumentsVisible = ref(false)
+const knowledgeRetrieveVisible = ref(false)
+const knowledgeDocumentsLoading = ref(false)
+const knowledgeChecking = ref(false)
+const difyDatasetsLoading = ref(false)
+const knowledgeRetrieving = ref(false)
+const knowledgeRetrieved = ref(false)
+const knowledgeWorkflowFormVisible = ref(false)
+const qaSessionFormVisible = ref(false)
+const knowledgeWorkflowChecking = ref(false)
+const qaAsking = ref(false)
 const createProjectDialogVisible = ref(false)
 const editProjectDialogVisible = ref(false)
 const createEnvironmentDialogVisible = ref(false)
@@ -2011,8 +2361,18 @@ const editRoleForm = reactive({ id: undefined as number | undefined, code: '', n
 const rolePermissionForm = reactive({ id: undefined as number | undefined, name: '', description: '', status: 'active', menus: [] as string[] })
 const ticketForm = reactive({ category: 'feature', title: '', content: '', files: [] as any[] })
 const ticketProcessForm = reactive({ status: 'processing', reply: '' })
+const apiKeyConfigForm = reactive({ id: undefined as number | undefined, env_key: '', display_name: '', status: 'active', description: '' })
 const ticketDetail = ref<any>(null)
 const ticketSubmitting = ref(false)
+const selectedKnowledgeBase = ref<any>(null)
+const knowledgeProjectForm = reactive({ id: undefined as number | undefined, name: '', description: '', status: 'active' })
+const knowledgeForm = reactive({ id: undefined as number | undefined, project_id: undefined as number | undefined, name: '', dify_dataset_id: '', status: 'active', description: '' })
+const knowledgeRetrieveForm = reactive({ query: '', top_k: 5, score_threshold: undefined as number | undefined })
+const knowledgeRetrieveResult = ref<any[]>([])
+const selectedQaSession = ref<any>(null)
+const knowledgeWorkflowForm = reactive({ id: undefined as number | undefined, project_id: undefined as number | undefined, name: '', api_base_url: '', api_key_env: '', status: 'active', description: '' })
+const qaSessionForm = reactive({ project_id: undefined as number | undefined, workflow_id: undefined as number | undefined, title: '' })
+const qaQuestion = ref('')
 const changePasswordForm = reactive({ old_password: '', new_password: '', confirm_password: '' })
 const projectForm = reactive({ name: '', description: '' })
 const editProjectForm = reactive({ id: undefined as number | undefined, name: '', description: '' })
@@ -2068,6 +2428,9 @@ const dashboardStats = computed(() => [
   { label: '用例数', value: cases.value.length, description: '可用于回归执行', tone: 'green', icon: FileTextOutlined },
   { label: '执行任务', value: executions.value.length, description: '历史执行任务', tone: 'orange', icon: PlayCircleOutlined }
 ])
+const activeKnowledgeProjects = computed(() => knowledgeProjects.value.filter(item => item.status === 'active'))
+const activeKnowledgeWorkflows = computed(() => knowledgeWorkflows.value.filter(item => item.status === 'active'))
+const qaSessionWorkflows = computed(() => activeKnowledgeWorkflows.value.filter(item => qaSessionForm.project_id && item.project_id === qaSessionForm.project_id))
 const caseSearchApis = computed(() => apis.value.filter(item => caseSearch.project_id && item.project_id === caseSearch.project_id))
 const caseFormApis = computed(() => apis.value.filter(item => caseForm.project_id && item.project_id === caseForm.project_id))
 const currentCaseApi = computed(() => selectedCaseApi())
@@ -2188,7 +2551,13 @@ async function loadAll() {
   calls.push(loadPlans())
   calls.push(loadReports())
   calls.push(loadAiGenerations())
+  calls.push(loadKnowledgeProjects())
+  calls.push(loadKnowledgeBases())
+  calls.push(loadKnowledgeWorkflows())
+  calls.push(loadQaSessions())
   calls.push(loadTickets())
+  calls.push(loadApiKeyConfigs())
+  calls.push(loadWorkflowApiKeyOptions())
   calls.push(loadLogs())
   await Promise.allSettled(calls)
 }
@@ -2548,6 +2917,694 @@ async function changeAiGenerationPage(page: number) {
   await loadAiGenerations()
 }
 
+function knowledgeProjectSerialNumber(index: number) {
+  return (knowledgeProjectPagination.page - 1) * knowledgeProjectPagination.pageSize + index + 1
+}
+
+async function loadKnowledgeProjects() {
+  const name = knowledgeProjectSearch.name.trim()
+  const status = knowledgeProjectSearch.status
+  const [listRes, allRes] = await Promise.all([
+    api.get('/knowledge-projects', {
+      params: {
+        ...(name ? { name } : {}),
+        ...(status ? { status } : {}),
+        page: knowledgeProjectPagination.page,
+        page_size: knowledgeProjectPagination.pageSize
+      }
+    }),
+    api.get('/knowledge-projects')
+  ])
+  knowledgeProjectList.value = listRes.data.items
+  knowledgeProjectPagination.total = listRes.data.total
+  knowledgeProjectPagination.page = listRes.data.page
+  knowledgeProjectPagination.pageSize = listRes.data.page_size
+  knowledgeProjects.value = allRes.data
+}
+
+async function searchKnowledgeProjects() {
+  knowledgeProjectPagination.page = 1
+  await loadKnowledgeProjects()
+}
+
+async function resetKnowledgeProjectSearch() {
+  knowledgeProjectSearch.name = ''
+  knowledgeProjectSearch.status = ''
+  knowledgeProjectPagination.page = 1
+  await loadKnowledgeProjects()
+}
+
+async function changeKnowledgeProjectPage(page: number) {
+  knowledgeProjectPagination.page = page
+  await loadKnowledgeProjects()
+}
+
+async function loadDifyDatasets() {
+  if (difyDatasetsLoading.value || difyDatasets.value.length) return
+  difyDatasetsLoading.value = true
+  try {
+    const { data } = await api.get('/knowledge-bases/dify-datasets', { params: { page: 1, page_size: 100 } })
+    difyDatasets.value = data.items || []
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || 'Dify 知识库列表加载失败')
+  } finally {
+    difyDatasetsLoading.value = false
+  }
+}
+
+function filterDifyDatasetOption(input: string, option: any) {
+  return String(option?.title || option?.children || '').toLowerCase().includes(input.toLowerCase())
+}
+
+function handleDifyDatasetDropdown(visible: boolean) {
+  if (visible) void loadDifyDatasets()
+}
+
+function changeDifyDataset(datasetId: string) {
+  const dataset = difyDatasets.value.find(item => item.id === datasetId)
+  if (dataset?.name && !knowledgeForm.name.trim()) {
+    knowledgeForm.name = dataset.name
+  }
+}
+
+function resetKnowledgeProjectForm() {
+  knowledgeProjectForm.id = undefined
+  knowledgeProjectForm.name = ''
+  knowledgeProjectForm.description = ''
+  knowledgeProjectForm.status = 'active'
+}
+
+function openCreateKnowledgeProject() {
+  resetKnowledgeProjectForm()
+  knowledgeProjectFormVisible.value = true
+}
+
+function openEditKnowledgeProject(row: any) {
+  knowledgeProjectForm.id = row.id
+  knowledgeProjectForm.name = row.name
+  knowledgeProjectForm.description = row.description || ''
+  knowledgeProjectForm.status = row.status || 'active'
+  knowledgeProjectFormVisible.value = true
+}
+
+async function saveKnowledgeProject() {
+  const name = knowledgeProjectForm.name.trim()
+  if (!name) { message.warning('请输入项目名称'); return }
+  const payload = { name, description: knowledgeProjectForm.description.trim(), status: knowledgeProjectForm.status }
+  try {
+    if (knowledgeProjectForm.id) {
+      await api.put(`/knowledge-projects/${knowledgeProjectForm.id}`, payload)
+      message.success('知识库项目已更新')
+    } else {
+      await api.post('/knowledge-projects', payload)
+      knowledgeProjectPagination.page = 1
+      message.success('知识库项目已创建')
+    }
+    knowledgeProjectFormVisible.value = false
+    await loadKnowledgeProjects()
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '知识库项目保存失败')
+  }
+}
+
+async function deleteKnowledgeProject(row: any) {
+  try {
+    await confirmAction(`确认删除知识库项目「${row.name}」？`, '删除知识库项目', { confirmButtonText: '删除' })
+  } catch {
+    return
+  }
+  try {
+    await api.delete(`/knowledge-projects/${row.id}`)
+    if (knowledgeProjectList.value.length === 1 && knowledgeProjectPagination.page > 1) knowledgeProjectPagination.page -= 1
+    await loadKnowledgeProjects()
+    await loadKnowledgeBases()
+    message.success('知识库项目已删除')
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '知识库项目删除失败')
+  }
+}
+
+function knowledgeSerialNumber(index: number) {
+  return (knowledgePagination.page - 1) * knowledgePagination.pageSize + index + 1
+}
+
+function maskDatasetId(value: string) {
+  if (!value) return '-'
+  if (value.length <= 12) return value
+  return `${value.slice(0, 8)}***${value.slice(-6)}`
+}
+
+async function loadKnowledgeBases() {
+  const { data } = await api.get('/knowledge-bases', {
+    params: {
+      ...(knowledgeSearch.project_id ? { project_id: knowledgeSearch.project_id } : {}),
+      ...(knowledgeSearch.name.trim() ? { name: knowledgeSearch.name.trim() } : {}),
+      ...(knowledgeSearch.status ? { status: knowledgeSearch.status } : {}),
+      page: knowledgePagination.page,
+      page_size: knowledgePagination.pageSize
+    }
+  })
+  knowledgeBases.value = data.items
+  knowledgePagination.total = data.total
+  knowledgePagination.page = data.page
+  knowledgePagination.pageSize = data.page_size
+}
+
+async function searchKnowledgeBases() {
+  knowledgePagination.page = 1
+  await loadKnowledgeBases()
+}
+
+async function resetKnowledgeSearch() {
+  knowledgeSearch.project_id = undefined
+  knowledgeSearch.name = ''
+  knowledgeSearch.status = ''
+  knowledgePagination.page = 1
+  await loadKnowledgeBases()
+}
+
+async function changeKnowledgePage(page: number) {
+  knowledgePagination.page = page
+  await loadKnowledgeBases()
+}
+
+function resetKnowledgeForm() {
+  knowledgeForm.id = undefined
+  knowledgeForm.project_id = undefined
+  knowledgeForm.name = ''
+  knowledgeForm.dify_dataset_id = ''
+  knowledgeForm.status = 'active'
+  knowledgeForm.description = ''
+  knowledgeChecking.value = false
+}
+
+function openCreateKnowledgeBase() {
+  resetKnowledgeForm()
+  knowledgeFormVisible.value = true
+  void loadDifyDatasets()
+}
+
+function openEditKnowledgeBase(row: any) {
+  knowledgeForm.id = row.id
+  knowledgeForm.project_id = row.project_id
+  knowledgeForm.name = row.name
+  knowledgeForm.dify_dataset_id = row.dify_dataset_id
+  knowledgeForm.status = row.status || 'active'
+  knowledgeForm.description = row.description || ''
+  knowledgeFormVisible.value = true
+  void loadDifyDatasets()
+}
+
+function validateKnowledgeForm() {
+  if (!knowledgeForm.project_id) { message.warning('请选择项目'); return false }
+  if (!knowledgeForm.name.trim()) { message.warning('请输入知识库名称'); return false }
+  if (!knowledgeForm.dify_dataset_id.trim()) { message.warning('请输入 Dify Dataset ID'); return false }
+  return true
+}
+
+async function checkKnowledgeForm() {
+  if (!knowledgeForm.dify_dataset_id.trim()) { message.warning('请输入 Dify Dataset ID'); return }
+  knowledgeChecking.value = true
+  try {
+    const { data } = await api.post('/knowledge-bases/check', { dify_dataset_id: knowledgeForm.dify_dataset_id.trim() })
+    message.success(`连接成功，文档数：${data.document_count ?? 0}`)
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || 'Dify 知识库连接失败')
+  } finally {
+    knowledgeChecking.value = false
+  }
+}
+
+async function saveKnowledgeBase() {
+  if (!validateKnowledgeForm()) return
+  const payload = {
+    project_id: knowledgeForm.project_id,
+    name: knowledgeForm.name.trim(),
+    dify_dataset_id: knowledgeForm.dify_dataset_id.trim(),
+    status: knowledgeForm.status,
+    description: knowledgeForm.description.trim()
+  }
+  try {
+    if (knowledgeForm.id) {
+      await api.put(`/knowledge-bases/${knowledgeForm.id}`, payload)
+      message.success('知识库绑定已更新')
+    } else {
+      await api.post('/knowledge-bases', payload)
+      knowledgePagination.page = 1
+      message.success('知识库绑定已创建')
+    }
+    knowledgeFormVisible.value = false
+    await loadKnowledgeProjects()
+    await loadKnowledgeBases()
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '知识库绑定保存失败')
+  }
+}
+
+async function checkKnowledgeBase(row: any) {
+  try {
+    const { data } = await api.post(`/knowledge-bases/${row.id}/check`)
+    message.success(`连接成功，文档数：${data.document_count ?? 0}`)
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || 'Dify 知识库连接失败')
+  }
+}
+
+async function deleteKnowledgeBase(row: any) {
+  try {
+    await confirmAction(`确认删除知识库绑定「${row.name}」？不会删除 Dify 侧知识库。`, '删除知识库绑定', { confirmButtonText: '删除' })
+  } catch {
+    return
+  }
+  try {
+    await api.delete(`/knowledge-bases/${row.id}`)
+    if (knowledgeBases.value.length === 1 && knowledgePagination.page > 1) knowledgePagination.page -= 1
+    await loadKnowledgeBases()
+    message.success('知识库绑定已删除')
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '知识库绑定删除失败')
+  }
+}
+
+async function loadKnowledgeDocuments() {
+  if (!selectedKnowledgeBase.value) return
+  knowledgeDocumentsLoading.value = true
+  try {
+    const { data } = await api.get(`/knowledge-bases/${selectedKnowledgeBase.value.id}/documents`, {
+      params: {
+        ...(knowledgeDocumentSearch.keyword.trim() ? { keyword: knowledgeDocumentSearch.keyword.trim() } : {}),
+        ...(knowledgeDocumentSearch.status.trim() ? { status: knowledgeDocumentSearch.status.trim() } : {}),
+        page: knowledgeDocumentPagination.page,
+        page_size: knowledgeDocumentPagination.pageSize
+      }
+    })
+    knowledgeDocuments.value = data.items
+    knowledgeDocumentPagination.total = data.total
+    knowledgeDocumentPagination.page = data.page
+    knowledgeDocumentPagination.pageSize = data.page_size
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '知识库文档加载失败')
+  } finally {
+    knowledgeDocumentsLoading.value = false
+  }
+}
+
+async function openKnowledgeDocuments(row: any) {
+  selectedKnowledgeBase.value = row
+  knowledgeDocumentSearch.keyword = ''
+  knowledgeDocumentSearch.status = ''
+  knowledgeDocumentPagination.page = 1
+  knowledgeDocuments.value = []
+  knowledgeDocumentsVisible.value = true
+  await loadKnowledgeDocuments()
+}
+
+async function searchKnowledgeDocuments() {
+  knowledgeDocumentPagination.page = 1
+  await loadKnowledgeDocuments()
+}
+
+async function resetKnowledgeDocuments() {
+  knowledgeDocumentSearch.keyword = ''
+  knowledgeDocumentSearch.status = ''
+  knowledgeDocumentPagination.page = 1
+  await loadKnowledgeDocuments()
+}
+
+async function changeKnowledgeDocumentPage(page: number) {
+  knowledgeDocumentPagination.page = page
+  await loadKnowledgeDocuments()
+}
+
+function openKnowledgeRetrieve(row: any) {
+  selectedKnowledgeBase.value = row
+  knowledgeRetrieveForm.query = ''
+  knowledgeRetrieveForm.top_k = 5
+  knowledgeRetrieveForm.score_threshold = undefined
+  knowledgeRetrieveResult.value = []
+  knowledgeRetrieved.value = false
+  knowledgeRetrieveVisible.value = true
+}
+
+async function runKnowledgeRetrieve() {
+  if (!selectedKnowledgeBase.value) return
+  if (!knowledgeRetrieveForm.query.trim()) { message.warning('请输入检索内容'); return }
+  knowledgeRetrieving.value = true
+  try {
+    const { data } = await api.post(`/knowledge-bases/${selectedKnowledgeBase.value.id}/retrieve`, {
+      query: knowledgeRetrieveForm.query.trim(),
+      top_k: knowledgeRetrieveForm.top_k,
+      score_threshold: knowledgeRetrieveForm.score_threshold ?? null
+    })
+    knowledgeRetrieveResult.value = data.hits || []
+    knowledgeRetrieved.value = true
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '知识库检索失败')
+  } finally {
+    knowledgeRetrieving.value = false
+  }
+}
+
+function formatScore(value: any) {
+  const numberValue = Number(value || 0)
+  return Number.isFinite(numberValue) ? numberValue.toFixed(3) : '0.000'
+}
+
+function knowledgeWorkflowSerialNumber(index: number) {
+  return (knowledgeWorkflowPagination.page - 1) * knowledgeWorkflowPagination.pageSize + index + 1
+}
+
+async function loadKnowledgeWorkflows() {
+  const name = knowledgeWorkflowSearch.name.trim()
+  const status = knowledgeWorkflowSearch.status
+  const [listRes, allRes] = await Promise.all([
+    api.get('/knowledge-workflows', {
+      params: {
+        ...(knowledgeWorkflowSearch.project_id ? { project_id: knowledgeWorkflowSearch.project_id } : {}),
+        ...(name ? { name } : {}),
+        ...(status ? { status } : {}),
+        page: knowledgeWorkflowPagination.page,
+        page_size: knowledgeWorkflowPagination.pageSize
+      }
+    }),
+    api.get('/knowledge-workflows')
+  ])
+  knowledgeWorkflowList.value = listRes.data.items
+  knowledgeWorkflowPagination.total = listRes.data.total
+  knowledgeWorkflowPagination.page = listRes.data.page
+  knowledgeWorkflowPagination.pageSize = listRes.data.page_size
+  knowledgeWorkflows.value = allRes.data
+}
+
+async function searchKnowledgeWorkflows() {
+  knowledgeWorkflowPagination.page = 1
+  await loadKnowledgeWorkflows()
+}
+
+async function resetKnowledgeWorkflowSearch() {
+  knowledgeWorkflowSearch.project_id = undefined
+  knowledgeWorkflowSearch.name = ''
+  knowledgeWorkflowSearch.status = ''
+  knowledgeWorkflowPagination.page = 1
+  await loadKnowledgeWorkflows()
+}
+
+async function changeKnowledgeWorkflowPage(page: number) {
+  knowledgeWorkflowPagination.page = page
+  await loadKnowledgeWorkflows()
+}
+
+function resetKnowledgeWorkflowForm() {
+  knowledgeWorkflowForm.id = undefined
+  knowledgeWorkflowForm.project_id = undefined
+  knowledgeWorkflowForm.name = ''
+  knowledgeWorkflowForm.api_base_url = ''
+  knowledgeWorkflowForm.api_key_env = ''
+  knowledgeWorkflowForm.status = 'active'
+  knowledgeWorkflowForm.description = ''
+}
+
+function openCreateKnowledgeWorkflow() {
+  resetKnowledgeWorkflowForm()
+  knowledgeWorkflowFormVisible.value = true
+}
+
+function openEditKnowledgeWorkflow(row: any) {
+  knowledgeWorkflowForm.id = row.id
+  knowledgeWorkflowForm.project_id = row.project_id
+  knowledgeWorkflowForm.name = row.name
+  knowledgeWorkflowForm.api_base_url = row.api_base_url || ''
+  knowledgeWorkflowForm.api_key_env = row.api_key_env || ''
+  knowledgeWorkflowForm.status = row.status || 'active'
+  knowledgeWorkflowForm.description = row.description || ''
+  knowledgeWorkflowFormVisible.value = true
+}
+
+function validateKnowledgeWorkflowForm() {
+  if (!knowledgeWorkflowForm.project_id) { message.warning('请选择项目'); return false }
+  if (!knowledgeWorkflowForm.name.trim()) { message.warning('请输入工作流名称'); return false }
+  if (!knowledgeWorkflowForm.api_key_env.trim()) { message.warning('请输入 API Key 环境变量名'); return false }
+  return true
+}
+
+async function saveKnowledgeWorkflow() {
+  if (!validateKnowledgeWorkflowForm()) return
+  const payload = {
+    project_id: knowledgeWorkflowForm.project_id,
+    name: knowledgeWorkflowForm.name.trim(),
+    api_base_url: knowledgeWorkflowForm.api_base_url.trim(),
+    api_key_env: knowledgeWorkflowForm.api_key_env.trim(),
+    status: knowledgeWorkflowForm.status,
+    description: knowledgeWorkflowForm.description.trim()
+  }
+  try {
+    if (knowledgeWorkflowForm.id) {
+      await api.put(`/knowledge-workflows/${knowledgeWorkflowForm.id}`, payload)
+      message.success('工作流配置已更新')
+    } else {
+      await api.post('/knowledge-workflows', payload)
+      knowledgeWorkflowPagination.page = 1
+      message.success('工作流配置已创建')
+    }
+    knowledgeWorkflowFormVisible.value = false
+    await loadKnowledgeWorkflows()
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '工作流配置保存失败')
+  }
+}
+
+async function checkKnowledgeWorkflow(row: any) {
+  if (knowledgeWorkflowChecking.value) return
+  knowledgeWorkflowChecking.value = true
+  try {
+    await api.post(`/knowledge-workflows/${row.id}/check`)
+    message.success('工作流连接测试成功')
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '工作流连接测试失败')
+  } finally {
+    knowledgeWorkflowChecking.value = false
+  }
+}
+
+async function deleteKnowledgeWorkflow(row: any) {
+  try {
+    await confirmAction(`确认删除工作流配置「${row.name}」？`, '删除工作流配置', { confirmButtonText: '删除' })
+  } catch {
+    return
+  }
+  try {
+    await api.delete(`/knowledge-workflows/${row.id}`)
+    if (knowledgeWorkflowList.value.length === 1 && knowledgeWorkflowPagination.page > 1) knowledgeWorkflowPagination.page -= 1
+    await loadKnowledgeWorkflows()
+    await loadQaSessions()
+    message.success('工作流配置已删除')
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '工作流配置删除失败')
+  }
+}
+
+async function loadQaSessions() {
+  const { data } = await api.get('/knowledge-qa/sessions', {
+    params: {
+      ...(qaSessionSearch.project_id ? { project_id: qaSessionSearch.project_id } : {}),
+      page: 1,
+      page_size: 50
+    }
+  })
+  qaSessions.value = data.items || []
+  if (selectedQaSession.value && !qaSessions.value.some(item => item.id === selectedQaSession.value.id)) {
+    selectedQaSession.value = null
+    qaMessages.value = []
+  }
+}
+
+async function searchQaSessions() {
+  selectedQaSession.value = null
+  qaMessages.value = []
+  await loadQaSessions()
+}
+
+function resetQaSessionForm() {
+  qaSessionForm.project_id = undefined
+  qaSessionForm.workflow_id = undefined
+  qaSessionForm.title = ''
+}
+
+function openCreateQaSession() {
+  resetQaSessionForm()
+  qaSessionFormVisible.value = true
+}
+
+function changeQaSessionProject() {
+  qaSessionForm.workflow_id = undefined
+  const first = qaSessionWorkflows.value[0]
+  if (first) qaSessionForm.workflow_id = first.id
+}
+
+async function createQaSession() {
+  if (!qaSessionForm.project_id) { message.warning('请选择项目'); return }
+  if (!qaSessionForm.workflow_id) { message.warning('请选择工作流'); return }
+  try {
+    const { data } = await api.post('/knowledge-qa/sessions', {
+      project_id: qaSessionForm.project_id,
+      workflow_id: qaSessionForm.workflow_id,
+      title: qaSessionForm.title.trim()
+    })
+    qaSessionFormVisible.value = false
+    await loadQaSessions()
+    await selectQaSession(data)
+    message.success('会话已创建')
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '会话创建失败')
+  }
+}
+
+async function selectQaSession(session: any) {
+  selectedQaSession.value = session
+  qaQuestion.value = ''
+  const { data } = await api.get(`/knowledge-qa/sessions/${session.id}/messages`)
+  qaMessages.value = data || []
+}
+
+async function deleteQaSession(session: any) {
+  try {
+    await confirmAction(`确认删除会话「${session.title}」？`, '删除问答会话', { confirmButtonText: '删除' })
+  } catch {
+    return
+  }
+  try {
+    await api.delete(`/knowledge-qa/sessions/${session.id}`)
+    selectedQaSession.value = null
+    qaMessages.value = []
+    await loadQaSessions()
+    message.success('会话已删除')
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '会话删除失败')
+  }
+}
+
+async function askKnowledgeQa() {
+  if (!selectedQaSession.value) { message.warning('请先选择或新建会话'); return }
+  const question = qaQuestion.value.trim()
+  if (!question) { message.warning('请输入问题'); return }
+  qaAsking.value = true
+  try {
+    const { data } = await api.post(`/knowledge-qa/sessions/${selectedQaSession.value.id}/ask`, { question })
+    qaMessages.value.push(data.user_message, data.assistant_message)
+    qaQuestion.value = ''
+    await loadQaSessions()
+    const latest = qaSessions.value.find(item => item.id === selectedQaSession.value.id)
+    if (latest) selectedQaSession.value = latest
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '知识问答失败')
+    if (selectedQaSession.value) {
+      const { data } = await api.get(`/knowledge-qa/sessions/${selectedQaSession.value.id}/messages`)
+      qaMessages.value = data || []
+    }
+  } finally {
+    qaAsking.value = false
+  }
+}
+
+function apiKeyConfigSerialNumber(index: number) {
+  return (apiKeyConfigPagination.page - 1) * apiKeyConfigPagination.pageSize + index + 1
+}
+
+function normalizeEnvKey(value: string) {
+  return value.trim().toUpperCase()
+}
+
+function validateEnvKey(value: string) {
+  return /^[A-Z][A-Z0-9_]*$/.test(value)
+}
+
+async function loadApiKeyConfigs() {
+  const { data } = await api.get('/api-key-configs', {
+    params: {
+      ...(apiKeyConfigSearch.keyword.trim() ? { keyword: apiKeyConfigSearch.keyword.trim() } : {}),
+      ...(apiKeyConfigSearch.status ? { status: apiKeyConfigSearch.status } : {}),
+      page: apiKeyConfigPagination.page,
+      page_size: apiKeyConfigPagination.pageSize
+    }
+  })
+  apiKeyConfigList.value = data.items
+  apiKeyConfigs.value = data.items
+  apiKeyConfigPagination.total = data.total
+  apiKeyConfigPagination.page = data.page
+  apiKeyConfigPagination.pageSize = data.page_size
+}
+
+async function loadWorkflowApiKeyOptions() {
+  const { data } = await api.get('/api-key-configs/options')
+  workflowApiKeyOptions.value = data || []
+}
+
+async function handleWorkflowApiKeyDropdown(visible: boolean) {
+  if (visible) await loadWorkflowApiKeyOptions()
+}
+
+async function searchApiKeyConfigs() { apiKeyConfigPagination.page = 1; await loadApiKeyConfigs() }
+async function resetApiKeyConfigSearch() { apiKeyConfigSearch.keyword = ''; apiKeyConfigSearch.status = ''; apiKeyConfigPagination.page = 1; await loadApiKeyConfigs() }
+async function changeApiKeyConfigPage(page: number) { apiKeyConfigPagination.page = page; await loadApiKeyConfigs() }
+
+function resetApiKeyConfigForm() {
+  apiKeyConfigForm.id = undefined
+  apiKeyConfigForm.env_key = ''
+  apiKeyConfigForm.display_name = ''
+  apiKeyConfigForm.status = 'active'
+  apiKeyConfigForm.description = ''
+}
+
+function openCreateApiKeyConfig() { resetApiKeyConfigForm(); apiKeyConfigFormVisible.value = true }
+function openEditApiKeyConfig(row: any) {
+  apiKeyConfigForm.id = row.id
+  apiKeyConfigForm.env_key = row.env_key || ''
+  apiKeyConfigForm.display_name = row.display_name || ''
+  apiKeyConfigForm.status = row.status || 'active'
+  apiKeyConfigForm.description = row.description || ''
+  apiKeyConfigFormVisible.value = true
+}
+
+async function saveApiKeyConfig() {
+  const envKey = normalizeEnvKey(apiKeyConfigForm.env_key)
+  const displayName = apiKeyConfigForm.display_name.trim()
+  if (!displayName) { message.warning('请输入中文名'); return }
+  if (!envKey) { message.warning('请输入环境变量名'); return }
+  if (!validateEnvKey(envKey)) { message.warning('环境变量名只允许大写字母、数字、下划线，且必须以大写字母开头'); return }
+  const payload = { env_key: envKey, display_name: displayName, status: apiKeyConfigForm.status, description: apiKeyConfigForm.description.trim() }
+  try {
+    if (apiKeyConfigForm.id) {
+      await api.put(`/api-key-configs/${apiKeyConfigForm.id}`, payload)
+      message.success('API Key配置已更新')
+    } else {
+      await api.post('/api-key-configs', payload)
+      apiKeyConfigPagination.page = 1
+      message.success('API Key配置已创建')
+    }
+    apiKeyConfigFormVisible.value = false
+    await loadApiKeyConfigs()
+    await loadWorkflowApiKeyOptions()
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || 'API Key配置保存失败')
+  }
+}
+
+async function deleteApiKeyConfig(row: any) {
+  try {
+    await confirmAction(`确认删除API Key配置「${row.display_name}」？`, '删除API Key配置', { confirmButtonText: '删除' })
+  } catch {
+    return
+  }
+  try {
+    await api.delete(`/api-key-configs/${row.id}`)
+    if (apiKeyConfigList.value.length === 1 && apiKeyConfigPagination.page > 1) apiKeyConfigPagination.page -= 1
+    await loadApiKeyConfigs()
+    await loadWorkflowApiKeyOptions()
+    message.success('API Key配置已删除')
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || 'API Key配置删除失败')
+  }
+}
 function ticketCategoryText(category: string) {
   return ({ feature: '功能建议', issue: '问题反馈', experience: '体验优化', other: '其他' } as Record<string, string>)[category] || category
 }
@@ -2814,6 +3871,11 @@ const operationModuleMap: Record<string, string> = {
   case: '用例管理',
   plan: '测试计划',
   ticket: '工单管理',
+  knowledge_project: '知识库项目',
+  knowledge_base: '知识库',
+  knowledge_workflow: '知识库工作流',
+  api_key_config: 'API Key配置',
+  knowledge_qa: '知识问答',
   log: '日志中心',
   system: '系统异常'
 }
@@ -2902,6 +3964,9 @@ async function login() {
     const { data } = await api.post('/auth/login', loginForm)
     sessionExpired.value = false
     me.value = data.user
+    openedTabs.value = [menuMeta.dashboard]
+    active.value = 'dashboard'
+    saveTabs()
     syncAllowedTabs()
     await loadAll()
   } catch (error: any) {
@@ -2939,6 +4004,8 @@ async function logout() {
 function handleSessionExpired() {
   if (!me.value || sessionExpired.value) return
   sessionExpired.value = true
+  localStorage.removeItem('active_menu')
+  localStorage.removeItem('opened_tabs')
   openedTabs.value = [menuMeta.dashboard]
   active.value = 'dashboard'
   me.value = null

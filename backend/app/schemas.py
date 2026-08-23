@@ -266,3 +266,87 @@ class ExecutionCreate(BaseModel):
     environment_id: int
     target_type: Literal["case", "scenario", "plan"]
     target_id: int
+
+
+class KnowledgeBaseIn(BaseModel):
+    project_id: int
+    name: str
+    dify_dataset_id: str
+    status: Literal["active", "disabled"] = "active"
+    description: str = ""
+
+
+class KnowledgeBaseUpdate(BaseModel):
+    project_id: int
+    name: str
+    dify_dataset_id: str
+    status: Literal["active", "disabled"] = "active"
+    description: str = ""
+
+
+class KnowledgeRetrieveIn(BaseModel):
+    query: str
+    top_k: int = Field(default=5, ge=1, le=10)
+    score_threshold: float | None = Field(default=None, ge=0, le=1)
+
+
+class KnowledgeCheckIn(BaseModel):
+    dify_dataset_id: str
+
+
+class ApiKeyConfigIn(BaseModel):
+    env_key: str
+    display_name: str
+    status: Literal["active", "disabled"] = "active"
+    description: str = ""
+
+
+class ApiKeyConfigUpdate(BaseModel):
+    env_key: str
+    display_name: str
+    status: Literal["active", "disabled"] = "active"
+    description: str = ""
+
+
+class KnowledgeProjectIn(BaseModel):
+    name: str
+    description: str = ""
+    status: Literal["active", "disabled"] = "active"
+
+
+class KnowledgeProjectUpdate(BaseModel):
+    name: str
+    description: str = ""
+    status: Literal["active", "disabled"] = "active"
+
+
+class KnowledgeWorkflowIn(BaseModel):
+    project_id: int
+    name: str
+    api_base_url: str = ""
+    api_key_env: str
+    status: Literal["active", "disabled"] = "active"
+    description: str = ""
+
+
+class KnowledgeWorkflowUpdate(BaseModel):
+    project_id: int
+    name: str
+    api_base_url: str = ""
+    api_key_env: str = ""
+    status: Literal["active", "disabled"] = "active"
+    description: str = ""
+
+
+class KnowledgeQaSessionIn(BaseModel):
+    project_id: int
+    workflow_id: int
+    title: str = ""
+
+
+class KnowledgeQaSessionUpdate(BaseModel):
+    title: str
+
+
+class KnowledgeQaAskIn(BaseModel):
+    question: str

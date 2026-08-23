@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     queue_poll_interval_seconds: float = Field(default=1.0)
     dify_api_base_url: str = Field(default="http://host.docker.internal:8080/v1")
     dify_workflow_api_key: str = Field(default="")
+    dify_knowledge_api_key: str = Field(default="")
     ai_generation_storage_dir: str = Field(default="/app/data/ai-generations")
     ai_generation_upload_limit_bytes: int = Field(default=20 * 1024 * 1024)
     ticket_attachment_storage_dir: str = Field(default="/app/data/ticket-attachments")

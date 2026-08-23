@@ -31,6 +31,8 @@ services:
 
   backend:
     build: ./backend
+    env_file:
+      - .env
     environment:
       TZ: Asia/Shanghai
       DATABASE_URL: mysql+pymysql://api_test:api_test@mysql:3306/api_test_platform?charset=utf8mb4
@@ -42,6 +44,7 @@ services:
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       DIFY_API_BASE_URL: ${DIFY_API_BASE_URL:-http://host.docker.internal:8080/v1}
       DIFY_WORKFLOW_API_KEY: ${DIFY_WORKFLOW_API_KEY:-}
+      DIFY_KNOWLEDGE_API_KEY: ${DIFY_KNOWLEDGE_API_KEY:-}
       AI_GENERATION_STORAGE_DIR: /app/data/ai-generations
       TICKET_ATTACHMENT_STORAGE_DIR: /app/data/ticket-attachments
     ports:
