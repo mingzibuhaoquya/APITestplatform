@@ -821,15 +821,16 @@
             </a-form-item>
             <div class="search-actions"><a-button type="primary" @click="searchUiCases">搜索</a-button><a-button @click="resetUiCaseSearch">重置</a-button></div>
           </a-form>
-          <a-table :pagination="false" :data-source="uiCaseList" :scroll="{ x: 1180 }">
+          <a-table class="ui-case-table" :pagination="false" :data-source="uiCaseList" :scroll="{ x: 1420 }">
             <a-table-column data-index="project_name" title="项目" width="160" />
             <a-table-column data-index="environment_name" title="环境" width="160" />
             <a-table-column data-index="name" title="UI用例名称" width="220" />
             <a-table-column title="目标地址" width="300"><template #default="{ record: row }"><span class="url-cell">{{ row.start_url }}</span></template></a-table-column>
-            <a-table-column title="步骤数" width="90"><template #default="{ record: row }">{{ (row.steps || []).length }}</template></a-table-column>
+            <a-table-column title="模式" width="100"><template #default="{ record: row }"><a-tag :color="row.execution_mode === 'ai' ? 'processing' : 'default'">{{ row.execution_mode === 'ai' ? 'AI模式' : '高级模式' }}</a-tag></template></a-table-column>
+            <a-table-column title="步骤数" width="90"><template #default="{ record: row }">{{ row.execution_mode === 'ai' ? (row.max_steps || 30) : (row.steps || []).length }}</template></a-table-column>
             <a-table-column title="状态" width="100"><template #default="{ record: row }"><a-tag :color="row.status === 'active' ? 'success' : 'default'">{{ row.status === 'active' ? '启用' : '禁用' }}</a-tag></template></a-table-column>
             <a-table-column title="最近执行" width="110"><template #default="{ record: row }"><a-tag :color="executionStatusColor(row.last_status)">{{ executionStatusText(row.last_status) }}</a-tag></template></a-table-column>
-            <a-table-column data-index="update_date" title="更新时间" width="160" />
+            <a-table-column data-index="update_date" title="更新时间" width="190" />
             <a-table-column title="操作" width="260" fixed="right">
               <template #default="{ record: row }">
                 <div class="table-actions">
@@ -853,11 +854,27 @@
               <a-form-item label="页面等待"><a-select v-model:value="uiCaseForm.wait_until"><a-select-option value="networkidle">网络空闲</a-select-option><a-select-option value="load">页面加载完成</a-select-option><a-select-option value="domcontentloaded">DOM加载完成</a-select-option></a-select></a-form-item>
               <a-form-item label="额外等待(ms)"><a-input-number v-model:value="uiCaseForm.wait_after_load_ms" :min="0" :max="60000" :step="500" style="width: 100%" /></a-form-item>
               <a-form-item label="目标地址" class="wide"><a-input v-model:value="uiCaseForm.start_url" placeholder="/login 或完整 URL" /></a-form-item>
+              <a-form-item label="用例模式" class="wide">
+                <a-radio-group v-model:value="uiCaseForm.execution_mode">
+                  <a-radio-button value="ai">AI模式</a-radio-button>
+                  <a-radio-button value="advanced">高级模式</a-radio-button>
+                </a-radio-group>
+              </a-form-item>
+              <template v-if="uiCaseForm.execution_mode === 'ai'">
+                <a-form-item label="测试目标" class="wide"><a-textarea v-model:value="uiCaseForm.test_goal" :rows="4" placeholder="例如：登录系统后进入合同列表，按合同编号查询详情，并确认页面展示合同信息" /></a-form-item>
+                <a-form-item label="测试数据" class="wide"><a-textarea v-model:value="uiCaseForm.test_data_text" :rows="5" placeholder="{&#10;  &quot;用户名&quot;: &quot;test&quot;,&#10;  &quot;密码&quot;: &quot;123456&quot;,&#10;  &quot;合同编号&quot;: &quot;HT001&quot;&#10;}" /></a-form-item>
+                <a-form-item label="期望结果" class="wide"><a-textarea v-model:value="uiCaseForm.assertion_goal" :rows="3" placeholder="例如：页面出现合同编号，且状态为正常" /></a-form-item>
+                <a-form-item label="最大步骤数"><a-input-number v-model:value="uiCaseForm.max_steps" :min="1" :max="100" style="width: 100%" /></a-form-item>
+                <a-form-item label="单步超时(ms)"><a-input-number v-model:value="uiCaseForm.step_timeout_ms" :min="1000" :max="120000" :step="1000" style="width: 100%" /></a-form-item>
+                <a-form-item label="允许AI操作"><a-switch v-model:checked="uiCaseForm.allow_ai_actions" checked-children="允许" un-checked-children="只观察" /></a-form-item>
+                <a-alert class="wide compact-alert" type="info" show-icon message="AI模式会在受控浏览器中观察当前页面，并在点击、输入、选择、断言等安全动作中选择下一步；每一步都会保存原因、截图和执行结果。" />
+              </template>
               <a-form-item label="描述" class="wide"><a-textarea v-model:value="uiCaseForm.description" :rows="2" placeholder="请输入用例说明" /></a-form-item>
-              <div class="wide">
+              <div v-if="uiCaseForm.execution_mode === 'advanced'" class="wide">
                 <div class="kv-title">
                   <h4>测试步骤</h4>
                   <div class="toolbar-actions">
+                    <a-button size="small" @click="openAiStepDialog(uiCaseForm)">自然语言生成</a-button>
                     <a-button size="small" @click="startUiStepRecorder(uiCaseForm)">录制添加步骤</a-button>
                     <a-button size="small" @click="addUiStep(uiCaseForm)">添加步骤</a-button>
                   </div>
@@ -886,11 +903,27 @@
               <a-form-item label="页面等待"><a-select v-model:value="editUiCaseForm.wait_until"><a-select-option value="networkidle">网络空闲</a-select-option><a-select-option value="load">页面加载完成</a-select-option><a-select-option value="domcontentloaded">DOM加载完成</a-select-option></a-select></a-form-item>
               <a-form-item label="额外等待(ms)"><a-input-number v-model:value="editUiCaseForm.wait_after_load_ms" :min="0" :max="60000" :step="500" style="width: 100%" /></a-form-item>
               <a-form-item label="目标地址" class="wide"><a-input v-model:value="editUiCaseForm.start_url" placeholder="/login 或完整 URL" /></a-form-item>
+              <a-form-item label="用例模式" class="wide">
+                <a-radio-group v-model:value="editUiCaseForm.execution_mode">
+                  <a-radio-button value="ai">AI模式</a-radio-button>
+                  <a-radio-button value="advanced">高级模式</a-radio-button>
+                </a-radio-group>
+              </a-form-item>
+              <template v-if="editUiCaseForm.execution_mode === 'ai'">
+                <a-form-item label="测试目标" class="wide"><a-textarea v-model:value="editUiCaseForm.test_goal" :rows="4" placeholder="例如：登录系统后进入合同列表，按合同编号查询详情，并确认页面展示合同信息" /></a-form-item>
+                <a-form-item label="测试数据" class="wide"><a-textarea v-model:value="editUiCaseForm.test_data_text" :rows="5" placeholder="{&#10;  &quot;用户名&quot;: &quot;test&quot;,&#10;  &quot;密码&quot;: &quot;123456&quot;,&#10;  &quot;合同编号&quot;: &quot;HT001&quot;&#10;}" /></a-form-item>
+                <a-form-item label="期望结果" class="wide"><a-textarea v-model:value="editUiCaseForm.assertion_goal" :rows="3" placeholder="例如：页面出现合同编号，且状态为正常" /></a-form-item>
+                <a-form-item label="最大步骤数"><a-input-number v-model:value="editUiCaseForm.max_steps" :min="1" :max="100" style="width: 100%" /></a-form-item>
+                <a-form-item label="单步超时(ms)"><a-input-number v-model:value="editUiCaseForm.step_timeout_ms" :min="1000" :max="120000" :step="1000" style="width: 100%" /></a-form-item>
+                <a-form-item label="允许AI操作"><a-switch v-model:checked="editUiCaseForm.allow_ai_actions" checked-children="允许" un-checked-children="只观察" /></a-form-item>
+                <a-alert class="wide compact-alert" type="info" show-icon message="AI模式会在受控浏览器中观察当前页面，并在点击、输入、选择、断言等安全动作中选择下一步；每一步都会保存原因、截图和执行结果。" />
+              </template>
               <a-form-item label="描述" class="wide"><a-textarea v-model:value="editUiCaseForm.description" :rows="2" placeholder="请输入用例说明" /></a-form-item>
-              <div class="wide">
+              <div v-if="editUiCaseForm.execution_mode === 'advanced'" class="wide">
                 <div class="kv-title">
                   <h4>测试步骤</h4>
                   <div class="toolbar-actions">
+                    <a-button size="small" @click="openAiStepDialog(editUiCaseForm)">自然语言生成</a-button>
                     <a-button size="small" @click="startUiStepRecorder(editUiCaseForm)">录制添加步骤</a-button>
                     <a-button size="small" @click="addUiStep(editUiCaseForm)">添加步骤</a-button>
                   </div>
@@ -907,6 +940,41 @@
               </div>
             </a-form>
             <template #footer><a-button @click="editUiCaseDialogVisible = false">取消</a-button><a-button type="primary" @click="updateUiCase">确认</a-button></template>
+          </a-modal>
+
+          <a-modal v-model:open="aiStepDialogVisible" title="自然语言生成步骤" width="860px" @cancel="resetAiStepGenerator">
+            <a-form layout="vertical">
+              <a-form-item label="执行描述">
+                <a-textarea
+                  v-model:value="aiStepGenerator.prompt"
+                  :rows="5"
+                  placeholder="例如：打开登录页，输入用户名 testyan1，输入密码 123456，选择经销商伊犁金帝汽车服务有限公司，点击登录，断言看到首页"
+                />
+              </a-form-item>
+              <a-form-item label="应用方式">
+                <a-radio-group v-model:value="aiStepGenerator.mode">
+                  <a-radio-button value="append">追加到现有步骤</a-radio-button>
+                  <a-radio-button value="replace">覆盖现有步骤</a-radio-button>
+                </a-radio-group>
+              </a-form-item>
+            </a-form>
+            <div class="kv-title">
+              <h4>生成结果</h4>
+              <a-tag>{{ aiStepGenerator.generatedSteps.length }} 步</a-tag>
+            </div>
+            <a-table :pagination="false" size="small" :data-source="aiStepGenerator.generatedSteps" :row-key="(row: UiStepRow) => row.id" :scroll="{ x: 820, y: 260 }">
+              <a-table-column title="#" width="56"><template #default="{ index }">{{ index + 1 }}</template></a-table-column>
+              <a-table-column title="动作" width="110"><template #default="{ record: row }">{{ uiActionText(row.action) }}</template></a-table-column>
+              <a-table-column title="定位" width="110"><template #default="{ record: row }">{{ uiLocatorText(row.locator_type) }}</template></a-table-column>
+              <a-table-column title="目标"><template #default="{ record: row }"><span class="wrap-text">{{ row.target || '-' }}</span></template></a-table-column>
+              <a-table-column title="值/期望" width="170"><template #default="{ record: row }"><span class="wrap-text">{{ row.value || '-' }}</span></template></a-table-column>
+              <a-table-column title="说明" width="180"><template #default="{ record: row }">{{ row.description || '-' }}</template></a-table-column>
+            </a-table>
+            <template #footer>
+              <a-button @click="resetAiStepGenerator">取消</a-button>
+              <a-button :loading="aiStepGenerator.loading" @click="generateUiStepsFromPrompt">生成步骤</a-button>
+              <a-button type="primary" :disabled="!aiStepGenerator.generatedSteps.length" @click="applyGeneratedUiSteps">应用步骤</a-button>
+            </template>
           </a-modal>
 
           <a-modal v-model:open="uiPickerDialogVisible" :title="uiPicker.targetRow ? '远程元素拾取' : '录制添加步骤'" width="1180px" @cancel="closeUiPicker">
@@ -988,7 +1056,13 @@
               <a-descriptions-item label="用例">{{ uiExecutionDetail.task?.target_name || '-' }}</a-descriptions-item>
             </a-descriptions>
             <div v-for="result in uiExecutionDetail.results" :key="result.id" class="execution-result-expand log-detail-block">
-              <strong>执行步骤</strong><pre>{{ formatJson(result.response_snapshot?.steps || []) }}</pre>
+              <template v-if="result.request_snapshot?.mode === 'ai'">
+                <strong>测试目标</strong><pre>{{ result.request_snapshot?.test_goal || '-' }}</pre>
+                <strong>AI执行轨迹</strong><pre>{{ formatJson(result.response_snapshot?.agent_steps || []) }}</pre>
+              </template>
+              <template v-else>
+                <strong>执行步骤</strong><pre>{{ formatJson(result.response_snapshot?.steps || []) }}</pre>
+              </template>
               <strong>截图</strong>
               <div class="ui-screenshot-list">
                 <a-empty v-if="!(result.response_snapshot?.screenshots || []).length" description="暂无截图" :image-style="{ width: '44px', height: '44px' }" />
@@ -997,7 +1071,10 @@
               <strong>断言结果</strong><pre>{{ formatJson(result.assertion_results || []) }}</pre>
               <strong>错误信息</strong><pre>{{ result.error_message || '-' }}</pre>
             </div>
-            <template #footer><a-button type="primary" @click="uiExecutionDetailVisible = false">关闭</a-button></template>
+            <template #footer>
+              <a-button v-if="hasAiExecutionResult()" @click="solidifyUiExecution">固化为高级步骤</a-button>
+              <a-button type="primary" @click="uiExecutionDetailVisible = false">关闭</a-button>
+            </template>
           </a-modal>
 
           <a-modal v-model:open="aiSettingDialogVisible" title="AI配置" width="560px">
@@ -2071,6 +2148,13 @@ type UiCaseFormState = {
   name: string
   start_url: string
   description: string
+  execution_mode: 'ai' | 'advanced'
+  test_goal: string
+  test_data_text: string
+  assertion_goal: string
+  max_steps: number
+  step_timeout_ms: number
+  allow_ai_actions: boolean
   status: string
   headless: boolean
   wait_until: 'domcontentloaded' | 'load' | 'networkidle'
@@ -2403,6 +2487,7 @@ const createMockDialogVisible = ref(false)
 const editMockDialogVisible = ref(false)
 const createUiCaseDialogVisible = ref(false)
 const editUiCaseDialogVisible = ref(false)
+const aiStepDialogVisible = ref(false)
 const uiPickerDialogVisible = ref(false)
 const uiExecutionDetailVisible = ref(false)
 const aiSettingDialogVisible = ref(false)
@@ -2436,6 +2521,13 @@ const uiPicker = reactive({
   screenshotUrl: '',
   viewportWidth: 1600,
   viewportHeight: 900,
+  loading: false
+})
+const aiStepGenerator = reactive({
+  targetForm: null as UiCaseFormState | null,
+  prompt: '',
+  mode: 'append' as 'append' | 'replace',
+  generatedSteps: [] as UiStepRow[],
   loading: false
 })
 let uiPickerTimer: number | undefined
@@ -2489,6 +2581,13 @@ const uiCaseForm = reactive<UiCaseFormState>({
   name: '',
   start_url: '/',
   description: '',
+  execution_mode: 'ai',
+  test_goal: '',
+  test_data_text: '{}',
+  assertion_goal: '',
+  max_steps: 30,
+  step_timeout_ms: 10000,
+  allow_ai_actions: true,
   status: 'active',
   headless: true,
   wait_until: 'networkidle',
@@ -2502,6 +2601,13 @@ const editUiCaseForm = reactive<UiCaseFormState>({
   name: '',
   start_url: '/',
   description: '',
+  execution_mode: 'ai',
+  test_goal: '',
+  test_data_text: '{}',
+  assertion_goal: '',
+  max_steps: 30,
+  step_timeout_ms: 10000,
+  allow_ai_actions: true,
   status: 'active',
   headless: true,
   wait_until: 'networkidle',
@@ -3264,6 +3370,7 @@ const operationActionMap: Record<string, string> = {
   delete: '删除',
   status: '修改状态',
   execute: '执行',
+  generate_steps: '生成步骤',
   exception: '异常捕获'
 }
 
@@ -4142,11 +4249,18 @@ function changeMockFormProject() {
     uiCaseForm.name = ''
     uiCaseForm.start_url = '/'
     uiCaseForm.description = ''
+    uiCaseForm.execution_mode = 'ai'
+    uiCaseForm.test_goal = ''
+    uiCaseForm.test_data_text = '{}'
+    uiCaseForm.assertion_goal = ''
+    uiCaseForm.max_steps = 30
+    uiCaseForm.step_timeout_ms = 10000
+    uiCaseForm.allow_ai_actions = true
     uiCaseForm.status = 'active'
     uiCaseForm.headless = true
     uiCaseForm.wait_until = 'networkidle'
     uiCaseForm.wait_after_load_ms = 500
-    uiCaseForm.steps = [defaultUiStep('goto')]
+    uiCaseForm.steps = []
   }
 
   function resetEditUiCaseForm() {
@@ -4156,6 +4270,13 @@ function changeMockFormProject() {
     editUiCaseForm.name = ''
     editUiCaseForm.start_url = '/'
     editUiCaseForm.description = ''
+    editUiCaseForm.execution_mode = 'ai'
+    editUiCaseForm.test_goal = ''
+    editUiCaseForm.test_data_text = '{}'
+    editUiCaseForm.assertion_goal = ''
+    editUiCaseForm.max_steps = 30
+    editUiCaseForm.step_timeout_ms = 10000
+    editUiCaseForm.allow_ai_actions = true
     editUiCaseForm.status = 'active'
     editUiCaseForm.headless = true
     editUiCaseForm.wait_until = 'networkidle'
@@ -4175,6 +4296,13 @@ function changeMockFormProject() {
     editUiCaseForm.name = row.name || ''
     editUiCaseForm.start_url = row.start_url || '/'
     editUiCaseForm.description = row.description || ''
+    editUiCaseForm.execution_mode = row.execution_mode === 'ai' ? 'ai' : 'advanced'
+    editUiCaseForm.test_goal = row.test_goal || ''
+    editUiCaseForm.test_data_text = JSON.stringify(row.test_data || {}, null, 2)
+    editUiCaseForm.assertion_goal = row.assertion_goal || ''
+    editUiCaseForm.max_steps = Number(row.max_steps ?? 30)
+    editUiCaseForm.step_timeout_ms = Number(row.step_timeout_ms ?? 10000)
+    editUiCaseForm.allow_ai_actions = row.allow_ai_actions !== false
     editUiCaseForm.status = row.status || 'active'
     editUiCaseForm.headless = row.headless !== false
     editUiCaseForm.wait_until = row.wait_until || 'networkidle'
@@ -4193,6 +4321,75 @@ function changeMockFormProject() {
 
   function addUiStep(form: UiCaseFormState) {
     form.steps.push(defaultUiStep('click'))
+  }
+
+  function openAiStepDialog(form: UiCaseFormState) {
+    aiStepGenerator.targetForm = form
+    aiStepGenerator.prompt = form.description || ''
+    aiStepGenerator.mode = 'append'
+    aiStepGenerator.generatedSteps = []
+    aiStepDialogVisible.value = true
+  }
+
+  function resetAiStepGenerator() {
+    aiStepDialogVisible.value = false
+    aiStepGenerator.targetForm = null
+    aiStepGenerator.prompt = ''
+    aiStepGenerator.mode = 'append'
+    aiStepGenerator.generatedSteps = []
+    aiStepGenerator.loading = false
+  }
+
+  function normalizeGeneratedUiStep(step: any): UiStepRow {
+    return {
+      id: Date.now() + Math.floor(Math.random() * 100000),
+      action: step?.action || 'click',
+      locator_type: step?.locator_type || 'ai',
+      target: step?.target || '',
+      value: step?.value || '',
+      description: step?.description || ''
+    }
+  }
+
+  async function generateUiStepsFromPrompt() {
+    const form = aiStepGenerator.targetForm
+    const prompt = aiStepGenerator.prompt.trim()
+    if (!form) return
+    if (!prompt) {
+      message.warning('请输入执行描述')
+      return
+    }
+    aiStepGenerator.loading = true
+    try {
+      const { data } = await api.post('/ui-cases/generate-steps', {
+        prompt,
+        start_url: form.start_url,
+        existing_steps: form.steps.map(({ action, locator_type, target, value, description }) => ({ action, locator_type, target, value, description }))
+      })
+      aiStepGenerator.generatedSteps = (data.steps || []).map(normalizeGeneratedUiStep)
+      if (!aiStepGenerator.generatedSteps.length) {
+        message.warning('未生成可用步骤')
+      } else {
+        message.success('步骤已生成，可预览后应用')
+      }
+    } catch (error: any) {
+      message.error(error?.response?.data?.detail || '生成步骤失败')
+    } finally {
+      aiStepGenerator.loading = false
+    }
+  }
+
+  function applyGeneratedUiSteps() {
+    const form = aiStepGenerator.targetForm
+    if (!form || !aiStepGenerator.generatedSteps.length) return
+    const steps = aiStepGenerator.generatedSteps.map(step => ({ ...step, id: Date.now() + Math.floor(Math.random() * 100000) }))
+    if (aiStepGenerator.mode === 'replace') {
+      form.steps = steps
+    } else {
+      form.steps.push(...steps)
+    }
+    message.success('已应用生成步骤')
+    resetAiStepGenerator()
   }
 
   function removeUiStep(form: UiCaseFormState, index: number) {
@@ -4295,6 +4492,18 @@ function changeMockFormProject() {
       screenshot: '截图'
     }
     return mapping[action] || action || '-'
+  }
+
+  function uiLocatorText(locatorType: string) {
+    const mapping: Record<string, string> = {
+      css: 'CSS',
+      xpath: 'XPath',
+      text: '文本',
+      placeholder: '占位符',
+      role: '按钮文字',
+      ai: 'AI描述'
+    }
+    return mapping[locatorType] || locatorType || '-'
   }
 
   function buildRecordedUiStep(result: any) {
@@ -4546,12 +4755,28 @@ function changeMockFormProject() {
       message.warning('请输入UI用例名称')
       return null
     }
+    if (form.execution_mode === 'ai' && !form.test_goal.trim()) {
+      message.warning('AI模式请填写测试目标')
+      return null
+    }
+    const testData = parseJson(form.test_data_text, undefined)
+    if (testData === undefined || Array.isArray(testData) || typeof testData !== 'object') {
+      message.warning('测试数据必须是合法 JSON 对象')
+      return null
+    }
     return {
       project_id: form.project_id,
       environment_id: form.environment_id,
       name: form.name.trim(),
       start_url: form.start_url.trim(),
       description: form.description.trim(),
+      execution_mode: form.execution_mode,
+      test_goal: form.test_goal.trim(),
+      test_data: testData,
+      assertion_goal: form.assertion_goal.trim(),
+      max_steps: Number(form.max_steps || 30),
+      step_timeout_ms: Number(form.step_timeout_ms || 10000),
+      allow_ai_actions: form.allow_ai_actions,
       status: form.status,
       headless: form.headless,
       wait_until: form.wait_until,
@@ -4597,20 +4822,31 @@ function changeMockFormProject() {
 
   function pollUiExecution(row: any, taskId: number) {
     let attempts = 0
+    const maxAttempts = 900
     const timer = window.setInterval(async () => {
       attempts += 1
       try {
         const { data } = await api.get(`/ui-executions/${taskId}`)
         row.last_status = data.task?.status || row.last_status
-        if (['passed', 'failed', 'error'].includes(row.last_status) || attempts >= 60) {
+        if (uiExecutionDetailVisible.value && uiExecutionDetail.task?.id === taskId) {
+          uiExecutionDetail.task = data.task
+          uiExecutionDetail.results = data.results || []
+        }
+        if (['passed', 'failed', 'error'].includes(row.last_status)) {
           window.clearInterval(timer)
-          if (uiExecutionDetailVisible.value && uiExecutionDetail.task?.id === taskId) {
-            uiExecutionDetail.task = data.task
-            uiExecutionDetail.results = data.results || []
-          }
+          await loadUiCases()
+          return
+        }
+        if (attempts >= maxAttempts) {
+          window.clearInterval(timer)
+          message.warning('UI执行仍在运行，已停止前端轮询，可稍后点击详情查看结果')
+          await loadUiCases()
         }
       } catch {
-        if (attempts >= 60) window.clearInterval(timer)
+        if (attempts >= maxAttempts) {
+          window.clearInterval(timer)
+          await loadUiCases()
+        }
       }
     }, 1000)
   }
@@ -4624,6 +4860,20 @@ function changeMockFormProject() {
     uiExecutionDetail.task = data.task
     uiExecutionDetail.results = data.results || []
     uiExecutionDetailVisible.value = true
+  }
+
+  function hasAiExecutionResult() {
+    return uiExecutionDetail.results.some((item: any) => item.request_snapshot?.mode === 'ai')
+  }
+
+  async function solidifyUiExecution() {
+    const taskId = uiExecutionDetail.task?.id
+    if (!taskId) return
+    await confirmAction('确认把本次 AI 执行轨迹固化为高级步骤？固化后用例会切换到高级模式，可继续手工调整。', '固化UI流程')
+    await api.post(`/ui-executions/${taskId}/solidify`)
+    message.success('已固化为高级步骤')
+    uiExecutionDetailVisible.value = false
+    await loadUiCases()
   }
 
   async function loadAiSetting() {
@@ -6385,13 +6635,24 @@ function pollPlanExecution(planId: number, taskId: number, row?: any) {
           syncExecutionDetail(planId, taskId, status, row, data?.results || [])
         }
       }
+      if (attempts >= 30 && !terminalStatuses.has(status)) {
+        await api.post(`/executions/${taskId}/timeout`)
+        updatePlanExecutionState(planId, taskId, 'failed', row, data?.results || [])
+        if (executionDetailDialogVisible.value && executionDetail.task?.id === taskId) {
+          executionDetail.task = { ...(data.task || executionDetail.task || {}), status: 'failed', summary: { ...(data.task?.summary || {}), error: '执行超时' } }
+          syncExecutionDetail(planId, taskId, 'failed', row, data?.results || [])
+        }
+      }
       if (terminalStatuses.has(status) || attempts >= 30) {
         clearPlanExecutionPoller(planId)
         await Promise.all([loadPlans(), refreshExecutionViews()])
       }
     } catch {
       if (attempts >= 30) {
+        await api.post(`/executions/${taskId}/timeout`).catch(() => {})
+        updatePlanExecutionState(planId, taskId, 'failed', row)
         clearPlanExecutionPoller(planId)
+        await Promise.all([loadPlans(), refreshExecutionViews()])
       }
     } finally {
       polling = false

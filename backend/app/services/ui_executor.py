@@ -65,6 +65,7 @@ def _goto_and_wait(page, destination: str, case: UiTestCase) -> None:
 
 def execute_ui_task(task_id: int) -> None:
     from ..database import SessionLocal
+    from .ui_agent_executor import execute_ui_agent_case
 
     db = SessionLocal()
     try:
@@ -75,11 +76,12 @@ def execute_ui_task(task_id: int) -> None:
         task.started_at = datetime.now()
         db.commit()
 
-        row = _execute_ui_case(db, task)
+        case = db.get(UiTestCase, task.target_id)
+        row = execute_ui_agent_case(db, task) if case and case.execution_mode == "ai" else _execute_ui_case(db, task)
         task.status = "passed" if row.status == "passed" else "failed"
         task.ended_at = datetime.now()
         task.summary_json = dump_json({"total": 1, "passed": 1 if row.status == "passed" else 0, "failed": 0 if row.status == "passed" else 1})
-        case = db.get(UiTestCase, row.case_id) if row.case_id else None
+        case = db.get(UiTestCase, row.case_id) if row.case_id else case
         task.report_html = build_html_report(task, [UiResultView(row, case)], case.name if case else "")
         db.commit()
     except Exception as exc:

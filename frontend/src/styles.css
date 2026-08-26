@@ -1628,6 +1628,14 @@ textarea.code-input,
     word-break: break-all;
 }
 
+.ui-case-table .ant-table-cell-fix-right {
+    background: #fff;
+}
+
+.ui-case-table .ant-table-thead .ant-table-cell-fix-right {
+    background: #f8fafc;
+}
+
 .wrap-text {
     white-space: normal;
     overflow-wrap: anywhere;

@@ -297,6 +297,13 @@ class UiTestCaseIn(BaseModel):
     name: str
     start_url: str = ""
     description: str = ""
+    execution_mode: Literal["ai", "advanced"] = "advanced"
+    test_goal: str = ""
+    test_data: dict[str, Any] = {}
+    assertion_goal: str = ""
+    max_steps: int = 30
+    step_timeout_ms: int = 10000
+    allow_ai_actions: bool = True
     status: Literal["active", "disabled"] = "active"
     headless: bool = True
     wait_until: Literal["domcontentloaded", "load", "networkidle"] = "networkidle"
@@ -306,6 +313,12 @@ class UiTestCaseIn(BaseModel):
 
 class UiTestCaseUpdate(UiTestCaseIn):
     pass
+
+
+class UiGenerateStepsIn(BaseModel):
+    prompt: str
+    start_url: str = ""
+    existing_steps: list[UiStepIn] = []
 
 
 class AiSettingIn(BaseModel):

@@ -202,7 +202,22 @@ def _ensure_ui_test_case_columns() -> None:
     if "ui_test_case" not in inspector.get_table_names():
         return
     columns = {column["name"] for column in inspector.get_columns("ui_test_case")}
+    large_text = "LONGTEXT" if engine.dialect.name == "mysql" else "TEXT"
     with engine.begin() as conn:
+        if "execution_mode" not in columns:
+            conn.execute(text("ALTER TABLE ui_test_case ADD COLUMN execution_mode VARCHAR(32) NOT NULL DEFAULT 'advanced'"))
+        if "test_goal" not in columns:
+            conn.execute(text("ALTER TABLE ui_test_case ADD COLUMN test_goal TEXT NULL"))
+        if "test_data_json" not in columns:
+            conn.execute(text(f"ALTER TABLE ui_test_case ADD COLUMN test_data_json {large_text} NULL"))
+        if "assertion_goal" not in columns:
+            conn.execute(text("ALTER TABLE ui_test_case ADD COLUMN assertion_goal TEXT NULL"))
+        if "max_steps" not in columns:
+            conn.execute(text("ALTER TABLE ui_test_case ADD COLUMN max_steps INT NOT NULL DEFAULT 30"))
+        if "step_timeout_ms" not in columns:
+            conn.execute(text("ALTER TABLE ui_test_case ADD COLUMN step_timeout_ms INT NOT NULL DEFAULT 10000"))
+        if "allow_ai_actions" not in columns:
+            conn.execute(text("ALTER TABLE ui_test_case ADD COLUMN allow_ai_actions BOOL NOT NULL DEFAULT 1"))
         if "headless" not in columns:
             conn.execute(text("ALTER TABLE ui_test_case ADD COLUMN headless BOOL NOT NULL DEFAULT 1"))
         if "wait_until" not in columns:

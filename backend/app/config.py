@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     admin_password: str = Field(default="admin123")
     response_body_limit: int = Field(default=30000)
     queue_poll_interval_seconds: float = Field(default=1.0)
+    running_task_timeout_seconds: int = Field(default=300)
 
 
 @lru_cache

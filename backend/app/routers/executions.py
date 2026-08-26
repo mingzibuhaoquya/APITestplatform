@@ -4,6 +4,7 @@ from ..database import get_db
 from ..deps import current_user
 from ..models import ApiDefinition, Environment, ExecutionResult, ExecutionTask, Project, ScenarioCase, TestCase, TestSuite, UiTestCase, User
 from ..schemas import ExecutionCreate
+from ..services.execution_status import fail_timed_out_running_tasks, mark_task_timed_out
 from ..utils import fmt_time, parse_json
 
 
@@ -66,6 +67,7 @@ def list_executions(
     _: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
+    fail_timed_out_running_tasks(db)
     query = db.query(ExecutionTask).filter(ExecutionTask.is_deleted.is_(False))
     if status.strip():
         query = query.filter(ExecutionTask.status == status.strip())
@@ -91,6 +93,7 @@ def list_executions(
 
 @router.get("/{task_id}")
 def get_execution(task_id: int, _: User = Depends(current_user), db: Session = Depends(get_db)):
+    fail_timed_out_running_tasks(db)
     task = db.get(ExecutionTask, task_id)
     if not task or task.is_deleted:
         raise HTTPException(status_code=404, detail="execution does not exist")
@@ -122,6 +125,14 @@ def get_execution(task_id: int, _: User = Depends(current_user), db: Session = D
             "error_message": row.error_message,
         } for row in results],
     }
+
+
+@router.post("/{task_id}/timeout")
+def timeout_execution(task_id: int, _: User = Depends(current_user), db: Session = Depends(get_db)):
+    task = mark_task_timed_out(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="execution does not exist")
+    return _task_out(task, db)
 
 
 @router.get("/{task_id}/report", response_class=Response)

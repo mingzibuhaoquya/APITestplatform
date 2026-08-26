@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timedelta
 from html import escape
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -30,7 +31,10 @@ from app.services.report import build_html_report
 from app.services import crypto_envelope
 from app.services.operation_logs import log_system_exception
 from app.services.variables import render_variables
+from app.services.execution_status import fail_timed_out_running_tasks, mark_task_timed_out
 from app.services.ui_executor import _chat_completions_url, _extract_ai_locator_response, _local_ai_locator_from_candidates
+from app.services.ui_agent_executor import _chat_completions_url as ui_agent_chat_url, normalize_agent_decision
+from app.services.ui_step_generator import _generate_steps_locally
 from app.security import create_session_token, hash_password
 
 
@@ -474,6 +478,7 @@ def test_ui_case_crud_and_execute_task_creation(db_session):
 
     assert created["name"] == "登录页面冒烟测试"
     assert created["headless"] is True
+    assert created["execution_mode"] == "advanced"
     assert created["wait_until"] == "networkidle"
     assert created["wait_after_load_ms"] == 500
     assert created["steps"][1]["action"] == "assert_text"
@@ -487,6 +492,7 @@ def test_ui_case_crud_and_execute_task_creation(db_session):
             environment_id=environment["id"],
             name="登录页面冒烟测试-编辑",
             start_url="/login",
+            execution_mode="advanced",
             status="active",
             headless=False,
             wait_until="load",
@@ -508,6 +514,51 @@ def test_ui_case_crud_and_execute_task_creation(db_session):
 
     deleted = delete_ui_case(created["id"], admin, db)
     assert deleted["is_deleted"] is True
+
+
+def test_ui_ai_case_requires_goal_and_stores_agent_config(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="UI AI项目", description="用于AI UI自动化"), admin, db)
+    environment = create_environment(EnvironmentIn(project_id=project["id"], name="AI环境", protocol="http", base_url="localhost", port=5173), admin, db)
+
+    with pytest.raises(HTTPException) as exc:
+        create_ui_case(
+            UiTestCaseIn(
+                project_id=project["id"],
+                environment_id=environment["id"],
+                name="AI登录",
+                start_url="/login",
+                execution_mode="ai",
+            ),
+            admin,
+            db,
+        )
+    assert exc.value.status_code == 400
+
+    created = create_ui_case(
+        UiTestCaseIn(
+            project_id=project["id"],
+            environment_id=environment["id"],
+            name="AI登录",
+            start_url="/login",
+            execution_mode="ai",
+            test_goal="登录系统并看到首页",
+            test_data={"username": "tester", "password": "123456"},
+            assertion_goal="页面出现首页",
+            max_steps=12,
+            step_timeout_ms=5000,
+            allow_ai_actions=True,
+        ),
+        admin,
+        db,
+    )
+
+    assert created["execution_mode"] == "ai"
+    assert created["test_goal"] == "登录系统并看到首页"
+    assert created["test_data"] == {"username": "tester", "password": "123456"}
+    assert created["assertion_goal"] == "页面出现首页"
+    assert created["max_steps"] == 12
+    assert created["step_timeout_ms"] == 5000
 
 
 def test_ai_setting_can_be_saved_and_masked(db_session):
@@ -549,6 +600,91 @@ def test_ui_ai_locator_helpers():
     assert button == {"locator_type": "role", "target": "登录", "source": "local"}
     username = _local_ai_locator_from_candidates({"target": "填写用户名输入框"}, candidates)
     assert username == {"locator_type": "placeholder", "target": "请输入用户名", "source": "local"}
+
+
+def test_ui_agent_decision_normalization_and_actions():
+    assert ui_agent_chat_url("https://api.deepseek.com") == "https://api.deepseek.com/v1/chat/completions"
+    assert ui_agent_chat_url("https://api.deepseek.com/v1") == "https://api.deepseek.com/v1/chat/completions"
+
+    decision = normalize_agent_decision('执行：{"action":"click","ref":"e1","reason":"点击登录按钮"}')
+    assert decision["action"] == "click"
+    assert decision["ref"] == "e1"
+    assert decision["reason"] == "点击登录按钮"
+
+    finish = normalize_agent_decision({"action": "finish", "success": True, "message": "完成"})
+    assert finish["action"] == "finish"
+    assert finish["success"] is True
+
+    with pytest.raises(RuntimeError):
+        normalize_agent_decision('{"action":"delete_all"}')
+
+
+def test_generate_ui_steps_locally_from_natural_language():
+    steps = _generate_steps_locally("输入用户名 testyan1；输入密码 123456；选择经销商伊犁金帝；点击登录；断言看到首页", "/login")
+
+    assert [step["action"] for step in steps] == ["goto", "fill", "fill", "select", "click", "assert_text"]
+    assert steps[1]["locator_type"] == "ai"
+    assert steps[1]["target"] == "用户名"
+    assert steps[1]["value"] == "testyan1"
+    assert steps[3]["target"] == "经销商"
+    assert steps[3]["value"] == "伊犁金帝"
+    assert steps[4]["target"] == "登录"
+
+
+def test_fail_timed_out_running_tasks_marks_failed(db_session, monkeypatch):
+    db, admin = db_session
+
+    class TimeoutSettings:
+        running_task_timeout_seconds = 60
+
+    monkeypatch.setattr("app.services.execution_status.get_settings", lambda: TimeoutSettings())
+    old_task = ExecutionTask(
+        executor_id=admin.id,
+        project_id=1,
+        environment_id=1,
+        target_type="case",
+        target_id=1,
+        status="running",
+        started_at=datetime.now() - timedelta(seconds=90),
+    )
+    fresh_task = ExecutionTask(
+        executor_id=admin.id,
+        project_id=1,
+        environment_id=1,
+        target_type="case",
+        target_id=2,
+        status="running",
+        started_at=datetime.now(),
+    )
+    db.add_all([old_task, fresh_task])
+    db.commit()
+
+    assert fail_timed_out_running_tasks(db) == 1
+    assert old_task.status == "failed"
+    assert old_task.ended_at is not None
+    assert fresh_task.status == "running"
+
+
+def test_mark_task_timed_out_marks_running_task_failed(db_session):
+    db, admin = db_session
+    task = ExecutionTask(
+        executor_id=admin.id,
+        project_id=1,
+        environment_id=1,
+        target_type="case",
+        target_id=1,
+        status="running",
+        started_at=datetime.now(),
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    marked = mark_task_timed_out(db, task.id)
+
+    assert marked is not None
+    assert marked.status == "failed"
+    assert marked.ended_at is not None
 
 
 def test_create_user_defaults_active_and_can_login(db_session):

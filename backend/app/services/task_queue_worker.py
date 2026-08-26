@@ -6,6 +6,7 @@ from sqlalchemy import select
 from ..config import get_settings
 from ..database import SessionLocal
 from ..models import ExecutionTask
+from .execution_status import fail_timed_out_running_tasks
 from .executor import execute_task
 from .ui_executor import execute_ui_task
 
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 def claim_next_task() -> int | None:
     db = SessionLocal()
     try:
+        fail_timed_out_running_tasks(db)
         with db.begin():
             task = db.scalars(
                 select(ExecutionTask)
