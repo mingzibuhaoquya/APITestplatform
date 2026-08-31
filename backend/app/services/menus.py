@@ -17,23 +17,51 @@ MENU_TREE = [
     {"key": "apis", "label": "接口管理", "module": "api"},
     {"key": "mocks", "label": "Mock服务", "module": "mock"},
     {"key": "cases", "label": "用例管理", "module": "case"},
-    {"key": "ui-tests", "label": "UI测试", "module": "ui"},
+    {
+        "key": "ui-tests",
+        "label": "UI测试",
+        "children": [
+            {"key": "ui-cases", "label": "用例管理", "module": "ui_case"},
+            {"key": "ui-reports", "label": "UI测试报告", "module": "ui_report"},
+        ],
+    },
     {"key": "execute", "label": "测试计划", "module": "execute"},
     {"key": "reports", "label": "报告中心", "module": "report"},
     {"key": "logs", "label": "日志中心", "module": "log"},
+    {"key": "ai_cases", "label": "AI生成用例", "module": "ai_case_generation"},
+    {
+        "key": "knowledge",
+        "label": "知识库",
+        "children": [
+            {"key": "knowledge_projects", "label": "项目配置", "module": "knowledge_project"},
+            {"key": "knowledge_bases", "label": "知识库配置", "module": "knowledge_base"},
+            {"key": "knowledge_workflows", "label": "工作流配置", "module": "knowledge_workflow"},
+            {"key": "knowledge_qa", "label": "知识问答", "module": "knowledge_qa"},
+        ],
+    },
     {
         "key": "system",
         "label": "系统管理",
         "children": [
             {"key": "accounts", "label": "用户管理", "module": "user"},
             {"key": "roles", "label": "角色管理", "module": "role"},
+            {"key": "tickets", "label": "工单管理", "module": "ticket"},
+            {"key": "api_key_configs", "label": "API Key配置", "module": "api_key_config"},
         ],
     },
 ]
 
 DEFAULT_ROLE_MENUS = {
-    "admin": ["dashboard", "projects", "environments", "apis", "mocks", "cases", "ui-tests", "execute", "reports", "logs", "accounts", "roles"],
-    "tester": ["dashboard", "projects", "environments", "apis", "mocks", "cases", "ui-tests", "execute", "reports", "logs", "accounts"],
+    "admin": [
+        "dashboard", "projects", "environments", "apis", "mocks", "cases", "ui-cases", "ui-reports",
+        "execute", "reports", "logs", "ai_cases", "knowledge_projects", "knowledge_bases",
+        "knowledge_workflows", "knowledge_qa", "accounts", "roles", "tickets", "api_key_configs",
+    ],
+    "tester": [
+        "dashboard", "projects", "environments", "apis", "mocks", "cases", "ui-cases", "ui-reports",
+        "execute", "reports", "logs", "ai_cases", "knowledge_projects", "knowledge_bases",
+        "knowledge_qa", "accounts", "tickets",
+    ],
 }
 
 PATH_MENU_RULES = [
@@ -44,13 +72,20 @@ PATH_MENU_RULES = [
     ("/apis", {"apis"}),
     ("/mocks", {"mocks"}),
     ("/cases", {"cases"}),
-    ("/ui-cases", {"ui-tests"}),
-    ("/ui-executions", {"ui-tests", "reports"}),
-    ("/ai-settings", {"ui-tests", "roles"}),
+    ("/ui-cases", {"ui-cases"}),
+    ("/ui-executions", {"ui-cases", "ui-reports", "reports"}),
+    ("/ai-settings", {"ui-cases", "roles"}),
     ("/scenarios", {"cases"}),
     ("/plans", {"execute"}),
     ("/logs", {"logs"}),
-    ("/executions", {"execute", "reports"}),
+    ("/executions", {"execute", "reports", "ui-reports"}),
+    ("/ai-case-generations", {"ai_cases"}),
+    ("/knowledge-projects", {"knowledge_projects"}),
+    ("/knowledge-bases", {"knowledge_bases"}),
+    ("/knowledge-workflows", {"knowledge_workflows"}),
+    ("/knowledge-qa", {"knowledge_qa"}),
+    ("/tickets", {"tickets"}),
+    ("/api-key-configs", {"api_key_configs"}),
 ]
 
 
@@ -68,6 +103,11 @@ def normalize_menus(menus) -> list[str]:
     allowed = set(flat_menu_keys())
     normalized = []
     for key in menus or []:
+        if key == "ui-tests":
+            for legacy_key in ("ui-cases", "ui-reports"):
+                if legacy_key in allowed and legacy_key not in normalized:
+                    normalized.append(legacy_key)
+            continue
         if key in allowed and key not in normalized:
             normalized.append(key)
     if "dashboard" not in normalized:
@@ -89,14 +129,15 @@ def ensure_default_roles(db: Session) -> None:
     for code, name, description, is_builtin, menus in defaults:
         role = db.query(Role).filter(Role.code == code).first()
         if role:
-            current_menus = parse_json(role.menus_json, [])
+            current_menus = normalize_menus(parse_json(role.menus_json, []))
             if not current_menus:
                 role.menus_json = dump_json(menus)
-            elif role.is_builtin:
-                merged = list(current_menus)
-                for menu in menus:
-                    if menu not in merged:
-                        merged.append(menu)
+            elif role.code in DEFAULT_ROLE_MENUS:
+                merged = list(dict.fromkeys([*current_menus, *menus]))
+                if role.code == "tester" and "knowledge_workflows" in merged:
+                    merged.remove("knowledge_workflows")
+                if role.code == "tester" and "api_key_configs" in merged:
+                    merged.remove("api_key_configs")
                 role.menus_json = dump_json(merged)
             role.name = role.name or name
             role.description = role.description or description

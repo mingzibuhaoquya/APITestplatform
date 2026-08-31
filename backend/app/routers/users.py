@@ -4,7 +4,7 @@ from ..database import get_db
 from ..deps import admin_user, current_user
 from ..models import Role, User
 from ..schemas import UserCreate, UserListOut, UserStatusUpdate, UserUpdate
-from ..security import hash_password
+from ..security import hash_password, revoke_user_sessions
 from ..services.menus import ensure_default_roles
 from ..services.operation_logs import log_operation
 from .auth import user_out
@@ -110,6 +110,8 @@ def update_user_status(user_id: int, payload: UserStatusUpdate, operator: User =
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
     user.status = payload.status
+    if user.status == "disabled":
+        revoke_user_sessions(db, user.id)
     db.commit()
     db.refresh(user)
     log_operation(db, operator, "user", "status", f"updated user {user.username} status to {user.status}")

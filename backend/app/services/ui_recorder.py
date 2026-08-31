@@ -10,7 +10,7 @@ from .ui_executor import DEFAULT_UI_LOCALE, DEFAULT_UI_USER_AGENT
 
 
 SESSION_TTL_SECONDS = 10 * 60
-VIEWPORT = {"width": 1600, "height": 900}
+VIEWPORT = {"width": 1366, "height": 1050}
 
 
 PICK_SCRIPT = r"""

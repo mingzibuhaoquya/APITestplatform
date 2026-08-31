@@ -1,7 +1,10 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 
-RUN corepack enable
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+RUN npm config set registry ${NPM_REGISTRY} \
+    && npm install -g pnpm@11.19.0 --registry=${NPM_REGISTRY} \
+    && pnpm config set registry ${NPM_REGISTRY}
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile

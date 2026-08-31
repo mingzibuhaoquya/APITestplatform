@@ -284,7 +284,7 @@ class ExecutionCreate(BaseModel):
 
 
 class UiStepIn(BaseModel):
-    action: Literal["goto", "click", "fill", "select", "wait", "assert_text", "assert_visible", "screenshot"]
+    action: Literal["goto", "click", "dblclick", "fill", "select", "wait", "assert_text", "assert_visible", "screenshot"]
     locator_type: Literal["text", "css", "xpath", "placeholder", "role", "ai"] = "css"
     target: str = ""
     value: str = ""
@@ -305,6 +305,7 @@ class UiTestCaseIn(BaseModel):
     step_timeout_ms: int = 10000
     allow_ai_actions: bool = True
     status: Literal["active", "disabled"] = "active"
+    browser_channel: Literal["chromium", "chrome", "msedge"] = "chromium"
     headless: bool = True
     wait_until: Literal["domcontentloaded", "load", "networkidle"] = "networkidle"
     wait_after_load_ms: int = 500
@@ -322,8 +323,98 @@ class UiGenerateStepsIn(BaseModel):
 
 
 class AiSettingIn(BaseModel):
+    id: int | None = None
+    name: str = ""
     provider_url: str = ""
     model_name: str = ""
     api_key: str = ""
     status: Literal["active", "disabled"] = "disabled"
+    is_default: bool = False
     description: str = ""
+
+
+class KnowledgeBaseIn(BaseModel):
+    project_id: int
+    name: str
+    dify_dataset_id: str
+    status: Literal["active", "disabled"] = "active"
+    description: str = ""
+
+
+class KnowledgeBaseUpdate(BaseModel):
+    project_id: int
+    name: str
+    dify_dataset_id: str
+    status: Literal["active", "disabled"] = "active"
+    description: str = ""
+
+
+class KnowledgeRetrieveIn(BaseModel):
+    query: str
+    top_k: int = Field(default=5, ge=1, le=10)
+    score_threshold: float | None = Field(default=None, ge=0, le=1)
+
+
+class KnowledgeCheckIn(BaseModel):
+    dify_dataset_id: str
+
+
+class ApiKeyConfigIn(BaseModel):
+    env_key: str
+    display_name: str
+    status: Literal["active", "disabled"] = "active"
+    description: str = ""
+
+
+class ApiKeyConfigUpdate(BaseModel):
+    env_key: str
+    display_name: str
+    status: Literal["active", "disabled"] = "active"
+    description: str = ""
+
+
+class KnowledgeProjectIn(BaseModel):
+    name: str
+    description: str = ""
+    status: Literal["active", "disabled"] = "active"
+
+
+class KnowledgeProjectUpdate(BaseModel):
+    name: str
+    description: str = ""
+    status: Literal["active", "disabled"] = "active"
+
+
+class KnowledgeWorkflowIn(BaseModel):
+    name: str
+    api_base_url: str = ""
+    api_key_env: str
+    status: Literal["active", "disabled"] = "active"
+    description: str = ""
+
+
+class KnowledgeWorkflowUpdate(BaseModel):
+    name: str
+    api_base_url: str = ""
+    api_key_env: str = ""
+    status: Literal["active", "disabled"] = "active"
+    description: str = ""
+
+
+class KnowledgeQaSessionIn(BaseModel):
+    project_id: int
+    workflow_id: int
+    title: str = ""
+
+
+class KnowledgeQaSessionUpdate(BaseModel):
+    title: str
+
+
+class KnowledgeQaAskIn(BaseModel):
+    question: str
+
+
+class TicketProcessIn(BaseModel):
+    status: Literal["processing", "resolved"]
+    reply: str = Field(max_length=5000)

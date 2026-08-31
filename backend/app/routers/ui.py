@@ -1,4 +1,10 @@
+import json
+import re
+from datetime import datetime
 from pathlib import Path
+from typing import Any
+
+import httpx
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -8,8 +14,10 @@ from ..database import get_db
 from ..deps import current_user
 from ..models import AiSetting, Environment, ExecutionResult, ExecutionTask, Project, UiTestCase, User
 from ..schemas import AiSettingIn, UiGenerateStepsIn, UiTestCaseIn, UiTestCaseUpdate
-from ..services.execution_status import fail_timed_out_running_tasks
+from ..services.execution_status import fail_timed_out_running_tasks, ui_task_progress_is_alive
 from ..services.operation_logs import log_operation
+from ..services.report import build_html_report
+from ..services.ui_executor import UiResultView
 from ..services.ui_step_generator import generate_ui_steps
 from ..utils import dump_json, fmt_time, parse_json
 
@@ -40,6 +48,39 @@ def _active_environment(environment_id: int, project_id: int, db: Session) -> En
     return environment
 
 
+def _ui_task_status(task: ExecutionTask | None) -> str:
+    if not task:
+        return ""
+    summary = parse_json(task.summary_json, {})
+    if summary.get("ui_progress") and summary.get("status") == "running" and ui_task_progress_is_alive(task):
+        return "running"
+    return task.status
+
+
+def _ui_progress_error(task: ExecutionTask, summary: dict[str, Any]) -> str:
+    for key in ("error", "message"):
+        value = str(summary.get(key) or "").strip()
+        if value:
+            return value
+    for item in reversed(summary.get("agent_steps") or []):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("status") or "") in {"failed", "error"}:
+            return str(item.get("message") or item.get("error") or "UI执行步骤失败")
+    if task.status in {"failed", "error"} and summary.get("ui_progress"):
+        updated_at = summary.get("updated_at") or "-"
+        return f"UI执行已中断或超时，最后进度更新时间：{updated_at}"
+    return ""
+
+
+def _ui_task_summary(task: ExecutionTask) -> dict[str, Any]:
+    summary = parse_json(task.summary_json, {})
+    error = _ui_progress_error(task, summary)
+    if error and not summary.get("error"):
+        summary["error"] = error
+    return summary
+
+
 def _ui_case_out(row: UiTestCase, db: Session):
     project = db.get(Project, row.project_id)
     environment = db.get(Environment, row.environment_id)
@@ -60,7 +101,7 @@ def _ui_case_out(row: UiTestCase, db: Session):
         "test_data": parse_json(row.test_data_json, {}),
         "steps": parse_json(row.steps_json, []),
         "last_task_id": last_task.id if last_task else None,
-        "last_status": last_task.status if last_task else "",
+        "last_status": _ui_task_status(last_task),
         "last_executed_at": fmt_time(last_task.create_date) if last_task else None,
     }
 
@@ -131,6 +172,7 @@ def create_ui_case(payload: UiTestCaseIn, user: User = Depends(current_user), db
         allow_ai_actions=payload.allow_ai_actions,
         steps_json=dump_json(steps),
         status=payload.status,
+        browser_channel=payload.browser_channel,
         headless=payload.headless,
         wait_until=payload.wait_until,
         wait_after_load_ms=payload.wait_after_load_ms,
@@ -178,6 +220,7 @@ def update_ui_case(case_id: int, payload: UiTestCaseUpdate, user: User = Depends
     row.allow_ai_actions = payload.allow_ai_actions
     row.steps_json = dump_json(steps)
     row.status = payload.status
+    row.browser_channel = payload.browser_channel
     row.headless = payload.headless
     row.wait_until = payload.wait_until
     row.wait_after_load_ms = payload.wait_after_load_ms
@@ -221,8 +264,11 @@ def get_ui_execution(task_id: int, _: User = Depends(current_user), db: Session 
     if not task or task.is_deleted or task.target_type != "ui_case":
         raise HTTPException(status_code=404, detail="UI执行记录不存在")
     case = db.get(UiTestCase, task.target_id)
+    project = db.get(Project, task.project_id)
+    environment = db.get(Environment, task.environment_id)
+    executor = db.get(User, task.executor_id)
     results = db.query(ExecutionResult).filter(ExecutionResult.task_id == task.id).all()
-    summary = parse_json(task.summary_json, {})
+    summary = _ui_task_summary(task)
     result_items = [{
         "id": row.id,
         "case_id": row.case_id,
@@ -234,37 +280,91 @@ def get_ui_execution(task_id: int, _: User = Depends(current_user), db: Session 
         "duration_ms": row.duration_ms,
         "error_message": row.error_message,
     } for row in results]
-    if not result_items and summary.get("ui_progress"):
+    if not result_items and (summary.get("ui_progress") or (case and case.execution_mode == "ai" and task.status in {"queued", "running"})):
         result_items.append({
             "id": f"progress-{task.id}",
             "case_id": task.target_id,
             "case_name": case.name if case else "",
-            "status": task.status,
+            "status": _ui_task_status(task),
             "request_snapshot": {
                 "mode": "ai",
+                "browser": case.browser_channel if case else "chromium",
+                "headless": case.headless is not False if case else True,
                 "test_goal": case.test_goal if case else "",
+                "test_data": parse_json(case.test_data_json, {}) if case else {},
+                "assertion_goal": case.assertion_goal if case else "",
             },
             "response_snapshot": {
+                "status": summary.get("status") or task.status,
+                "message": summary.get("message") or summary.get("error") or "AI执行已提交，正在等待执行进度",
                 "agent_steps": summary.get("agent_steps") or [],
                 "screenshots": summary.get("screenshots") or [],
+                "token_usage": summary.get("token_usage") or {},
                 "updated_at": summary.get("updated_at"),
             },
             "assertion_results": [],
             "duration_ms": 0,
-            "error_message": summary.get("message") or "",
+            "error_message": summary.get("error") or summary.get("message") or "",
         })
+    report_html = _build_ui_execution_report_html(db, task, case, results, project, environment, executor)
     return {
         "task": {
             "id": task.id,
             "target_name": case.name if case else "",
-            "status": task.status,
+            "project_name": project.name if project and not project.is_deleted else "",
+            "environment_name": environment.name if environment and not environment.is_deleted else "",
+            "executor_name": executor.real_name or executor.username if executor else "",
+            "status": _ui_task_status(task),
             "summary": summary,
-            "report_html": task.report_html,
+            "report_html": report_html,
+            "started_at": fmt_time(task.started_at),
+            "ended_at": fmt_time(task.ended_at),
             "create_date": fmt_time(task.create_date),
             "update_date": fmt_time(task.update_date),
         },
         "results": result_items,
     }
+
+
+@router.post("/ui-executions/{task_id}/stop")
+def stop_ui_execution(task_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    task = db.get(ExecutionTask, task_id)
+    if not task or task.is_deleted or task.target_type != "ui_case":
+        raise HTTPException(status_code=404, detail="UI执行记录不存在")
+    if task.status not in {"queued", "running"}:
+        return {"id": task.id, "status": _ui_task_status(task), "message": "任务已结束，无需停止"}
+    summary = _ui_task_summary(task)
+    summary["stop_requested"] = True
+    summary["status"] = "stopped"
+    summary["message"] = "用户手动停止任务"
+    task.status = "stopped"
+    task.ended_at = datetime.now()
+    task.summary_json = dump_json(summary)
+    db.commit()
+    db.refresh(task)
+    log_operation(db, user, "ui", "stop", f"stopped ui task {task.id}")
+    return {"id": task.id, "status": "stopped", "message": "已发送停止请求"}
+
+
+def _build_ui_execution_report_html(
+    db: Session,
+    task: ExecutionTask,
+    case: UiTestCase | None,
+    results: list[ExecutionResult],
+    project: Project | None,
+    environment: Environment | None,
+    executor: User | None,
+) -> str:
+    if not case or not results:
+        return task.report_html
+    task.project_name = project.name if project and not project.is_deleted else ""
+    task.environment_name = environment.name if environment and not environment.is_deleted else ""
+    task.executor_name = executor.real_name or executor.username if executor else ""
+    html = build_html_report(task, [UiResultView(row, case) for row in results], case.name)
+    if html and html != task.report_html:
+        task.report_html = html
+        db.commit()
+    return html or task.report_html
 
 
 @router.post("/ui-executions/{task_id}/solidify")
@@ -294,18 +394,110 @@ def _solidified_steps(agent_steps: list[dict]) -> list[dict]:
     rows: list[dict] = []
     for item in agent_steps:
         action = str(item.get("action") or "")
-        if action not in {"click", "fill", "select", "wait", "assert_text", "screenshot"}:
+        if action not in {"click", "dblclick", "fill", "select", "wait", "assert_text", "screenshot"}:
             continue
+        locator_type = "css"
+        target = str(item.get("target") or "")
+        if action in {"click", "dblclick", "fill", "select"}:
+            locator_type, target = _solidified_locator(item)
+        if action == "assert_text":
+            locator_type = "text"
+            target = str(item.get("value") or item.get("target") or item.get("message") or "")
+        value = _solidified_step_value(item)
         rows.append(
             {
                 "action": action,
-                "locator_type": str(item.get("locator_type") or "xpath") if action not in {"wait", "screenshot"} else "css",
-                "target": str(item.get("target") or ""),
-                "value": str(item.get("value") or ""),
+                "locator_type": locator_type,
+                "target": target,
+                "value": value,
                 "description": str(item.get("reason") or item.get("message") or ""),
             }
         )
+        wait_ms = _solidified_pace_wait_ms(item)
+        if wait_ms:
+            rows.append(
+                {
+                    "action": "wait",
+                    "locator_type": "css",
+                    "target": "",
+                    "value": str(wait_ms),
+                    "description": f"沿用AI执行节奏，等待 {wait_ms}ms",
+                }
+            )
+    if rows and rows[-1].get("action") != "screenshot":
+        rows.append(
+            {
+                "action": "screenshot",
+                "locator_type": "css",
+                "target": "",
+                "value": "",
+                "description": "保存最终页面截图",
+            }
+        )
     return rows
+
+
+def _solidified_step_value(item: dict) -> str:
+    action = str(item.get("action") or "")
+    if action == "wait":
+        wait_ms = _solidified_wait_value(item)
+        return str(wait_ms) if wait_ms else str(item.get("value") or "")
+    return str(item.get("value") or "")
+
+
+def _solidified_wait_value(item: dict) -> int:
+    value = str(item.get("value") or "").strip()
+    if value.isdigit():
+        number = int(value)
+        return number * 1000 if 0 < number < 1000 else number
+    message = str(item.get("message") or "")
+    match = re.search(r"(\d+)\s*ms", message)
+    if match:
+        return int(match.group(1))
+    try:
+        return int(item.get("duration_ms") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _solidified_pace_wait_ms(item: dict) -> int:
+    if str(item.get("status") or "") != "passed":
+        return 0
+    action = str(item.get("action") or "")
+    if action not in {"click", "dblclick", "fill", "select"}:
+        return 0
+    try:
+        duration_ms = int(item.get("duration_ms") or 0)
+    except (TypeError, ValueError):
+        duration_ms = 0
+    if duration_ms <= 0:
+        return 0
+    return min(max(duration_ms, 500), 10000)
+
+
+def _solidified_locator(item: dict) -> tuple[str, str]:
+    locator_type = str(item.get("locator_type") or "").strip()
+    target = str(item.get("target") or "").strip()
+    if locator_type in {"css", "xpath", "text", "placeholder", "role"} and target:
+        return locator_type, target
+    return "ai", _solidified_target(item)
+
+
+def _solidified_target(item: dict) -> str:
+    reason = str(item.get("reason") or "").strip()
+    message = str(item.get("message") or "").strip()
+    value = str(item.get("value") or "").strip()
+    action = str(item.get("action") or "").strip()
+    for text in (reason, message):
+        if text and text != "通过":
+            return text
+    if action == "fill":
+        return f"需要输入 {value} 的输入框" if value else "需要输入内容的输入框"
+    if action == "select":
+        return f"需要选择 {value} 的下拉框" if value else "需要选择的下拉框"
+    if action in {"click", "dblclick"}:
+        return "需要点击的按钮或元素"
+    return ""
 
 
 @router.get("/ui-artifacts/{filename}")
@@ -319,14 +511,16 @@ def get_ui_artifact(filename: str, _: User = Depends(current_user)):
 
 def _ai_setting_out(row: AiSetting | None):
     if not row:
-        return {"provider_url": "", "model_name": "", "api_key": "", "status": "disabled", "description": ""}
+        return {"id": None, "name": "", "provider_url": "", "model_name": "", "api_key": "", "status": "disabled", "is_default": False, "description": ""}
     masked_key = "******" if row.api_key else ""
     return {
         "id": row.id,
+        "name": row.name,
         "provider_url": row.provider_url,
         "model_name": row.model_name,
         "api_key": masked_key,
         "status": row.status,
+        "is_default": row.is_default,
         "description": row.description,
         "create_date": fmt_time(row.create_date),
         "update_date": fmt_time(row.update_date),
@@ -335,22 +529,148 @@ def _ai_setting_out(row: AiSetting | None):
 
 @router.get("/ai-settings")
 def get_ai_setting(_: User = Depends(current_user), db: Session = Depends(get_db)):
-    return _ai_setting_out(db.query(AiSetting).order_by(AiSetting.id.asc()).first())
+    rows = db.query(AiSetting).order_by(AiSetting.is_default.desc(), AiSetting.id.asc()).all()
+    active = (
+        db.query(AiSetting)
+        .filter(AiSetting.status == "active", AiSetting.provider_url != "", AiSetting.model_name != "")
+        .order_by(AiSetting.is_default.desc(), AiSetting.id.asc())
+        .first()
+    )
+    data = _ai_setting_out(active or (rows[0] if rows else None))
+    data["items"] = [_ai_setting_out(row) for row in rows]
+    return data
 
 
 @router.put("/ai-settings")
 def update_ai_setting(payload: AiSettingIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    row = db.query(AiSetting).order_by(AiSetting.id.asc()).first()
-    if not row:
+    row = db.get(AiSetting, payload.id) if payload.id else None
+    if payload.id and not row:
+        raise HTTPException(status_code=404, detail="AI配置不存在")
+    if row is None:
         row = AiSetting()
         db.add(row)
+    name = payload.name.strip() or payload.model_name.strip() or "AI配置"
+    row.name = name
     row.provider_url = payload.provider_url.strip()
     row.model_name = payload.model_name.strip()
     if payload.api_key and payload.api_key != "******":
         row.api_key = payload.api_key
     row.status = payload.status
+    row.is_default = payload.is_default
     row.description = payload.description.strip()
+    if row.is_default:
+        db.query(AiSetting).filter(AiSetting.id != (row.id or 0)).update({AiSetting.is_default: False})
     db.commit()
     db.refresh(row)
     log_operation(db, user, "ui", "update", "updated ai setting")
     return _ai_setting_out(row)
+
+
+@router.post("/ai-settings/{setting_id}/default")
+def set_default_ai_setting(setting_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    row = db.get(AiSetting, setting_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="AI配置不存在")
+    db.query(AiSetting).filter(AiSetting.id != setting_id).update({AiSetting.is_default: False})
+    row.is_default = True
+    db.commit()
+    db.refresh(row)
+    log_operation(db, user, "ui", "update", f"set default ai setting {row.name}")
+    return _ai_setting_out(row)
+
+
+@router.delete("/ai-settings/{setting_id}")
+def delete_ai_setting(setting_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    row = db.get(AiSetting, setting_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="AI配置不存在")
+    was_default = row.is_default
+    db.delete(row)
+    db.flush()
+    if was_default:
+        next_row = db.query(AiSetting).order_by(AiSetting.id.asc()).first()
+        if next_row:
+            next_row.is_default = True
+    db.commit()
+    log_operation(db, user, "ui", "delete", f"deleted ai setting {row.name}")
+    return {"success": True}
+
+
+@router.post("/ai-settings/test")
+def test_ai_setting(payload: AiSettingIn, _: User = Depends(current_user), db: Session = Depends(get_db)):
+    provider_url = payload.provider_url.strip()
+    model_name = payload.model_name.strip()
+    api_key = payload.api_key
+    if api_key in {"", "******"}:
+        current = db.get(AiSetting, payload.id) if payload.id else db.query(AiSetting).order_by(AiSetting.is_default.desc(), AiSetting.id.asc()).first()
+        api_key = current.api_key if current else ""
+    if not provider_url:
+        raise HTTPException(status_code=400, detail="请先填写模型服务地址")
+    if not model_name:
+        raise HTTPException(status_code=400, detail="请先填写模型名称")
+
+    url = _chat_completions_url(provider_url)
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    body = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": "你只负责测试连接。"},
+            {"role": "user", "content": "请只回复一个字：是"},
+        ],
+        "temperature": 0,
+        "max_tokens": 8,
+    }
+    try:
+        response = httpx.post(url, json=body, headers=headers, timeout=15)
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=400, detail=f"AI连接失败：{exc}；{_ai_connection_error_hint(url, exc)}") from exc
+    if response.status_code >= 400:
+        raise HTTPException(status_code=400, detail=f"AI连接失败：HTTP {response.status_code}，{_response_preview(response)}")
+    try:
+        data = response.json()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"AI连接失败：响应不是合法JSON，{response.text[:300]}") from exc
+    message = data.get("choices", [{}])[0].get("message", {}) or {}
+    content = str(message.get("content") or message.get("reasoning_content") or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail=f"AI连接失败：响应中没有模型回复，{_compact_value(data)}")
+    return {"success": True, "message": "连接成功", "reply": content[:20]}
+
+
+def _chat_completions_url(provider_url: str) -> str:
+    value = (provider_url or "").strip().rstrip("/")
+    if value.endswith("/chat/completions"):
+        return value
+    if value in {"https://api.deepseek.com", "http://api.deepseek.com"}:
+        value = f"{value}/v1"
+    return f"{value}/chat/completions"
+
+
+def _response_preview(response: httpx.Response) -> str:
+    try:
+        return _compact_value(response.json())
+    except json.JSONDecodeError:
+        return response.text[:500]
+
+
+def _compact_value(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False)[:500]
+
+
+def _ai_connection_error_hint(url: str, exc: httpx.RequestError) -> str:
+    text = str(exc).lower()
+    if "unexpected_eof_while_reading" in text or "eof occurred in violation of protocol" in text or "wrong version number" in text:
+        if url.startswith("https://"):
+            return "SSL握手失败，请优先确认模型服务地址是否实际只支持 http://；如果必须使用 https，请检查模型网关证书、反向代理 TLS 配置和公司代理。"
+        return "SSL/TLS连接异常，请检查模型网关证书、反向代理 TLS 配置和公司代理。"
+    if "certificate" in text or "cert" in text:
+        return "证书校验失败，请检查证书是否过期、域名是否匹配，或改用受信任的模型网关地址。"
+    if "name or service not known" in text or "getaddrinfo" in text or "nodename nor servname" in text:
+        return "域名解析失败，请检查服务地址、DNS、代理或容器网络配置。"
+    if "connection refused" in text or "connecterror" in text:
+        return "服务拒绝连接，请确认模型服务已启动、端口正确，并且容器能访问该地址。"
+    if "timed out" in text or "timeout" in text:
+        return "请求超时，请检查网络连通性、模型服务负载，或稍后重试。"
+    return "请检查模型服务地址、网络连通性、代理和服务器 DNS。"

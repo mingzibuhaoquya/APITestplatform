@@ -3,9 +3,9 @@
     <div v-if="!me" class="login-page">
       <a-card class="login-card" :bordered="false">
         <div class="login-brand">
-          <div class="login-logo"><img src="/company-logo.png" alt="接口测试平台" /></div>
+          <div class="login-logo"><img src="/company-logo.png" alt="测试平台" /></div>
           <div>
-            <h1>接口自动化测试平台</h1>
+            <h1>测试平台</h1>
             <p>面向测试团队的接口回归与质量协作平台</p>
           </div>
         </div>
@@ -40,10 +40,10 @@
         @breakpoint="handleSidebarBreakpoint"
       >
         <div class="brand" :class="{ 'brand-collapsed': sidebarCollapsed }">
-          <img src="/company-logo.png" alt="接口测试平台" />
-          <span v-if="!sidebarCollapsed">接口测试平台</span>
+          <img src="/company-logo.png" alt="测试平台" />
+          <span v-if="!sidebarCollapsed">测试平台</span>
         </div>
-        <a-menu :selected-keys="[active]" mode="inline" @select="handleMenuSelect">
+        <a-menu :selected-keys="[active]" :default-open-keys="['interface-test', 'ui-tests']" mode="inline" @select="handleMenuSelect">
           <template v-for="item in visibleMenuGroups" :key="item.key">
             <a-sub-menu v-if="item.children?.length" :key="item.key">
               <template #icon><component :is="item.icon" /></template>
@@ -59,8 +59,8 @@
         </a-menu>
       </a-layout-sider>
       <a-drawer v-else v-model:open="mobileSidebarOpen" placement="left" :closable="false" :width="232" class="mobile-nav-drawer">
-        <div class="brand"><img src="/company-logo.png" alt="接口测试平台" /><span>接口测试平台</span></div>
-        <a-menu :selected-keys="[active]" mode="inline" @select="handleMenuSelect">
+        <div class="brand"><img src="/company-logo.png" alt="测试平台" /><span>测试平台</span></div>
+        <a-menu :selected-keys="[active]" :default-open-keys="['interface-test', 'ui-tests']" mode="inline" @select="handleMenuSelect">
           <template v-for="item in visibleMenuGroups" :key="item.key">
             <a-sub-menu v-if="item.children?.length" :key="item.key">
               <template #icon><component :is="item.icon" /></template>
@@ -252,20 +252,13 @@
           <a-table :pagination="false" :data-source="roles">
             <a-table-column data-index="code" title="角色编码" width="150" />
             <a-table-column data-index="name" title="角色名称" width="150" />
-            <a-table-column data-index="description" title="描述" />
             <a-table-column title="状态" width="100">
               <template #default="{ record: row }"><a-tag :color="row.status === 'active' ? 'success' : 'warning'">{{ statusText(row.status) }}</a-tag></template>
             </a-table-column>
-            <a-table-column title="类型" width="100">
-              <template #default="{ record: row }"><a-tag :color="row.is_builtin ? 'blue' : 'default'">{{ row.is_builtin ? '内置' : '自定义' }}</a-tag></template>
-            </a-table-column>
-            <a-table-column data-index="user_count" title="用户数" width="90" />
-            <a-table-column title="菜单权限" width="240">
-              <template #default="{ record: row }">{{ roleMenuLabels(row.menus).join('、') || '-' }}</template>
-            </a-table-column>
-            <a-table-column title="操作" width="140" fixed="right">
+            <a-table-column title="操作" width="230" fixed="right">
               <template #default="{ record: row }">
                 <div class="table-actions">
+                  <a-button size="small" @click="openRolePermissionDialog(row)">菜单权限</a-button>
                   <a-button size="small" @click="openEditRoleDialog(row)">编辑</a-button>
                   <a-button size="small" danger :disabled="row.is_builtin || row.user_count > 0" @click="deleteRole(row)">删除</a-button>
                 </div>
@@ -327,8 +320,84 @@
             </a-form>
             <template #footer><a-button @click="cancelEditRole">取消</a-button><a-button type="primary" @click="updateRole">确认</a-button></template>
           </a-modal>
+
+          <a-modal v-model:open="rolePermissionDialogVisible" title="菜单权限" width="560px" @after-close="resetRolePermissionForm">
+            <div class="role-permission-role">角色：{{ rolePermissionForm.name }}</div>
+            <a-tree
+              v-model:checked-keys="rolePermissionForm.menus"
+              class="role-permission-tree"
+              checkable
+              block-node
+              default-expand-all
+              :tree-data="roleMenuTreeData"
+            />
+            <template #footer><a-button @click="cancelRolePermission">取消</a-button><a-button type="primary" @click="saveRolePermissions">确认</a-button></template>
+          </a-modal>
         </section>
 
+        <section v-if="active === 'tickets'" class="page-view">
+          <div class="toolbar"><h2>工单管理</h2><a-button type="primary" @click="openCreateTicket"><template #icon><PlusOutlined /></template>提交工单</a-button></div>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="工单标题"><a-input v-model:value="ticketSearch.title" placeholder="请输入工单标题" allow-clear @keyup.enter="searchTickets" /></a-form-item>
+            <a-form-item label="工单类型"><a-select v-model:value="ticketSearch.category" placeholder="请选择类型" allow-clear><a-select-option value="feature">功能建议</a-select-option><a-select-option value="issue">问题反馈</a-select-option><a-select-option value="experience">体验优化</a-select-option><a-select-option value="other">其他</a-select-option></a-select></a-form-item>
+            <a-form-item label="状态"><a-select v-model:value="ticketSearch.status" placeholder="请选择状态" allow-clear><a-select-option value="pending">待处理</a-select-option><a-select-option value="processing">处理中</a-select-option><a-select-option value="resolved">已解决</a-select-option></a-select></a-form-item>
+            <div class="search-actions"><a-button type="primary" @click="searchTickets">搜索</a-button><a-button @click="resetTickets">重置</a-button></div>
+          </a-form>
+          <a-table :pagination="false" :data-source="tickets" :scroll="{ x: 1120 }">
+            <a-table-column title="编号" width="70"><template #default="{ index }">{{ (ticketPagination.page - 1) * ticketPagination.pageSize + index + 1 }}</template></a-table-column>
+            <a-table-column title="类型" width="110"><template #default="{ record: row }">{{ ticketCategoryText(row.category) }}</template></a-table-column>
+            <a-table-column title="工单标题"><template #default="{ record: row }"><TableText :value="row.title" /></template></a-table-column>
+            <a-table-column title="状态" width="100"><template #default="{ record: row }"><a-tag :color="ticketStatusColor(row.status)">{{ ticketStatusText(row.status) }}</a-tag></template></a-table-column>
+            <a-table-column data-index="submitter_name" title="提交人" width="120" />
+            <a-table-column data-index="create_date" title="提交时间" width="170" />
+            <a-table-column data-index="handler_name" title="处理人" width="120" />
+            <a-table-column data-index="handled_at" title="处理时间" width="170" />
+            <a-table-column title="操作" width="90" fixed="right"><template #default="{ record: row }"><a-button size="small" @click="openTicketDetail(row)">查看</a-button></template></a-table-column>
+          </a-table>
+          <div class="pagination"><a-pagination :show-total="paginationTotal" show-less-items :current="ticketPagination.page" :page-size="ticketPagination.pageSize" :total="ticketPagination.total" @change="changeTicketPage" /></div>
+
+          <a-modal v-model:open="createTicketVisible" title="提交工单" width="640px" @after-close="resetTicketForm">
+            <a-form layout="vertical"><a-form-item label="工单类型" required><a-select v-model:value="ticketForm.category"><a-select-option value="feature">功能建议</a-select-option><a-select-option value="issue">问题反馈</a-select-option><a-select-option value="experience">体验优化</a-select-option><a-select-option value="other">其他</a-select-option></a-select></a-form-item><a-form-item label="工单标题" required><a-input v-model:value="ticketForm.title" :maxlength="200" show-count /></a-form-item><a-form-item label="建议内容" required><a-textarea v-model:value="ticketForm.content" :maxlength="5000" show-count :auto-size="{ minRows: 5, maxRows: 9 }" /></a-form-item><a-form-item label="附件"><a-upload v-model:file-list="ticketForm.files" :before-upload="validateTicketFile" :max-count="5" multiple><a-button><template #icon><FileTextOutlined /></template>选择附件</a-button></a-upload><div class="form-tip">最多 5 个附件，单个文件不超过 20MB。</div></a-form-item></a-form>
+            <template #footer><a-button @click="createTicketVisible = false">取消</a-button><a-button type="primary" :loading="ticketSubmitting" @click="submitTicket">提交</a-button></template>
+          </a-modal>
+
+          <a-modal v-model:open="ticketDetailVisible" title="工单详情" width="720px">
+            <a-descriptions v-if="ticketDetail" :column="2" bordered size="small"><a-descriptions-item label="工单类型">{{ ticketCategoryText(ticketDetail.category) }}</a-descriptions-item><a-descriptions-item label="状态"><a-tag :color="ticketStatusColor(ticketDetail.status)">{{ ticketStatusText(ticketDetail.status) }}</a-tag></a-descriptions-item><a-descriptions-item label="工单标题" :span="2">{{ ticketDetail.title }}</a-descriptions-item><a-descriptions-item label="建议内容" :span="2"><div class="ticket-content">{{ ticketDetail.content }}</div></a-descriptions-item><a-descriptions-item label="附件" :span="2"><a-space v-if="ticketDetail.attachments?.length" wrap><a-button v-for="item in ticketDetail.attachments" :key="item.id" type="link" size="small" @click="downloadTicketAttachment(ticketDetail, item)">{{ item.name }}</a-button></a-space><span v-else>-</span></a-descriptions-item><a-descriptions-item label="处理人">{{ ticketDetail.handler_name || '-' }}</a-descriptions-item><a-descriptions-item label="处理时间">{{ ticketDetail.handled_at || '-' }}</a-descriptions-item><a-descriptions-item label="处理回复" :span="2"><div class="ticket-content">{{ ticketDetail.reply || '-' }}</div></a-descriptions-item></a-descriptions>
+            <template #footer><a-button @click="ticketDetailVisible = false">关闭</a-button><a-button v-if="me?.role === 'admin'" type="primary" @click="openProcessTicket">处理工单</a-button></template>
+          </a-modal>
+          <a-modal v-model:open="processTicketVisible" title="处理工单" width="560px"><a-form layout="vertical"><a-form-item label="状态"><a-select v-model:value="ticketProcessForm.status"><a-select-option value="processing">处理中</a-select-option><a-select-option value="resolved">已解决</a-select-option></a-select></a-form-item><a-form-item label="处理回复" :required="ticketProcessForm.status === 'resolved'"><a-textarea v-model:value="ticketProcessForm.reply" :maxlength="5000" :auto-size="{ minRows: 4, maxRows: 8 }" /></a-form-item></a-form><template #footer><a-button @click="processTicketVisible = false">取消</a-button><a-button type="primary" @click="saveTicketProcess">确认</a-button></template></a-modal>
+        </section>
+
+        <section v-if="active === 'api_key_configs'" class="page-view">
+          <div class="toolbar"><h2>API Key配置</h2><a-button type="primary" @click="openCreateApiKeyConfig"><template #icon><PlusOutlined /></template>新增配置</a-button></div>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="关键字"><a-input v-model:value="apiKeyConfigSearch.keyword" placeholder="请输入中文名或环境变量名" allow-clear @keyup.enter="searchApiKeyConfigs" /></a-form-item>
+            <a-form-item label="状态"><a-select v-model:value="apiKeyConfigSearch.status" placeholder="请选择状态" allow-clear><a-select-option value="active">启用</a-select-option><a-select-option value="disabled">禁用</a-select-option></a-select></a-form-item>
+            <div class="search-actions"><a-button type="primary" @click="searchApiKeyConfigs">搜索</a-button><a-button @click="resetApiKeyConfigSearch">重置</a-button></div>
+          </a-form>
+          <a-table class="app-data-table" :pagination="false" :data-source="apiKeyConfigList" :scroll="{ x: true }">
+            <a-table-column title="编号" width="52"><template #default="{ index }">{{ apiKeyConfigSerialNumber(index) }}</template></a-table-column>
+            <a-table-column data-index="display_name" title="中文名" width="190" />
+            <a-table-column title="环境变量名"><template #default="{ record: row }"><TableText :value="row.env_key" /></template></a-table-column>
+            <a-table-column title="环境变量状态" width="130"><template #default="{ record: row }"><a-tag :color="row.configured ? 'success' : 'warning'">{{ row.configured ? '已配置' : '未配置' }}</a-tag></template></a-table-column>
+            <a-table-column title="状态" width="90"><template #default="{ record: row }"><a-tag :color="row.status === 'active' ? 'success' : 'warning'">{{ row.status === 'active' ? '启用' : '禁用' }}</a-tag></template></a-table-column>
+            <a-table-column title="备注"><template #default="{ record: row }"><TableText :value="row.description" /></template></a-table-column>
+            <a-table-column data-index="update_date" title="更新时间" width="170" />
+            <a-table-column title="操作" width="150" fixed="right"><template #default="{ record: row }"><div class="table-actions"><a-button size="small" @click="openEditApiKeyConfig(row)">编辑</a-button><a-button size="small" danger @click="deleteApiKeyConfig(row)">删除</a-button></div></template></a-table-column>
+          </a-table>
+          <div class="pagination"><a-pagination :show-total="paginationTotal" show-less-items :current="apiKeyConfigPagination.page" :page-size="apiKeyConfigPagination.pageSize" :total="apiKeyConfigPagination.total" @change="changeApiKeyConfigPage" /></div>
+
+          <a-modal v-model:open="apiKeyConfigFormVisible" :title="apiKeyConfigForm.id ? '编辑API Key配置' : '新增API Key配置'" width="560px" @after-close="resetApiKeyConfigForm">
+            <a-alert type="info" show-icon message="这里只维护环境变量名和中文名，不保存、不展示真实 API Key。" class="modal-alert" />
+            <a-form layout="vertical">
+              <a-form-item label="中文名" required><a-input v-model:value="apiKeyConfigForm.display_name" placeholder="例如：FAF知识库问答工作流Key" /></a-form-item>
+              <a-form-item label="环境变量名" required><a-input v-model:value="apiKeyConfigForm.env_key" placeholder="例如：DIFY_WORKFLOW_API_KEY_FAF" /></a-form-item>
+              <a-form-item label="状态"><a-select v-model:value="apiKeyConfigForm.status"><a-select-option value="active">启用</a-select-option><a-select-option value="disabled">禁用</a-select-option></a-select></a-form-item>
+              <a-form-item label="备注"><a-textarea v-model:value="apiKeyConfigForm.description" :auto-size="{ minRows: 2, maxRows: 4 }" placeholder="可记录用途、归属知识库或维护人" /></a-form-item>
+            </a-form>
+            <template #footer><a-button @click="apiKeyConfigFormVisible = false">取消</a-button><a-button type="primary" @click="saveApiKeyConfig">确认</a-button></template>
+          </a-modal>
+        </section>
         <section v-if="active === 'projects'" class="page-view">
           <div class="toolbar"><h2>项目管理</h2><a-button type="primary" @click="openCreateProjectDialog"><template #icon><PlusOutlined /></template>创建项目</a-button></div>
           <a-form class="search-form" layout="vertical">
@@ -341,8 +410,8 @@
             </div>
           </a-form>
           <a-table :pagination="false" :data-source="projectList">
-            <a-table-column data-index="name" title="项目" />
-            <a-table-column data-index="description" title="描述" />
+            <a-table-column title="项目"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
+            <a-table-column title="描述"><template #default="{ record: row }"><TableText :value="row.description" /></template></a-table-column>
             <a-table-column title="操作" width="190" fixed="right">
               <template #default="{ record: row }">
                 <div class="table-actions">
@@ -411,10 +480,10 @@
             </div>
           </a-form>
           <a-table :pagination="false" :data-source="environmentList">
-            <a-table-column data-index="project_name" title="项目" />
-            <a-table-column data-index="name" title="环境名称" />
+            <a-table-column title="项目"><template #default="{ record: row }"><TableText :value="row.project_name" /></template></a-table-column>
+            <a-table-column title="环境名称"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
             <a-table-column data-index="protocol" title="协议" />
-            <a-table-column data-index="base_url" title="Base URL" />
+            <a-table-column title="Base URL"><template #default="{ record: row }"><TableText :value="row.base_url" /></template></a-table-column>
             <a-table-column data-index="port" title="端口号" />
             <a-table-column title="操作" width="190" fixed="right">
               <template #default="{ record: row }">
@@ -515,11 +584,11 @@
             </div>
           </a-form>
           <a-table :pagination="false" :data-source="apiList">
-            <a-table-column data-index="project_name" title="项目" />
-            <a-table-column data-index="name" title="名称" />
-            <a-table-column data-index="description" title="接口描述" />
+            <a-table-column title="项目"><template #default="{ record: row }"><TableText :value="row.project_name" /></template></a-table-column>
+            <a-table-column title="名称"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
+            <a-table-column title="接口描述"><template #default="{ record: row }"><TableText :value="row.description" /></template></a-table-column>
             <a-table-column data-index="method" title="方法" width="100" />
-            <a-table-column data-index="path" title="路径" />
+            <a-table-column title="路径"><template #default="{ record: row }"><TableText :value="row.path" /></template></a-table-column>
             <a-table-column data-index="create_date" title="创建时间" width="170" />
             <a-table-column data-index="update_date" title="更新时间" width="170" />
             <a-table-column title="操作" width="190" fixed="right">
@@ -793,9 +862,9 @@
           </a-modal>
         </section>
 
-        <section v-if="active === 'ui-tests'" class="page-view">
+        <section v-if="active === 'ui-cases'" class="page-view">
           <div class="toolbar">
-            <h2>UI测试</h2>
+            <h2>UI用例管理</h2>
             <div class="toolbar-actions">
               <a-button @click="openAiSettingDialog">AI配置</a-button>
               <a-button type="primary" @click="openCreateUiCaseDialog"><template #icon><PlusOutlined /></template>新增UI用例</a-button>
@@ -826,7 +895,15 @@
             <a-table-column data-index="environment_name" title="环境" width="160" />
             <a-table-column data-index="name" title="UI用例名称" width="220" />
             <a-table-column title="目标地址" width="300"><template #default="{ record: row }"><span class="url-cell">{{ row.start_url }}</span></template></a-table-column>
-            <a-table-column title="模式" width="100"><template #default="{ record: row }"><a-tag :color="row.execution_mode === 'ai' ? 'processing' : 'default'">{{ row.execution_mode === 'ai' ? 'AI模式' : '高级模式' }}</a-tag></template></a-table-column>
+            <a-table-column title="模式" width="130">
+              <template #default="{ record: row }">
+                <a-select :value="row.execution_mode === 'ai' ? 'ai' : 'advanced'" size="small" style="width: 104px" @change="changeUiCaseMode(row, $event)">
+                  <a-select-option value="ai">AI模式</a-select-option>
+                  <a-select-option value="advanced">高级模式</a-select-option>
+                </a-select>
+              </template>
+            </a-table-column>
+            <a-table-column title="浏览器" width="120"><template #default="{ record: row }">{{ uiBrowserChannelText(row.browser_channel) }}</template></a-table-column>
             <a-table-column title="步骤数" width="90"><template #default="{ record: row }">{{ row.execution_mode === 'ai' ? (row.max_steps || 30) : (row.steps || []).length }}</template></a-table-column>
             <a-table-column title="状态" width="100"><template #default="{ record: row }"><a-tag :color="row.status === 'active' ? 'success' : 'default'">{{ row.status === 'active' ? '启用' : '禁用' }}</a-tag></template></a-table-column>
             <a-table-column title="最近执行" width="110"><template #default="{ record: row }"><a-tag :color="executionStatusColor(row.last_status)">{{ executionStatusText(row.last_status) }}</a-tag></template></a-table-column>
@@ -835,6 +912,7 @@
               <template #default="{ record: row }">
                 <div class="table-actions">
                   <a-button size="small" type="primary" @click="executeUiCase(row)">执行</a-button>
+                  <a-button v-if="uiExecutionCanStop(row.last_status)" size="small" danger @click="stopUiExecution(row)">停止</a-button>
                   <a-button size="small" @click="openEditUiCaseDialog(row)">编辑</a-button>
                   <a-button size="small" @click="openUiExecutionDetail(row)">详情</a-button>
                   <a-button size="small" danger @click="deleteUiCase(row)">删除</a-button>
@@ -850,6 +928,7 @@
               <a-form-item label="环境"><a-select v-model:value="uiCaseForm.environment_id" placeholder="请先选择项目" :disabled="!uiCaseForm.project_id"><a-select-option v-for="e in uiCaseFormEnvironments" :key="e.id" :value="e.id">{{ e.name }}</a-select-option></a-select></a-form-item>
               <a-form-item label="用例名称"><a-input v-model:value="uiCaseForm.name" placeholder="请输入UI用例名称" /></a-form-item>
               <a-form-item label="状态"><a-select v-model:value="uiCaseForm.status"><a-select-option value="active">启用</a-select-option><a-select-option value="disabled">禁用</a-select-option></a-select></a-form-item>
+              <a-form-item label="浏览器"><a-select v-model:value="uiCaseForm.browser_channel"><a-select-option value="chromium">Playwright Chromium</a-select-option><a-select-option value="chrome">本机 Chrome</a-select-option><a-select-option value="msedge">本机 Edge</a-select-option></a-select></a-form-item>
               <a-form-item label="浏览器模式"><a-select v-model:value="uiCaseForm.headless"><a-select-option :value="true">无头模式</a-select-option><a-select-option :value="false">有头模式</a-select-option></a-select></a-form-item>
               <a-form-item label="页面等待"><a-select v-model:value="uiCaseForm.wait_until"><a-select-option value="networkidle">网络空闲</a-select-option><a-select-option value="load">页面加载完成</a-select-option><a-select-option value="domcontentloaded">DOM加载完成</a-select-option></a-select></a-form-item>
               <a-form-item label="额外等待(ms)"><a-input-number v-model:value="uiCaseForm.wait_after_load_ms" :min="0" :max="60000" :step="500" style="width: 100%" /></a-form-item>
@@ -881,10 +960,10 @@
                 </div>
                 <a-alert class="compact-alert" type="info" show-icon message="定位方式选择“AI描述”时，目标元素可填写自然语言，例如：点击登录按钮、填写用户名输入框；执行时会自动转换为可执行定位器。" />
                 <a-table :pagination="false" :data-source="uiCaseForm.steps" :row-key="(row: UiStepRow) => row.id" :scroll="{ x: 1100 }">
-                  <a-table-column title="动作" width="170"><template #default="{ record: row }"><a-select v-model:value="row.action" :popup-match-select-width="false" popup-class-name="ui-action-dropdown"><a-select-option value="goto">打开页面</a-select-option><a-select-option value="click">点击</a-select-option><a-select-option value="fill">输入</a-select-option><a-select-option value="select">选择</a-select-option><a-select-option value="wait">等待</a-select-option><a-select-option value="assert_text">断言文本</a-select-option><a-select-option value="assert_visible">断言元素</a-select-option><a-select-option value="screenshot">截图</a-select-option></a-select></template></a-table-column>
+                  <a-table-column title="动作" width="170"><template #default="{ record: row }"><a-select v-model:value="row.action" :popup-match-select-width="false" popup-class-name="ui-action-dropdown"><a-select-option value="goto">打开页面</a-select-option><a-select-option value="click">点击</a-select-option><a-select-option value="dblclick">双击</a-select-option><a-select-option value="fill">输入</a-select-option><a-select-option value="select">选择</a-select-option><a-select-option value="wait">等待</a-select-option><a-select-option value="assert_text">断言文本</a-select-option><a-select-option value="assert_visible">断言元素</a-select-option><a-select-option value="screenshot">截图</a-select-option></a-select></template></a-table-column>
                   <a-table-column title="定位方式" width="170"><template #default="{ record: row }"><a-select v-model:value="row.locator_type" :popup-match-select-width="false" popup-class-name="ui-locator-dropdown"><a-select-option value="css">CSS</a-select-option><a-select-option value="xpath">XPath</a-select-option><a-select-option value="text">文本</a-select-option><a-select-option value="placeholder">占位符</a-select-option><a-select-option value="role">按钮文字</a-select-option><a-select-option value="ai">AI描述</a-select-option></a-select></template></a-table-column>
                   <a-table-column title="目标元素/地址" width="260"><template #default="{ record: row }"><a-input v-model:value="row.target" placeholder="CSS、XPath、文本，或写：点击登录按钮" /></template></a-table-column>
-                  <a-table-column title="值/期望" width="220"><template #default="{ record: row }"><a-input v-model:value="row.value" placeholder="输入值、期望文本或等待毫秒" /></template></a-table-column>
+                  <a-table-column title="值/期望" width="220"><template #default="{ record: row }"><a-input v-model:value="row.value" placeholder="如 VIN${random.string(14)}，或等待毫秒" /></template></a-table-column>
                   <a-table-column title="说明" width="220"><template #default="{ record: row }"><a-input v-model:value="row.description" placeholder="步骤说明" /></template></a-table-column>
                   <a-table-column title="操作" width="230" fixed="right"><template #default="{ record: row, index }"><div class="table-actions"><a-button size="small" @click="startUiElementPicker(uiCaseForm, row)">拾取</a-button><a-button size="small" @click="moveUiStep(uiCaseForm, index, -1)">上移</a-button><a-button size="small" @click="moveUiStep(uiCaseForm, index, 1)">下移</a-button><a-button size="small" danger @click="removeUiStep(uiCaseForm, index)">删除</a-button></div></template></a-table-column>
                 </a-table>
@@ -899,6 +978,7 @@
               <a-form-item label="环境"><a-select v-model:value="editUiCaseForm.environment_id" placeholder="请先选择项目" :disabled="!editUiCaseForm.project_id"><a-select-option v-for="e in editUiCaseFormEnvironments" :key="e.id" :value="e.id">{{ e.name }}</a-select-option></a-select></a-form-item>
               <a-form-item label="用例名称"><a-input v-model:value="editUiCaseForm.name" placeholder="请输入UI用例名称" /></a-form-item>
               <a-form-item label="状态"><a-select v-model:value="editUiCaseForm.status"><a-select-option value="active">启用</a-select-option><a-select-option value="disabled">禁用</a-select-option></a-select></a-form-item>
+              <a-form-item label="浏览器"><a-select v-model:value="editUiCaseForm.browser_channel"><a-select-option value="chromium">Playwright Chromium</a-select-option><a-select-option value="chrome">本机 Chrome</a-select-option><a-select-option value="msedge">本机 Edge</a-select-option></a-select></a-form-item>
               <a-form-item label="浏览器模式"><a-select v-model:value="editUiCaseForm.headless"><a-select-option :value="true">无头模式</a-select-option><a-select-option :value="false">有头模式</a-select-option></a-select></a-form-item>
               <a-form-item label="页面等待"><a-select v-model:value="editUiCaseForm.wait_until"><a-select-option value="networkidle">网络空闲</a-select-option><a-select-option value="load">页面加载完成</a-select-option><a-select-option value="domcontentloaded">DOM加载完成</a-select-option></a-select></a-form-item>
               <a-form-item label="额外等待(ms)"><a-input-number v-model:value="editUiCaseForm.wait_after_load_ms" :min="0" :max="60000" :step="500" style="width: 100%" /></a-form-item>
@@ -930,10 +1010,10 @@
                 </div>
                 <a-alert class="compact-alert" type="info" show-icon message="定位方式选择“AI描述”时，目标元素可填写自然语言，例如：点击登录按钮、填写用户名输入框；执行时会自动转换为可执行定位器。" />
                 <a-table :pagination="false" :data-source="editUiCaseForm.steps" :row-key="(row: UiStepRow) => row.id" :scroll="{ x: 1100 }">
-                  <a-table-column title="动作" width="170"><template #default="{ record: row }"><a-select v-model:value="row.action" :popup-match-select-width="false" popup-class-name="ui-action-dropdown"><a-select-option value="goto">打开页面</a-select-option><a-select-option value="click">点击</a-select-option><a-select-option value="fill">输入</a-select-option><a-select-option value="select">选择</a-select-option><a-select-option value="wait">等待</a-select-option><a-select-option value="assert_text">断言文本</a-select-option><a-select-option value="assert_visible">断言元素</a-select-option><a-select-option value="screenshot">截图</a-select-option></a-select></template></a-table-column>
+                  <a-table-column title="动作" width="170"><template #default="{ record: row }"><a-select v-model:value="row.action" :popup-match-select-width="false" popup-class-name="ui-action-dropdown"><a-select-option value="goto">打开页面</a-select-option><a-select-option value="click">点击</a-select-option><a-select-option value="dblclick">双击</a-select-option><a-select-option value="fill">输入</a-select-option><a-select-option value="select">选择</a-select-option><a-select-option value="wait">等待</a-select-option><a-select-option value="assert_text">断言文本</a-select-option><a-select-option value="assert_visible">断言元素</a-select-option><a-select-option value="screenshot">截图</a-select-option></a-select></template></a-table-column>
                   <a-table-column title="定位方式" width="170"><template #default="{ record: row }"><a-select v-model:value="row.locator_type" :popup-match-select-width="false" popup-class-name="ui-locator-dropdown"><a-select-option value="css">CSS</a-select-option><a-select-option value="xpath">XPath</a-select-option><a-select-option value="text">文本</a-select-option><a-select-option value="placeholder">占位符</a-select-option><a-select-option value="role">按钮文字</a-select-option><a-select-option value="ai">AI描述</a-select-option></a-select></template></a-table-column>
                   <a-table-column title="目标元素/地址" width="260"><template #default="{ record: row }"><a-input v-model:value="row.target" placeholder="CSS、XPath、文本，或写：点击登录按钮" /></template></a-table-column>
-                  <a-table-column title="值/期望" width="220"><template #default="{ record: row }"><a-input v-model:value="row.value" placeholder="输入值、期望文本或等待毫秒" /></template></a-table-column>
+                  <a-table-column title="值/期望" width="220"><template #default="{ record: row }"><a-input v-model:value="row.value" placeholder="如 VIN${random.string(14)}，或等待毫秒" /></template></a-table-column>
                   <a-table-column title="说明" width="220"><template #default="{ record: row }"><a-input v-model:value="row.description" placeholder="步骤说明" /></template></a-table-column>
                   <a-table-column title="操作" width="230" fixed="right"><template #default="{ record: row, index }"><div class="table-actions"><a-button size="small" @click="startUiElementPicker(editUiCaseForm, row)">拾取</a-button><a-button size="small" @click="moveUiStep(editUiCaseForm, index, -1)">上移</a-button><a-button size="small" @click="moveUiStep(editUiCaseForm, index, 1)">下移</a-button><a-button size="small" danger @click="removeUiStep(editUiCaseForm, index)">删除</a-button></div></template></a-table-column>
                 </a-table>
@@ -941,6 +1021,7 @@
             </a-form>
             <template #footer><a-button @click="editUiCaseDialogVisible = false">取消</a-button><a-button type="primary" @click="updateUiCase">确认</a-button></template>
           </a-modal>
+        </section>
 
           <a-modal v-model:open="aiStepDialogVisible" title="自然语言生成步骤" width="860px" @cancel="resetAiStepGenerator">
             <a-form layout="vertical">
@@ -977,7 +1058,13 @@
             </template>
           </a-modal>
 
-          <a-modal v-model:open="uiPickerDialogVisible" :title="uiPicker.targetRow ? '远程元素拾取' : '录制添加步骤'" width="1180px" @cancel="closeUiPicker">
+          <a-modal
+            v-model:open="uiPickerDialogVisible"
+            :title="uiPicker.targetRow ? '远程元素拾取' : '录制添加步骤'"
+            :width="uiPicker.targetRow ? 1180 : 'min(1480px, calc(100vw - 32px))'"
+            :wrap-class-name="uiPicker.targetRow ? '' : 'ui-recorder-modal-fullscreen'"
+            @cancel="closeUiPicker"
+          >
             <a-alert
               class="compact-alert"
               type="info"
@@ -989,13 +1076,15 @@
                 <a-radio-button value="operate">操作</a-radio-button>
                 <a-radio-button value="pick">{{ uiPicker.targetRow ? '拾取' : '录制' }}</a-radio-button>
               </a-radio-group>
-              <a-select v-if="!uiPicker.targetRow" v-model:value="uiPicker.recordAction" :popup-match-select-width="false" popup-class-name="ui-action-dropdown">
+              <a-select v-if="!uiPicker.targetRow" v-model:value="uiPicker.recordAction" :popup-match-select-width="false" popup-class-name="ui-action-dropdown" @change="disableUiRecordActionAuto">
                 <a-select-option value="click">点击</a-select-option>
+                <a-select-option value="dblclick">双击</a-select-option>
                 <a-select-option value="fill">输入</a-select-option>
                 <a-select-option value="select">选择</a-select-option>
                 <a-select-option value="assert_visible">断言元素</a-select-option>
                 <a-select-option value="assert_text">断言文本</a-select-option>
               </a-select>
+              <a-tag v-if="!uiPicker.targetRow && uiPicker.recordActionAuto" color="processing">自动判断</a-tag>
               <a-select
                 v-if="!uiPicker.targetRow && uiPicker.recordAction === 'select' && uiPickerSelectOptions.length"
                 v-model:value="uiPicker.inputText"
@@ -1003,24 +1092,33 @@
                 :popup-match-select-width="false"
                 popup-class-name="ui-action-dropdown"
                 placeholder="请选择下拉项"
+                @change="handleUiPickerSelectChange"
               >
-                <a-select-option v-for="option in uiPickerSelectOptions" :key="option.key" :value="option.value">{{ option.label }}</a-select-option>
+                <a-select-option v-for="option in uiPickerSelectOptions" :key="option.key" :value="option.value">{{ uiPickerOptionLabel(option) }}</a-select-option>
               </a-select>
-              <a-input v-else v-model:value="uiPicker.inputText" :placeholder="uiPicker.targetRow ? '先点击输入框，再输入文本' : '输入步骤的值或期望文本'" @keyup.enter="typeUiPickerText" />
+              <a-input v-else v-model:value="uiPicker.inputText" :placeholder="uiPicker.targetRow ? '可输入 VIN${random.string(14)} 这类动态值' : '输入步骤的值或期望文本'" @input="refreshAutoUiRecordAction" @keyup.enter="typeUiPickerText" />
               <a-button v-if="!uiPicker.targetRow && uiPicker.recordAction === 'select'" :disabled="!uiPicker.inputText.trim()" @click="applyUiPickerSelect">应用选择</a-button>
               <a-button v-if="!uiPicker.targetRow" type="primary" :disabled="!canAppendRecordedUiStep" @click="confirmAppendRecordedUiStep">添加当前步骤</a-button>
               <a-button @click="typeUiPickerText">输入</a-button>
+              <a-button @click="pressUiPickerKey('Backspace')">Backspace</a-button>
+              <a-button @click="pressUiPickerKey('Delete')">Delete</a-button>
               <a-button @click="pressUiPickerKey('Enter')">Enter</a-button>
               <a-button v-if="!uiPicker.targetRow" @click="appendUiPickerUtilityStep('wait')">添加等待</a-button>
               <a-button v-if="!uiPicker.targetRow" @click="appendUiPickerUtilityStep('screenshot')">添加截图</a-button>
               <a-button @click="refreshUiPickerScreenshot">刷新截图</a-button>
+              <span class="ui-recorder-zoom">
+                <a-button @click="changeUiPickerZoom(-10)">-</a-button>
+                <a-button @click="resetUiPickerZoom">{{ uiPicker.zoomPercent }}%</a-button>
+                <a-button @click="changeUiPickerZoom(10)">+</a-button>
+              </span>
             </div>
-            <div class="remote-browser-frame">
+            <div class="remote-browser-frame" @wheel.ctrl.prevent="handleUiPickerZoomWheel">
               <a-spin v-if="uiPicker.loading" />
               <img
                 v-if="uiPicker.screenshotUrl"
                 :src="uiPicker.screenshotUrl"
                 alt="远程浏览器截图"
+                :style="uiPickerImageStyle"
                 @click="handleUiPickerImageClick"
               />
               <a-empty v-else description="等待远程浏览器截图" />
@@ -1050,43 +1148,196 @@
             </template>
           </a-modal>
 
-          <a-modal v-model:open="uiExecutionDetailVisible" title="UI执行详情" width="900px">
+          <a-modal v-model:open="uiExecutionDetailVisible" title="UI执行详情" width="1040px">
+            <a-alert
+              v-if="currentUiExecutionError"
+              class="modal-alert"
+              type="error"
+              show-icon
+              :message="currentUiExecutionError"
+            />
             <a-descriptions bordered size="small" :column="2">
               <a-descriptions-item label="状态"><a-tag :color="executionStatusColor(uiExecutionDetail.task?.status)">{{ executionStatusText(uiExecutionDetail.task?.status) }}</a-tag></a-descriptions-item>
               <a-descriptions-item label="用例">{{ uiExecutionDetail.task?.target_name || '-' }}</a-descriptions-item>
+              <a-descriptions-item label="项目">{{ uiExecutionDetail.task?.project_name || '-' }}</a-descriptions-item>
+              <a-descriptions-item label="环境">{{ uiExecutionDetail.task?.environment_name || '-' }}</a-descriptions-item>
+              <a-descriptions-item label="执行人">{{ uiExecutionDetail.task?.executor_name || '-' }}</a-descriptions-item>
+              <a-descriptions-item label="执行时间">{{ uiExecutionDetailTime }}</a-descriptions-item>
+              <a-descriptions-item label="测试模式">{{ uiExecutionModeText(uiExecutionDetail.results?.[0]?.request_snapshot?.mode) }}</a-descriptions-item>
+              <a-descriptions-item label="Token消耗">{{ uiTokenUsageText(uiExecutionDetail.results?.[0]?.response_snapshot?.token_usage, uiExecutionDetail.results?.[0]?.request_snapshot?.mode) }}</a-descriptions-item>
             </a-descriptions>
             <div v-for="result in uiExecutionDetail.results" :key="result.id" class="execution-result-expand log-detail-block">
               <template v-if="result.request_snapshot?.mode === 'ai'">
                 <strong>测试目标</strong><pre>{{ result.request_snapshot?.test_goal || '-' }}</pre>
-                <strong>AI执行轨迹</strong><pre>{{ formatJson(result.response_snapshot?.agent_steps || []) }}</pre>
+                <strong>测试数据</strong><pre>{{ formatJson(result.request_snapshot?.test_data || {}) }}</pre>
+                <strong>期望结果</strong><pre>{{ result.request_snapshot?.assertion_goal || '-' }}</pre>
               </template>
-              <template v-else>
-                <strong>执行步骤</strong><pre>{{ formatJson(result.response_snapshot?.steps || []) }}</pre>
-              </template>
+              <a-table class="ui-detail-step-table" :pagination="false" size="small" :data-source="uiResultSteps(result)" :row-key="(row: any, index: number) => `${row.index || index}-${row.action || ''}`" :scroll="{ x: 980 }">
+                <a-table-column title="步骤" width="70"><template #default="{ record: row, index }">{{ row.index || index + 1 }}</template></a-table-column>
+                <a-table-column title="动作" width="110"><template #default="{ record: row }">{{ uiActionText(row.action) }}</template></a-table-column>
+                <a-table-column title="定位方式" width="110"><template #default="{ record: row }">{{ uiLocatorText(row.locator_type) }}</template></a-table-column>
+                <a-table-column title="目标元素/地址" width="260"><template #default="{ record: row }"><span class="wrap-text">{{ row.target || row.ref || '-' }}</span></template></a-table-column>
+                <a-table-column title="值/期望" width="180"><template #default="{ record: row }"><span class="wrap-text">{{ row.value || row.expected || '-' }}</span></template></a-table-column>
+                <a-table-column title="状态" width="90"><template #default="{ record: row }"><a-tag :color="executionStatusColor(row.status)">{{ executionStatusText(row.status) }}</a-tag></template></a-table-column>
+                <a-table-column title="说明"><template #default="{ record: row }"><span class="wrap-text">{{ uiStepMessage(row) }}</span></template></a-table-column>
+              </a-table>
               <strong>截图</strong>
               <div class="ui-screenshot-list">
-                <a-empty v-if="!(result.response_snapshot?.screenshots || []).length" description="暂无截图" :image-style="{ width: '44px', height: '44px' }" />
-                <a-image v-for="shot in result.response_snapshot?.screenshots || []" :key="shot.path" :src="uiArtifactUrl(shot.path)" :width="180" />
+                <a-empty v-if="!(result.response_snapshot?.screenshots || []).length" description="等待页面截图" :image-style="{ width: '44px', height: '44px' }" />
+                <figure v-for="shot in result.response_snapshot?.screenshots || []" :key="shot.path" class="ui-screenshot-card">
+                  <figcaption>步骤 {{ shot.step_index || '-' }} · {{ shot.type || 'screenshot' }}</figcaption>
+                  <a-image :src="uiArtifactUrl(shot.path)" :width="220" />
+                </figure>
               </div>
               <strong>断言结果</strong><pre>{{ formatJson(result.assertion_results || []) }}</pre>
-              <strong>错误信息</strong><pre>{{ result.error_message || '-' }}</pre>
+              <template v-if="result.response_snapshot?.error_analysis">
+                <strong>AI分析</strong><pre>{{ result.response_snapshot.error_analysis }}</pre>
+              </template>
+              <strong>错误信息</strong><pre>{{ uiResultErrorMessage(result) || '-' }}</pre>
             </div>
             <template #footer>
+              <a-button :disabled="!uiExecutionDetail.task?.report_html" @click="exportUiExecutionReport">导出报告</a-button>
               <a-button v-if="hasAiExecutionResult()" @click="solidifyUiExecution">固化为高级步骤</a-button>
+              <a-button v-if="uiExecutionCanStop(uiExecutionDetail.task?.status)" danger @click="stopUiExecutionFromDetail">停止任务</a-button>
               <a-button type="primary" @click="uiExecutionDetailVisible = false">关闭</a-button>
             </template>
           </a-modal>
 
-          <a-modal v-model:open="aiSettingDialogVisible" title="AI配置" width="560px">
-            <a-form layout="vertical" @submit.prevent="saveAiSetting">
+          <a-modal v-model:open="aiSettingDialogVisible" title="AI配置" width="960px">
+            <div class="ai-setting-layout">
+              <div class="ai-setting-list">
+                <div class="kv-title">
+                  <h4>配置列表</h4>
+                  <a-button size="small" @click="resetAiSettingForm">新增配置</a-button>
+                </div>
+                <a-table :pagination="false" size="small" :data-source="aiSettings" :row-key="(row: any) => row.id" :scroll="{ y: 300 }">
+                  <a-table-column title="名称" data-index="name" />
+                  <a-table-column title="状态" width="76"><template #default="{ record: row }"><a-tag :color="row.status === 'active' ? 'success' : 'default'">{{ row.status === 'active' ? '启用' : '禁用' }}</a-tag></template></a-table-column>
+                  <a-table-column title="默认" width="76"><template #default="{ record: row }"><a-tag v-if="row.is_default" color="processing">默认</a-tag><span v-else>-</span></template></a-table-column>
+                  <a-table-column title="操作" width="190" fixed="right">
+                    <template #default="{ record: row }">
+                      <div class="table-actions">
+                        <a-button size="small" @click="editAiSetting(row)">编辑</a-button>
+                        <a-button size="small" :disabled="row.is_default" @click="setDefaultAiSetting(row)">设默认</a-button>
+                        <a-button size="small" danger @click="deleteAiSetting(row)">删除</a-button>
+                      </div>
+                    </template>
+                  </a-table-column>
+                </a-table>
+              </div>
+              <a-form layout="vertical" class="ai-setting-form" @submit.prevent="saveAiSetting">
+              <a-form-item label="配置名称"><a-input v-model:value="aiSettingForm.name" placeholder="例如 DeepSeek、Qwen、内网模型" /></a-form-item>
               <a-form-item label="模型服务地址"><a-input v-model:value="aiSettingForm.provider_url" placeholder="https://模型网关地址/v1" /></a-form-item>
               <a-form-item label="模型名称"><a-input v-model:value="aiSettingForm.model_name" placeholder="例如 ui-agent" /></a-form-item>
               <a-form-item label="API Key"><a-input-password v-model:value="aiSettingForm.api_key" placeholder="留空则不修改已有 Key" /></a-form-item>
               <a-form-item label="状态"><a-select v-model:value="aiSettingForm.status"><a-select-option value="active">启用</a-select-option><a-select-option value="disabled">禁用</a-select-option></a-select></a-form-item>
+              <a-form-item label="默认配置"><a-switch v-model:checked="aiSettingForm.is_default" checked-children="默认" un-checked-children="普通" /></a-form-item>
               <a-form-item label="说明"><a-textarea v-model:value="aiSettingForm.description" :rows="3" placeholder="用于后续 AI 生成 UI 测试步骤和辅助识别元素" /></a-form-item>
-            </a-form>
-            <template #footer><a-button @click="aiSettingDialogVisible = false">取消</a-button><a-button type="primary" @click="saveAiSetting">保存</a-button></template>
+              </a-form>
+            </div>
+            <template #footer>
+              <a-button @click="aiSettingDialogVisible = false">取消</a-button>
+              <a-button :loading="aiSettingTesting" @click="testAiSetting">测试连接</a-button>
+              <a-button type="primary" @click="saveAiSetting">{{ aiSettingForm.id ? '保存配置' : '新增配置' }}</a-button>
+            </template>
           </a-modal>
+
+        <section v-if="activeUiCaseEditor" class="api-editor-page ui-case-editor-page">
+          <div class="toolbar">
+            <h2>{{ activeUiCaseEditor.label }}</h2>
+            <div class="toolbar-actions">
+              <a-button @click="closeUiCaseEditorFromPage">取消</a-button>
+              <a-button type="primary" @click="saveUiCaseEditor">保存UI用例</a-button>
+            </div>
+          </div>
+
+          <div class="editor-section">
+            <h3>基础信息</h3>
+            <a-form layout="vertical" class="form-grid" @submit.prevent="saveUiCaseEditor">
+              <a-form-item label="项目">
+                <a-select v-model:value="activeUiCaseEditor.form.project_id" placeholder="请选择项目" @change="changeUiCaseEditorProject(activeUiCaseEditor.form)">
+                  <a-select-option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item label="环境">
+                <a-select v-model:value="activeUiCaseEditor.form.environment_id" placeholder="请先选择项目" :disabled="!activeUiCaseEditor.form.project_id">
+                  <a-select-option v-for="e in uiCaseEditorEnvironments(activeUiCaseEditor.form)" :key="e.id" :value="e.id">{{ e.name }}</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item label="用例名称"><a-input v-model:value="activeUiCaseEditor.form.name" placeholder="请输入UI用例名称" /></a-form-item>
+              <a-form-item label="状态"><a-select v-model:value="activeUiCaseEditor.form.status"><a-select-option value="active">启用</a-select-option><a-select-option value="disabled">禁用</a-select-option></a-select></a-form-item>
+              <a-form-item label="浏览器"><a-select v-model:value="activeUiCaseEditor.form.browser_channel"><a-select-option value="chromium">Playwright Chromium</a-select-option><a-select-option value="chrome">本机 Chrome</a-select-option><a-select-option value="msedge">本机 Edge</a-select-option></a-select></a-form-item>
+              <a-form-item label="浏览器模式"><a-select v-model:value="activeUiCaseEditor.form.headless"><a-select-option :value="true">无头模式</a-select-option><a-select-option :value="false">有头模式</a-select-option></a-select></a-form-item>
+              <a-form-item label="页面等待"><a-select v-model:value="activeUiCaseEditor.form.wait_until"><a-select-option value="networkidle">网络空闲</a-select-option><a-select-option value="load">页面加载完成</a-select-option><a-select-option value="domcontentloaded">DOM加载完成</a-select-option></a-select></a-form-item>
+              <a-form-item label="额外等待(ms)"><a-input-number v-model:value="activeUiCaseEditor.form.wait_after_load_ms" :min="0" :max="60000" :step="500" style="width: 100%" /></a-form-item>
+              <a-form-item label="目标地址" class="wide"><a-input v-model:value="activeUiCaseEditor.form.start_url" placeholder="/login 或完整 URL" /></a-form-item>
+              <a-form-item label="用例模式" class="wide">
+                <a-radio-group v-model:value="activeUiCaseEditor.form.execution_mode">
+                  <a-radio-button value="ai">AI模式</a-radio-button>
+                  <a-radio-button value="advanced">高级模式</a-radio-button>
+                </a-radio-group>
+              </a-form-item>
+              <template v-if="activeUiCaseEditor.form.execution_mode === 'ai'">
+                <a-form-item label="测试目标" class="wide"><a-textarea v-model:value="activeUiCaseEditor.form.test_goal" :rows="4" placeholder="例如：登录系统后进入合同列表，按合同编号查询详情，并确认页面展示合同信息" /></a-form-item>
+                <a-form-item label="测试数据" class="wide"><a-textarea v-model:value="activeUiCaseEditor.form.test_data_text" :rows="5" placeholder="{&#10;  &quot;用户名&quot;: &quot;test&quot;,&#10;  &quot;密码&quot;: &quot;123456&quot;,&#10;  &quot;合同编号&quot;: &quot;HT001&quot;&#10;}" /></a-form-item>
+                <a-form-item label="期望结果" class="wide"><a-textarea v-model:value="activeUiCaseEditor.form.assertion_goal" :rows="3" placeholder="例如：页面出现合同编号，且状态为正常" /></a-form-item>
+                <a-form-item label="最大步骤数"><a-input-number v-model:value="activeUiCaseEditor.form.max_steps" :min="1" :max="100" style="width: 100%" /></a-form-item>
+                <a-form-item label="单步超时(ms)"><a-input-number v-model:value="activeUiCaseEditor.form.step_timeout_ms" :min="1000" :max="120000" :step="1000" style="width: 100%" /></a-form-item>
+                <a-form-item label="允许AI操作"><a-switch v-model:checked="activeUiCaseEditor.form.allow_ai_actions" checked-children="允许" un-checked-children="只观察" /></a-form-item>
+                <a-alert class="wide compact-alert" type="info" show-icon message="AI模式会在受控浏览器中观察当前页面，并在点击、输入、选择、断言等安全动作中选择下一步；每一步都会保存原因、截图和执行结果。" />
+              </template>
+              <a-form-item label="描述" class="wide"><a-textarea v-model:value="activeUiCaseEditor.form.description" :rows="2" placeholder="请输入用例说明" /></a-form-item>
+            </a-form>
+          </div>
+
+          <div v-if="activeUiCaseEditor.form.execution_mode === 'advanced'" class="editor-section">
+            <div class="kv-title">
+              <h4>测试步骤</h4>
+              <div class="toolbar-actions">
+                <a-button size="small" @click="openAiStepDialog(activeUiCaseEditor.form)">自然语言生成</a-button>
+                <a-button size="small" @click="startUiStepRecorder(activeUiCaseEditor.form)">录制添加步骤</a-button>
+                <a-button size="small" @click="addUiStep(activeUiCaseEditor.form)">添加步骤</a-button>
+              </div>
+            </div>
+            <a-alert class="compact-alert" type="info" show-icon message="定位方式选择“AI描述”时，目标元素可填写自然语言，例如：点击登录按钮、填写用户名输入框；执行时会自动转换为可执行定位器。" />
+            <a-table
+              class="ui-step-table"
+              :pagination="false"
+              :data-source="activeUiCaseEditor.form.steps"
+              :row-key="(row: UiStepRow) => row.id"
+              :scroll="{ x: 1180 }"
+              :custom-row="activeUiStepRowProps"
+            >
+              <a-table-column title="步骤ID" width="96">
+                <template #default="{ index }">
+                  <span class="ui-step-id">
+                    <span
+                      class="drag-handle"
+                      draggable="true"
+                      title="拖动调整步骤顺序"
+                      @dragstart="startUiStepDrag(activeUiCaseEditor.form, index, $event)"
+                      @dragend="resetUiStepDrag"
+                    >⋮⋮</span>
+                    {{ index + 1 }}
+                  </span>
+                </template>
+              </a-table-column>
+              <a-table-column title="动作" width="170"><template #default="{ record: row }"><a-select v-model:value="row.action" :popup-match-select-width="false" popup-class-name="ui-action-dropdown"><a-select-option value="goto">打开页面</a-select-option><a-select-option value="click">点击</a-select-option><a-select-option value="dblclick">双击</a-select-option><a-select-option value="fill">输入</a-select-option><a-select-option value="select">选择</a-select-option><a-select-option value="wait">等待</a-select-option><a-select-option value="assert_text">断言文本</a-select-option><a-select-option value="assert_visible">断言元素</a-select-option><a-select-option value="screenshot">截图</a-select-option></a-select></template></a-table-column>
+              <a-table-column title="定位方式" width="170"><template #default="{ record: row }"><a-select v-model:value="row.locator_type" :popup-match-select-width="false" popup-class-name="ui-locator-dropdown"><a-select-option value="css">CSS</a-select-option><a-select-option value="xpath">XPath</a-select-option><a-select-option value="text">文本</a-select-option><a-select-option value="placeholder">占位符</a-select-option><a-select-option value="role">按钮文字</a-select-option><a-select-option value="ai">AI描述</a-select-option></a-select></template></a-table-column>
+              <a-table-column title="目标元素/地址" width="260"><template #default="{ record: row }"><a-input v-model:value="row.target" placeholder="CSS、XPath、文本，或写：点击登录按钮" /></template></a-table-column>
+              <a-table-column title="值/期望" width="220"><template #default="{ record: row }"><a-input v-model:value="row.value" placeholder="如 VIN${random.string(14)}，或等待毫秒" /></template></a-table-column>
+              <a-table-column title="说明" width="220"><template #default="{ record: row }"><a-input v-model:value="row.description" placeholder="步骤说明" /></template></a-table-column>
+              <a-table-column title="操作" width="230" fixed="right"><template #default="{ record: row, index }"><div class="table-actions"><a-button size="small" @click="startUiElementPicker(activeUiCaseEditor.form, row)">拾取</a-button><a-button size="small" @click="moveUiStep(activeUiCaseEditor.form, index, -1)">上移</a-button><a-button size="small" @click="moveUiStep(activeUiCaseEditor.form, index, 1)">下移</a-button><a-button size="small" danger @click="removeUiStep(activeUiCaseEditor.form, index)">删除</a-button></div></template></a-table-column>
+            </a-table>
+          </div>
+
+          <div class="plan-editor-footer">
+            <span>保存成功后会自动关闭当前页签</span>
+            <div class="toolbar-actions">
+              <a-button @click="closeUiCaseEditorFromPage">取消</a-button>
+              <a-button type="primary" @click="saveUiCaseEditor">保存UI用例</a-button>
+            </div>
+          </div>
         </section>
 
         <section v-if="activeApiEditor" class="api-editor-page">
@@ -1354,9 +1605,9 @@
             <a-table-column title="编号" width="80">
               <template #default="{ index }">{{ caseSerialNumber(index) }}</template>
             </a-table-column>
-            <a-table-column data-index="project_name" title="项目" />
-            <a-table-column data-index="api_name" title="接口" />
-            <a-table-column data-index="name" title="用例名称" />
+            <a-table-column title="项目"><template #default="{ record: row }"><TableText :value="row.project_name" /></template></a-table-column>
+            <a-table-column title="接口"><template #default="{ record: row }"><TableText :value="row.api_name" /></template></a-table-column>
+            <a-table-column title="用例名称"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
             <a-table-column title="操作" width="330" fixed="right">
               <template #default="{ record: row }">
                 <div class="table-actions">
@@ -1536,9 +1787,19 @@
                 <h3>全部计划</h3>
                 <span>共 {{ planPagination.total }} 条记录</span>
               </div>
-              <span class="plan-list-hint">点击计划名称可查看执行范围</span>
+              <div class="toolbar-actions">
+                <span class="plan-list-hint">点击计划名称可查看执行范围</span>
+                <a-button :disabled="!selectedPlanIds.length" :loading="batchExecutingPlans" @click="executeSelectedPlans">批量执行</a-button>
+              </div>
             </div>
-          <a-table :pagination="false" :data-source="planList" row-key="id" :scroll="{ x: 1360 }" class="plan-list-table">
+          <a-table
+            :pagination="false"
+            :data-source="planList"
+            row-key="id"
+            :row-selection="{ selectedRowKeys: selectedPlanIds, onChange: changeSelectedPlans }"
+            :scroll="{ x: 1360 }"
+            class="plan-list-table"
+          >
             <template #expandedRowRender="{ record: row }">
               <div class="plan-case-expand-list">
                 <div class="plan-case-expand-head">
@@ -1560,10 +1821,10 @@
                 <a-empty v-if="!(row.cases || []).length" description="暂无用例" :image-style="{ width: '48px', height: '48px' }" />
               </div>
             </template>
-            <a-table-column data-index="name" title="计划名称" width="280" class-name="plan-wrap-cell" />
-            <a-table-column data-index="project_name" title="项目" width="220" class-name="plan-wrap-cell" />
-            <a-table-column data-index="environment_name" title="环境" width="220" class-name="plan-wrap-cell" />
-            <a-table-column data-index="api_name" title="包含接口" width="260" class-name="plan-wrap-cell" />
+            <a-table-column title="计划名称"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
+            <a-table-column title="项目"><template #default="{ record: row }"><TableText :value="row.project_name" /></template></a-table-column>
+            <a-table-column title="环境"><template #default="{ record: row }"><TableText :value="row.environment_name" /></template></a-table-column>
+            <a-table-column title="包含接口"><template #default="{ record: row }"><TableText :value="row.api_name" /></template></a-table-column>
             <a-table-column title="状态" width="96" align="center">
               <template #default="{ record: row }">
                 <a-tag :color="executionStatusColor(row.last_status)">{{ executionStatusText(row.last_status) }}</a-tag>
@@ -1661,8 +1922,8 @@
                   row-key="id"
                   :row-selection="{ onChange: (_keys: any[], rows: any[]) => changePlanCandidateSelection(activePlanEditor, rows) }"
                 >
-                  <a-table-column data-index="name" title="用例名称" />
-                  <a-table-column data-index="api_name" title="接口" />
+                  <a-table-column title="用例名称"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
+                  <a-table-column title="接口"><template #default="{ record: row }"><TableText :value="row.api_name" /></template></a-table-column>
                   <a-table-column title="操作" width="100">
                     <template #default="{ record: row }">
                       <a-button size="small" type="link" @click="openCaseDetailDialog(row, activePlanEditor.environment_id)">查看</a-button>
@@ -1768,22 +2029,90 @@
                 <pre>{{ formatJson(row.response_snapshot) }}</pre>
               </div>
             </template>
-            <a-table-column data-index="case_name" title="用例名称" width="240" class-name="log-ellipsis-cell" />
-            <a-table-column data-index="api_name" title="接口" width="220" class-name="log-ellipsis-cell" />
+            <a-table-column title="用例名称"><template #default="{ record: row }"><TableText :value="row.case_name" /></template></a-table-column>
+            <a-table-column title="接口"><template #default="{ record: row }"><TableText :value="row.api_name" /></template></a-table-column>
             <a-table-column title="状态" width="100">
               <template #default="{ record: row }">
                 <a-tag :color="executionStatusColor(row.status)">{{ executionStatusText(row.status) }}</a-tag>
               </template>
             </a-table-column>
             <a-table-column data-index="duration_ms" title="耗时(ms)" width="100" />
-            <a-table-column title="错误信息" width="220" class-name="log-ellipsis-cell">
-              <template #default="{ record: row }"><span :title="row.error_message || '-'">{{ row.error_message || '-' }}</span></template>
-            </a-table-column>
+            <a-table-column title="错误信息"><template #default="{ record: row }"><TableText :value="row.error_message" /></template></a-table-column>
           </a-table>
           <template #footer>
             <a-button type="primary" @click="executionDetailDialogVisible = false">关闭</a-button>
           </template>
         </a-modal>
+
+        <section v-if="active === 'ui-reports'" class="page-view">
+          <div class="toolbar">
+            <h2>UI测试报告</h2>
+            <div class="toolbar-actions">
+              <a-button danger :disabled="!selectedUiReportIds.length" @click="deleteSelectedUiReports">批量删除</a-button>
+            </div>
+          </div>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="UI用例名称">
+              <a-input v-model:value="uiReportSearch.name" placeholder="请输入UI用例名称" allow-clear @keyup.enter="searchUiReports" />
+            </a-form-item>
+            <a-form-item label="状态">
+              <a-select v-model:value="uiReportSearch.status" placeholder="请选择状态" allow-clear>
+                <a-select-option value="queued">排队中</a-select-option>
+                <a-select-option value="running">执行中</a-select-option>
+                <a-select-option value="passed">已通过</a-select-option>
+                <a-select-option value="failed">失败</a-select-option>
+                <a-select-option value="error">异常</a-select-option>
+              </a-select>
+            </a-form-item>
+            <div class="search-actions">
+              <a-button type="primary" @click="searchUiReports">搜索</a-button>
+              <a-button @click="resetUiReportSearch">重置</a-button>
+            </div>
+          </a-form>
+          <a-table
+            :pagination="false"
+            :data-source="uiReportList"
+            :row-key="(row: any) => row.id"
+            :row-selection="{ selectedRowKeys: selectedUiReportIds, onChange: changeSelectedUiReports }"
+          >
+            <a-table-column title="UI用例名称"><template #default="{ record: row }"><TableText :value="row.target_name" /></template></a-table-column>
+            <a-table-column title="项目"><template #default="{ record: row }"><TableText :value="row.project_name" /></template></a-table-column>
+            <a-table-column title="环境"><template #default="{ record: row }"><TableText :value="row.environment_name" /></template></a-table-column>
+            <a-table-column title="执行模式" width="110">
+              <template #default="{ record: row }">
+                <a-tag :color="row.execution_mode === 'ai' ? 'blue' : 'default'">{{ uiExecutionModeText(row.execution_mode) }}</a-tag>
+              </template>
+            </a-table-column>
+            <a-table-column title="状态" width="100">
+              <template #default="{ record: row }">
+                <a-tag :color="executionStatusColor(row.status)">{{ executionStatusText(row.status) }}</a-tag>
+              </template>
+            </a-table-column>
+            <a-table-column title="执行时间" width="150">
+              <template #default="{ record: row }">{{ formatMinute(row.ended_at || row.started_at || row.create_date) }}</template>
+            </a-table-column>
+            <a-table-column data-index="executor_name" title="执行用户" width="120" />
+            <a-table-column title="操作" width="230" fixed="right">
+              <template #default="{ record: row }">
+                <div class="table-actions">
+                  <a-button size="small" @click="openReport(row)">查看报告</a-button>
+                  <a-button size="small" @click="exportReport(row)">导出</a-button>
+                  <a-button size="small" danger @click="deleteUiReport(row)">删除</a-button>
+                </div>
+              </template>
+            </a-table-column>
+          </a-table>
+          <div class="pagination">
+            <a-pagination
+              :show-total="paginationTotal"
+              show-less-items
+              :current="uiReportPagination.page"
+              :page-size="uiReportPagination.pageSize"
+              :total="uiReportPagination.total"
+              @change="changeUiReportPage"
+            />
+          </div>
+        </section>
 
         <section v-if="active === 'reports'" class="page-view">
           <div class="toolbar">
@@ -1816,9 +2145,9 @@
             :row-key="(row: any) => row.id"
             :row-selection="{ selectedRowKeys: selectedReportIds, onChange: changeSelectedReports }"
           >
-            <a-table-column data-index="target_name" title="测试计划名称" width="180" />
-            <a-table-column data-index="project_name" title="项目" />
-            <a-table-column data-index="environment_name" title="环境" />
+            <a-table-column title="测试计划名称"><template #default="{ record: row }"><TableText :value="row.target_name" /></template></a-table-column>
+            <a-table-column title="项目"><template #default="{ record: row }"><TableText :value="row.project_name" /></template></a-table-column>
+            <a-table-column title="环境"><template #default="{ record: row }"><TableText :value="row.environment_name" /></template></a-table-column>
             <a-table-column title="状态" width="100">
               <template #default="{ record: row }">
                 <a-tag :color="executionStatusColor(row.status)">{{ executionStatusText(row.status) }}</a-tag>
@@ -1849,6 +2178,324 @@
           </div>
         </section>
 
+        <section v-if="active === 'ai_cases'" class="page-view ai-generation-page">
+          <div class="toolbar">
+            <div><h2>AI生成用例</h2><p class="page-subtitle">上传需求文档，使用 AI 生成测试用例 Excel 文件。</p></div>
+          </div>
+          <a-card class="ai-generation-upload" :bordered="false">
+            <a-form layout="vertical">
+              <a-form-item label="需求文档" extra="每次只能上传 1 个文档，文件大小不超过 20MB。">
+                <a-upload
+                  :file-list="aiSourceFiles"
+                  :max-count="1"
+                  :multiple="false"
+                  :show-upload-list="false"
+                  :before-upload="selectAiSourceFile"
+                >
+                  <a-button :disabled="aiGenerating"><template #icon><FileTextOutlined /></template>选择需求文档</a-button>
+                </a-upload>
+                <div v-if="aiSourceFiles.length || aiLastUploadedFilename" class="ai-selected-file">
+                  <FileTextOutlined />
+                  <span :title="aiSourceFiles[0]?.name || aiLastUploadedFilename">{{ aiSourceFiles[0]?.name || aiLastUploadedFilename }}</span>
+                  <a-button v-if="aiSourceFiles.length" type="link" size="small" :disabled="aiGenerating" @click="removeAiSourceFile">移除</a-button>
+                </div>
+              </a-form-item>
+              <a-button type="primary" :loading="aiGenerating" :disabled="!aiSourceFiles.length" @click="startAiGeneration">
+                <template #icon><PlayCircleOutlined /></template>开始生成
+              </a-button>
+            </a-form>
+          </a-card>
+
+          <div class="toolbar ai-history-toolbar"><h3>生成历史</h3><a-button @click="loadAiGenerations"><template #icon><ReloadOutlined /></template>刷新</a-button></div>
+          <a-table :pagination="false" :data-source="aiGenerations" :scroll="{ x: 1080 }" table-layout="fixed" class="ai-generation-table">
+            <a-table-column title="编号" :width="64"><template #default="{ index }">{{ aiGenerationSerialNumber(index) }}</template></a-table-column>
+            <a-table-column title="需求文档" :width="260">
+              <template #default="{ record: row }"><span class="ai-source-filename" :title="row.source_filename">{{ row.source_filename }}</span></template>
+            </a-table-column>
+            <a-table-column title="状态" :width="96">
+              <template #default="{ record: row }"><a-tag :color="aiGenerationStatusColor(row.status)">{{ aiGenerationStatusText(row.status) }}</a-tag></template>
+            </a-table-column>
+            <a-table-column data-index="creator_name" title="发起人" :width="110" />
+            <a-table-column data-index="create_date" title="创建时间" :width="168" />
+            <a-table-column title="生成文件" :width="190">
+              <template #default="{ record: row }">
+                <div v-if="row.output_files?.length" class="ai-output-files">
+                  <a-button v-for="(file, index) in row.output_files" :key="file.storage_name || index" size="small" type="link" @click="downloadAiGenerationFile(row, index)">{{ file.name }}</a-button>
+                </div>
+                <span v-else>-</span>
+              </template>
+            </a-table-column>
+            <a-table-column title="错误信息" :width="190">
+              <template #default="{ record: row }"><span class="ai-error-message" :title="row.error_message || ''">{{ row.error_message || '-' }}</span></template>
+            </a-table-column>
+          </a-table>
+          <div class="pagination">
+            <a-pagination :show-total="paginationTotal" show-less-items :current="aiGenerationPagination.page" :page-size="aiGenerationPagination.pageSize" :total="aiGenerationPagination.total" @change="changeAiGenerationPage" />
+          </div>
+        </section>
+
+        <section v-if="active === 'knowledge_projects'" class="page-view">
+          <div class="toolbar"><h2>项目配置</h2><a-button type="primary" @click="openCreateKnowledgeProject"><template #icon><PlusOutlined /></template>创建项目</a-button></div>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="项目名称"><a-input v-model:value="knowledgeProjectSearch.name" placeholder="请输入项目名称" allow-clear @keyup.enter="searchKnowledgeProjects" /></a-form-item>
+            <a-form-item label="状态">
+              <a-select v-model:value="knowledgeProjectSearch.status" placeholder="请选择状态" allow-clear>
+                <a-select-option value="active">启用</a-select-option>
+                <a-select-option value="disabled">禁用</a-select-option>
+              </a-select>
+            </a-form-item>
+            <div class="search-actions"><a-button type="primary" @click="searchKnowledgeProjects">搜索</a-button><a-button @click="resetKnowledgeProjectSearch">重置</a-button></div>
+          </a-form>
+          <a-table :pagination="false" :data-source="knowledgeProjectList">
+            <a-table-column title="编号" width="70"><template #default="{ index }">{{ knowledgeProjectSerialNumber(index) }}</template></a-table-column>
+            <a-table-column title="项目名称"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
+            <a-table-column title="描述"><template #default="{ record: row }"><TableText :value="row.description" /></template></a-table-column>
+            <a-table-column title="状态" width="100"><template #default="{ record: row }"><a-tag :color="row.status === 'active' ? 'success' : 'warning'">{{ row.status === 'active' ? '启用' : '禁用' }}</a-tag></template></a-table-column>
+            <a-table-column data-index="update_date" title="更新时间" width="170" />
+            <a-table-column title="操作" width="190" fixed="right">
+              <template #default="{ record: row }">
+                <div class="table-actions">
+                  <a-button size="small" @click="openEditKnowledgeProject(row)">编辑</a-button>
+                  <a-button size="small" danger @click="deleteKnowledgeProject(row)">删除</a-button>
+                </div>
+              </template>
+            </a-table-column>
+          </a-table>
+          <div class="pagination"><a-pagination :show-total="paginationTotal" show-less-items :current="knowledgeProjectPagination.page" :page-size="knowledgeProjectPagination.pageSize" :total="knowledgeProjectPagination.total" @change="changeKnowledgeProjectPage" /></div>
+
+          <a-modal v-model:open="knowledgeProjectFormVisible" :title="knowledgeProjectForm.id ? '编辑知识库项目' : '创建知识库项目'" width="460px" @after-close="resetKnowledgeProjectForm">
+            <a-form layout="vertical">
+              <a-form-item label="项目名称" required><a-input v-model:value="knowledgeProjectForm.name" placeholder="请输入项目名称" /></a-form-item>
+              <a-form-item label="描述"><a-textarea v-model:value="knowledgeProjectForm.description" :auto-size="{ minRows: 2, maxRows: 4 }" placeholder="请输入描述" /></a-form-item>
+              <a-form-item label="状态"><a-select v-model:value="knowledgeProjectForm.status"><a-select-option value="active">启用</a-select-option><a-select-option value="disabled">禁用</a-select-option></a-select></a-form-item>
+            </a-form>
+            <template #footer><a-button @click="knowledgeProjectFormVisible = false">取消</a-button><a-button type="primary" @click="saveKnowledgeProject">确认</a-button></template>
+          </a-modal>
+        </section>
+
+        <section v-if="active === 'knowledge_bases'" class="page-view knowledge-page">
+          <div class="toolbar">
+            <div><h2>知识库配置</h2><p class="page-subtitle">按知识库项目绑定 Dify 已配置知识库，查看文档并检索命中片段。</p></div>
+            <a-button type="primary" @click="openCreateKnowledgeBase"><template #icon><PlusOutlined /></template>新增绑定</a-button>
+          </div>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="项目">
+              <a-select v-model:value="knowledgeSearch.project_id" placeholder="请选择项目" allow-clear>
+                <a-select-option v-for="p in knowledgeProjects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item label="知识库名称"><a-input v-model:value="knowledgeSearch.name" placeholder="请输入知识库名称" allow-clear @keyup.enter="searchKnowledgeBases" /></a-form-item>
+            <a-form-item label="状态">
+              <a-select v-model:value="knowledgeSearch.status" placeholder="请选择状态" allow-clear>
+                <a-select-option value="active">启用</a-select-option>
+                <a-select-option value="disabled">禁用</a-select-option>
+              </a-select>
+            </a-form-item>
+            <div class="search-actions"><a-button type="primary" @click="searchKnowledgeBases">搜索</a-button><a-button @click="resetKnowledgeSearch">重置</a-button></div>
+          </a-form>
+          <a-table class="knowledge-base-table" table-layout="fixed" :pagination="false" :data-source="knowledgeBases" :scroll="{ x: 1168 }">
+            <a-table-column title="编号" width="56" class-name="knowledge-number-column"><template #default="{ index }">{{ knowledgeSerialNumber(index) }}</template></a-table-column>
+            <a-table-column data-index="project_name" title="项目" width="170" />
+            <a-table-column title="知识库名称"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
+            <a-table-column title="Dify Dataset ID" width="180">
+              <template #default="{ record: row }">
+                <a-tooltip :title="row.dify_dataset_id">
+                  <TableText :value="maskDatasetId(row.dify_dataset_id)" :max-width="180" />
+                </a-tooltip>
+              </template>
+            </a-table-column>
+            <a-table-column title="状态" width="72" class-name="knowledge-status-column"><template #default="{ record: row }"><a-tag :color="row.status === 'active' ? 'success' : 'warning'">{{ row.status === 'active' ? '启用' : '禁用' }}</a-tag></template></a-table-column>
+            <a-table-column data-index="update_date" title="更新时间" width="170" />
+            <a-table-column title="操作" width="330" fixed="right">
+              <template #default="{ record: row }">
+                <div class="table-actions">
+                  <a-button size="small" @click="openKnowledgeDocuments(row)">文档</a-button>
+                  <a-button size="small" type="primary" :disabled="row.status !== 'active'" @click="openKnowledgeRetrieve(row)">检索</a-button>
+                  <a-button size="small" @click="checkKnowledgeBase(row)">测试</a-button>
+                  <a-button size="small" @click="openEditKnowledgeBase(row)">编辑</a-button>
+                  <a-button size="small" danger @click="deleteKnowledgeBase(row)">删除</a-button>
+                </div>
+              </template>
+            </a-table-column>
+          </a-table>
+          <div class="pagination"><a-pagination :show-total="paginationTotal" show-less-items :current="knowledgePagination.page" :page-size="knowledgePagination.pageSize" :total="knowledgePagination.total" @change="changeKnowledgePage" /></div>
+
+          <a-modal v-model:open="knowledgeFormVisible" :title="knowledgeForm.id ? '编辑知识库绑定' : '新增知识库绑定'" width="560px" @after-close="resetKnowledgeForm">
+            <a-form layout="vertical">
+              <a-form-item label="项目" required><a-select v-model:value="knowledgeForm.project_id" placeholder="请选择项目"><a-select-option v-for="p in activeKnowledgeProjects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option></a-select></a-form-item>
+              <a-form-item label="知识库名称" required><a-input v-model:value="knowledgeForm.name" placeholder="例如：支付业务规则" /></a-form-item>
+              <a-form-item label="Dify 知识库" required>
+                <a-select
+                  v-model:value="knowledgeForm.dify_dataset_id"
+                  show-search
+                  allow-clear
+                  :loading="difyDatasetsLoading"
+                  placeholder="请选择 Dify 知识库"
+                  :filter-option="filterDifyDatasetOption"
+                  @dropdown-visible-change="handleDifyDatasetDropdown"
+                  @change="changeDifyDataset"
+                >
+                  <a-select-option v-for="item in difyDatasets" :key="item.id" :value="item.id" :title="item.name">
+                    {{ item.name }}
+                  </a-select-option>
+                </a-select>
+                <div v-if="knowledgeForm.dify_dataset_id" class="form-tip">Dataset ID：{{ knowledgeForm.dify_dataset_id }}</div>
+              </a-form-item>
+              <a-form-item label="状态"><a-select v-model:value="knowledgeForm.status"><a-select-option value="active">启用</a-select-option><a-select-option value="disabled">禁用</a-select-option></a-select></a-form-item>
+              <a-form-item label="备注"><a-textarea v-model:value="knowledgeForm.description" :auto-size="{ minRows: 2, maxRows: 4 }" placeholder="可记录知识库用途或维护人" /></a-form-item>
+            </a-form>
+            <template #footer>
+              <a-button @click="knowledgeFormVisible = false">取消</a-button>
+              <a-button :loading="knowledgeChecking" @click="checkKnowledgeForm">连接测试</a-button>
+              <a-button type="primary" @click="saveKnowledgeBase">确认</a-button>
+            </template>
+          </a-modal>
+
+          <a-drawer v-model:open="knowledgeDocumentsVisible" width="760" :title="`${selectedKnowledgeBase?.name || '知识库'}文档`">
+            <a-form class="search-form compact-search-form" layout="vertical">
+              <a-form-item label="关键词"><a-input v-model:value="knowledgeDocumentSearch.keyword" placeholder="请输入文档关键词" allow-clear @keyup.enter="searchKnowledgeDocuments" /></a-form-item>
+                            <a-form-item label="索引状态">
+                <a-select v-model:value="knowledgeDocumentSearch.status" placeholder="请选择索引状态" allow-clear>
+                  <a-select-option value="completed">索引完成</a-select-option>
+                  <a-select-option value="indexing">索引中</a-select-option>
+                  <a-select-option value="processing">处理中</a-select-option>
+                  <a-select-option value="error">索引异常</a-select-option>
+                  <a-select-option value="failed">索引失败</a-select-option>
+                  <a-select-option value="paused">已暂停</a-select-option>
+                </a-select>
+              </a-form-item>
+              <div class="search-actions"><a-button type="primary" @click="searchKnowledgeDocuments">搜索</a-button><a-button @click="resetKnowledgeDocuments">重置</a-button></div>
+            </a-form>
+            <a-table :pagination="false" :data-source="knowledgeDocuments" :loading="knowledgeDocumentsLoading" :scroll="{ x: 720 }">
+              <a-table-column title="文档名称"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
+              <a-table-column data-index="indexing_status" title="索引状态" width="120" />
+              <a-table-column title="启用" width="80"><template #default="{ record: row }"><a-tag :color="row.enabled ? 'success' : 'warning'">{{ row.enabled ? '是' : '否' }}</a-tag></template></a-table-column>
+              <a-table-column data-index="word_count" title="字数" width="90" />
+              <a-table-column data-index="hit_count" title="命中" width="90" />
+              <a-table-column data-index="update_date" title="更新时间" width="160" />
+            </a-table>
+            <div class="pagination"><a-pagination :show-total="paginationTotal" show-less-items :current="knowledgeDocumentPagination.page" :page-size="knowledgeDocumentPagination.pageSize" :total="knowledgeDocumentPagination.total" @change="changeKnowledgeDocumentPage" /></div>
+          </a-drawer>
+
+          <a-modal v-model:open="knowledgeRetrieveVisible" :title="`${selectedKnowledgeBase?.name || '知识库'}检索`" width="780px">
+            <a-form layout="vertical">
+              <a-form-item label="检索内容" required><a-textarea v-model:value="knowledgeRetrieveForm.query" :auto-size="{ minRows: 3, maxRows: 6 }" placeholder="请输入要检索的问题或关键词" /></a-form-item>
+              <div class="knowledge-retrieve-options">
+                <a-form-item label="Top K"><a-input-number v-model:value="knowledgeRetrieveForm.top_k" :min="1" :max="10" /></a-form-item>
+                <a-form-item label="分数阈值"><a-input-number v-model:value="knowledgeRetrieveForm.score_threshold" :min="0" :max="1" :step="0.05" placeholder="可选" /></a-form-item>
+              </div>
+            </a-form>
+            <div v-if="knowledgeRetrieveResult.length" class="knowledge-hit-list">
+              <div v-for="(hit, index) in knowledgeRetrieveResult" :key="hit.segment_id || index" class="knowledge-hit-item">
+                <div class="knowledge-hit-head"><strong>命中 {{ index + 1 }}</strong><a-tag color="blue">score {{ formatScore(hit.score) }}</a-tag><span>{{ hit.document_name || hit.document_id || '-' }}</span></div>
+                <p>{{ hit.content }}</p>
+              </div>
+            </div>
+            <a-empty v-else-if="knowledgeRetrieved" description="暂无命中结果" />
+            <template #footer><a-button @click="knowledgeRetrieveVisible = false">关闭</a-button><a-button type="primary" :loading="knowledgeRetrieving" @click="runKnowledgeRetrieve">开始检索</a-button></template>
+          </a-modal>
+        </section>
+
+        <section v-if="active === 'knowledge_workflows'" class="page-view knowledge-page">
+          <div class="toolbar">
+            <div><h2>工作流配置</h2><p class="page-subtitle">绑定 Dify Workflow，供知识问答页面调用。</p></div>
+            <a-button type="primary" @click="openCreateKnowledgeWorkflow"><template #icon><PlusOutlined /></template>新增工作流</a-button>
+          </div>
+          <a-form class="search-form" layout="vertical">
+            <a-form-item label="工作流名称"><a-input v-model:value="knowledgeWorkflowSearch.name" placeholder="请输入工作流名称" allow-clear @keyup.enter="searchKnowledgeWorkflows" /></a-form-item>
+            <a-form-item label="状态">
+              <a-select v-model:value="knowledgeWorkflowSearch.status" placeholder="请选择状态" allow-clear>
+                <a-select-option value="active">启用</a-select-option>
+                <a-select-option value="disabled">禁用</a-select-option>
+              </a-select>
+            </a-form-item>
+            <div class="search-actions"><a-button type="primary" @click="searchKnowledgeWorkflows">搜索</a-button><a-button @click="resetKnowledgeWorkflowSearch">重置</a-button></div>
+          </a-form>
+          <a-table :pagination="false" :data-source="knowledgeWorkflowList" :scroll="{ x: 960 }">
+            <a-table-column title="编号" width="70"><template #default="{ index }">{{ knowledgeWorkflowSerialNumber(index) }}</template></a-table-column>
+            <a-table-column title="工作流名称"><template #default="{ record: row }"><TableText :value="row.name" /></template></a-table-column>
+            <a-table-column title="API 地址"><template #default="{ record: row }"><TableText :value="row.api_base_url" /></template></a-table-column>
+            <a-table-column title="API Key 环境变量"><template #default="{ record: row }"><TableText :value="row.api_key_env" /></template></a-table-column>
+            <a-table-column title="状态" width="90"><template #default="{ record: row }"><a-tag :color="row.status === 'active' ? 'success' : 'warning'">{{ row.status === 'active' ? '启用' : '禁用' }}</a-tag></template></a-table-column>
+            <a-table-column data-index="update_date" title="更新时间" width="170" />
+            <a-table-column title="操作" width="260" fixed="right">
+              <template #default="{ record: row }">
+                <div class="table-actions">
+                  <a-button size="small" :loading="knowledgeWorkflowCheckingId === row.id" @click="checkKnowledgeWorkflow(row)">测试</a-button>
+                  <a-button size="small" @click="openEditKnowledgeWorkflow(row)">编辑</a-button>
+                  <a-button size="small" danger @click="deleteKnowledgeWorkflow(row)">删除</a-button>
+                </div>
+              </template>
+            </a-table-column>
+          </a-table>
+          <div class="pagination"><a-pagination :show-total="paginationTotal" show-less-items :current="knowledgeWorkflowPagination.page" :page-size="knowledgeWorkflowPagination.pageSize" :total="knowledgeWorkflowPagination.total" @change="changeKnowledgeWorkflowPage" /></div>
+
+          <a-modal v-model:open="knowledgeWorkflowFormVisible" :title="knowledgeWorkflowForm.id ? '编辑工作流配置' : '新增工作流配置'" width="560px" @after-close="resetKnowledgeWorkflowForm">
+            <a-form layout="vertical">
+              <a-form-item label="工作流名称" required><a-input v-model:value="knowledgeWorkflowForm.name" placeholder="例如：FAF知识库问答工作流" /></a-form-item>
+              <a-form-item label="Dify API 地址"><a-input v-model:value="knowledgeWorkflowForm.api_base_url" placeholder="留空使用全局 DIFY_API_BASE_URL" /></a-form-item>
+              <a-form-item label="API Key 环境变量名" required><a-select v-model:value="knowledgeWorkflowForm.api_key_env" placeholder="请选择 API Key 配置" show-search option-filter-prop="label" @dropdown-visible-change="handleWorkflowApiKeyDropdown"><a-select-option v-for="item in workflowApiKeyOptions" :key="item.env_key" :value="item.env_key" :label="`${item.display_name} ${item.env_key}`">{{ item.display_name }}（{{ item.env_key }}）<span class="option-status">{{ item.configured ? '' : '未配置' }}</span></a-select-option></a-select></a-form-item>
+              <a-form-item label="状态"><a-select v-model:value="knowledgeWorkflowForm.status"><a-select-option value="active">启用</a-select-option><a-select-option value="disabled">禁用</a-select-option></a-select></a-form-item>
+              <a-form-item label="备注"><a-textarea v-model:value="knowledgeWorkflowForm.description" :auto-size="{ minRows: 2, maxRows: 4 }" placeholder="可记录工作流用途或 Dify 配置说明" /></a-form-item>
+            </a-form>
+            <template #footer>
+              <a-button @click="knowledgeWorkflowFormVisible = false">取消</a-button>
+              <a-button type="primary" @click="saveKnowledgeWorkflow">确认</a-button>
+            </template>
+          </a-modal>
+        </section>
+
+        <section v-if="active === 'knowledge_qa'" class="page-view knowledge-qa-page">
+          <div class="toolbar">
+            <div><h2>知识问答</h2><p class="page-subtitle">基于 Dify Workflow 进行知识库问答，同一会话内支持连续追问。</p></div>
+            <a-button type="primary" @click="openCreateQaSession"><template #icon><PlusOutlined /></template>新建会话</a-button>
+          </div>
+          <div class="qa-shell">
+            <aside class="qa-sessions">
+              <div class="qa-session-filter">
+                <a-select v-model:value="qaSessionSearch.project_id" placeholder="项目" allow-clear @change="searchQaSessions">
+                  <a-select-option v-for="p in knowledgeProjects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option>
+                </a-select>
+              </div>
+              <div class="qa-session-list">
+                <button v-for="session in qaSessions" :key="session.id" class="qa-session-item" :class="{ active: selectedQaSession?.id === session.id }" @click="selectQaSession(session)">
+                  <strong>{{ session.title }}</strong>
+                  <span>{{ session.project_name }} / {{ session.workflow_name }}</span>
+                </button>
+                <a-empty v-if="!qaSessions.length" description="暂无会话" />
+              </div>
+            </aside>
+            <main class="qa-chat">
+              <div v-if="selectedQaSession" class="qa-chat-head">
+                <div><strong>{{ selectedQaSession.title }}</strong><span>{{ selectedQaSession.project_name }} / {{ selectedQaSession.workflow_name }}</span></div>
+                <a-button size="small" danger @click="deleteQaSession(selectedQaSession)">删除会话</a-button>
+              </div>
+              <div ref="qaMessagesRef" class="qa-messages">
+                <template v-if="selectedQaSession">
+                  <div v-for="msg in qaMessages" :key="msg.id" class="qa-message" :class="`qa-message-${msg.role}`">
+                    <div class="qa-message-role">{{ msg.role === 'user' ? '我' : '助手' }}</div>
+                    <div class="qa-message-content">{{ msg.error_message || msg.content }}</div>
+                  </div>
+                  <a-empty v-if="!qaMessages.length" description="当前会话暂无消息" />
+                </template>
+                <a-empty v-else description="请选择或新建会话" />
+              </div>
+              <div class="qa-input-bar">
+                <a-textarea v-model:value="qaQuestion" :disabled="!selectedQaSession" :auto-size="{ minRows: 2, maxRows: 5 }" placeholder="请输入问题" @keydown.ctrl.enter.prevent="askKnowledgeQa" />
+                <a-button type="primary" :disabled="!selectedQaSession" :loading="qaAsking" @click="askKnowledgeQa">发送</a-button>
+              </div>
+            </main>
+          </div>
+
+          <a-modal v-model:open="qaSessionFormVisible" title="新建知识问答会话" width="520px" @after-close="resetQaSessionForm">
+            <a-form layout="vertical">
+              <a-form-item label="项目" required><a-select v-model:value="qaSessionForm.project_id" placeholder="请选择项目" @change="changeQaSessionProject"><a-select-option v-for="p in activeKnowledgeProjects" :key="p.id" :value="p.id">{{ p.name }}</a-select-option></a-select></a-form-item>
+              <a-form-item label="工作流" required><a-select v-model:value="qaSessionForm.workflow_id" placeholder="请选择工作流"><a-select-option v-for="w in qaSessionWorkflows" :key="w.id" :value="w.id">{{ w.name }}</a-select-option></a-select></a-form-item>
+              <a-form-item label="会话标题"><a-input v-model:value="qaSessionForm.title" placeholder="留空则用第一条问题自动命名" /></a-form-item>
+            </a-form>
+            <template #footer><a-button @click="qaSessionFormVisible = false">取消</a-button><a-button type="primary" @click="createQaSession">确认</a-button></template>
+          </a-modal>
+        </section>
         <section v-if="active === 'logs'" class="page-view">
           <div class="toolbar"><h2>日志中心</h2></div>
           <a-tabs v-model:active-key="activeLogTab" class="log-tabs" @change="changeLogTab">
@@ -1908,9 +2555,9 @@
                 </div>
               </a-form>
               <a-table :pagination="false" :data-source="executionLogs" :scroll="{ x: 1160 }" class="log-table">
-                <a-table-column data-index="target_name" title="计划/目标" width="220" class-name="log-ellipsis-cell" />
-                <a-table-column data-index="case_name" title="用例" width="220" class-name="log-ellipsis-cell" />
-                <a-table-column data-index="api_name" title="接口" width="200" class-name="log-ellipsis-cell" />
+                <a-table-column title="计划/目标"><template #default="{ record: row }"><TableText :value="row.target_name" /></template></a-table-column>
+                <a-table-column title="用例"><template #default="{ record: row }"><TableText :value="row.case_name" /></template></a-table-column>
+                <a-table-column title="接口"><template #default="{ record: row }"><TableText :value="row.api_name" /></template></a-table-column>
                 <a-table-column data-index="environment_name" title="环境" width="130" />
                 <a-table-column title="状态" width="100">
                   <template #default="{ record: row }"><a-tag :color="executionStatusColor(row.status)">{{ executionStatusText(row.status) }}</a-tag></template>
@@ -1944,15 +2591,13 @@
                 </div>
               </a-form>
               <a-table :pagination="false" :data-source="exceptionLogs" :scroll="{ x: 1060 }" class="log-table">
-                <a-table-column data-index="path" title="请求路径" width="280" class-name="log-ellipsis-cell" />
+                <a-table-column title="请求路径"><template #default="{ record: row }"><TableText :value="row.path" /></template></a-table-column>
                 <a-table-column data-index="method" title="方法" width="90" />
-                <a-table-column data-index="error_type" title="异常类型" width="180" class-name="log-ellipsis-cell" />
+                <a-table-column title="异常类型"><template #default="{ record: row }"><TableText :value="row.error_type" /></template></a-table-column>
                 <a-table-column title="结果" width="90">
                   <template #default="{ record: row }"><a-tag color="error">{{ operationResultText(row.result) }}</a-tag></template>
                 </a-table-column>
-                <a-table-column title="异常摘要" width="360" class-name="log-ellipsis-cell">
-                  <template #default="{ record: row }"><span :title="row.error_message || '-'">{{ row.error_message || '-' }}</span></template>
-                </a-table-column>
+                <a-table-column title="异常摘要"><template #default="{ record: row }"><TableText :value="row.error_message" /></template></a-table-column>
                 <a-table-column data-index="ip" title="IP" width="130" />
                 <a-table-column data-index="create_date" title="时间" width="160" />
                 <a-table-column title="操作" width="90">
@@ -2037,7 +2682,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, defineComponent, h, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import { basicSetup } from 'codemirror'
@@ -2053,11 +2698,12 @@ import {
   CloudServerOutlined,
   DashboardOutlined,
   DeleteOutlined,
+  DesktopOutlined,
   DownOutlined,
   EditOutlined,
+  ExperimentOutlined,
   EyeOutlined,
   FileTextOutlined,
-  FolderOpenOutlined,
   LockOutlined,
   LoginOutlined,
   LogoutOutlined,
@@ -2076,6 +2722,7 @@ import {
   UserOutlined
 } from '@ant-design/icons-vue'
 import { api, type User } from './api'
+import TableText from './components/TableText.vue'
 
 const appTheme = {
   token: {
@@ -2156,6 +2803,7 @@ type UiCaseFormState = {
   step_timeout_ms: number
   allow_ai_actions: boolean
   status: string
+  browser_channel: 'chromium' | 'chrome' | 'msedge'
   headless: boolean
   wait_until: 'domcontentloaded' | 'load' | 'networkidle'
   wait_after_load_ms: number
@@ -2356,39 +3004,69 @@ const menuMeta: Record<string, AppTab> = {
   apis: { name: 'apis', label: '接口管理', closable: true },
   mocks: { name: 'mocks', label: 'Mock服务', closable: true },
   cases: { name: 'cases', label: '用例管理', closable: true },
-  'ui-tests': { name: 'ui-tests', label: 'UI测试', closable: true },
+  'ui-cases': { name: 'ui-cases', label: '用例管理', closable: true },
+  'ui-reports': { name: 'ui-reports', label: 'UI测试报告', closable: true },
   execute: { name: 'execute', label: '测试计划', closable: true },
   reports: { name: 'reports', label: '报告中心', closable: true },
+  ai_cases: { name: 'ai_cases', label: 'AI生成用例', closable: true },
+  knowledge_projects: { name: 'knowledge_projects', label: '项目配置', closable: true },
+  knowledge_bases: { name: 'knowledge_bases', label: '知识库配置', closable: true },
+  knowledge_workflows: { name: 'knowledge_workflows', label: '工作流配置', closable: true },
+  knowledge_qa: { name: 'knowledge_qa', label: '知识问答', closable: true },
   logs: { name: 'logs', label: '日志中心', closable: true },
   accounts: { name: 'accounts', label: '用户管理', closable: true },
-  roles: { name: 'roles', label: '角色管理', closable: true }
+  roles: { name: 'roles', label: '角色管理', closable: true },
+  tickets: { name: 'tickets', label: '工单管理', closable: true },
+  api_key_configs: { name: 'api_key_configs', label: 'API Key配置', closable: true }
 }
 
 const menuTree: MenuNode[] = [
-  { key: 'dashboard', label: menuMeta.dashboard.label, icon: DashboardOutlined },
   {
-    key: 'project-env',
-    label: '项目环境',
-    icon: FolderOpenOutlined,
+    key: 'interface-test',
+    label: '接口测试',
+    icon: ApiOutlined,
     children: [
+      { key: 'dashboard', label: menuMeta.dashboard.label, icon: DashboardOutlined },
       { key: 'projects', label: menuMeta.projects.label, icon: ProjectOutlined },
-      { key: 'environments', label: menuMeta.environments.label, icon: CloudServerOutlined }
+      { key: 'environments', label: menuMeta.environments.label, icon: CloudServerOutlined },
+      { key: 'apis', label: menuMeta.apis.label, icon: ApiOutlined },
+      { key: 'mocks', label: menuMeta.mocks.label, icon: ExperimentOutlined },
+      { key: 'cases', label: menuMeta.cases.label, icon: FileTextOutlined },
+      { key: 'execute', label: menuMeta.execute.label, icon: PlayCircleOutlined },
+      { key: 'reports', label: menuMeta.reports.label, icon: BarChartOutlined },
+      { key: 'logs', label: menuMeta.logs.label, icon: ProfileOutlined }
     ]
   },
-  { key: 'apis', label: menuMeta.apis.label, icon: ApiOutlined },
-  { key: 'mocks', label: menuMeta.mocks.label, icon: ApiOutlined },
-  { key: 'cases', label: menuMeta.cases.label, icon: FileTextOutlined },
-  { key: 'ui-tests', label: menuMeta['ui-tests'].label, icon: PlayCircleOutlined },
-  { key: 'execute', label: menuMeta.execute.label, icon: PlayCircleOutlined },
-  { key: 'reports', label: menuMeta.reports.label, icon: BarChartOutlined },
-  { key: 'logs', label: menuMeta.logs.label, icon: ProfileOutlined },
+  {
+    key: 'ui-tests',
+    label: 'UI测试',
+    icon: DesktopOutlined,
+    children: [
+      { key: 'ui-cases', label: menuMeta['ui-cases'].label, icon: FileTextOutlined },
+      { key: 'ui-reports', label: menuMeta['ui-reports'].label, icon: BarChartOutlined }
+    ]
+  },
+  { key: 'ai_cases', label: menuMeta.ai_cases.label, icon: CheckCircleOutlined },
+  {
+    key: 'knowledge',
+    label: '知识库',
+    icon: FileTextOutlined,
+    children: [
+      { key: 'knowledge_projects', label: menuMeta.knowledge_projects.label, icon: ProjectOutlined },
+      { key: 'knowledge_bases', label: menuMeta.knowledge_bases.label, icon: FileTextOutlined },
+      { key: 'knowledge_workflows', label: menuMeta.knowledge_workflows.label, icon: PlayCircleOutlined },
+      { key: 'knowledge_qa', label: menuMeta.knowledge_qa.label, icon: CheckCircleOutlined }
+    ]
+  },
   {
     key: 'system',
     label: '系统管理',
     icon: SettingOutlined,
     children: [
       { key: 'accounts', label: menuMeta.accounts.label, icon: TeamOutlined },
-      { key: 'roles', label: menuMeta.roles.label, icon: SettingOutlined }
+      { key: 'roles', label: menuMeta.roles.label, icon: SettingOutlined },
+      { key: 'tickets', label: menuMeta.tickets.label, icon: FileTextOutlined },
+      { key: 'api_key_configs', label: menuMeta.api_key_configs.label, icon: LockOutlined }
     ]
   }
 ]
@@ -2398,7 +3076,7 @@ function restoreTabs(): AppTab[] {
     const raw = JSON.parse(localStorage.getItem('opened_tabs') || '[]')
     if (Array.isArray(raw)) {
       const restored = raw
-        .map((tab: any) => menuMeta[tab?.name])
+        .map((tab: any) => menuMeta[tab?.name === 'ui-tests' ? 'ui-cases' : tab?.name])
         .filter(Boolean)
       const unique = Array.from(new Map(restored.map(tab => [tab.name, tab])).values())
       if (unique.length > 0) {
@@ -2410,7 +3088,8 @@ function restoreTabs(): AppTab[] {
 }
 
 function restoreActive(tabs: AppTab[]) {
-  const saved = localStorage.getItem('active_menu') || 'dashboard'
+  const savedMenu = localStorage.getItem('active_menu') || 'dashboard'
+  const saved = savedMenu === 'ui-tests' ? 'ui-cases' : savedMenu
   return tabs.some(tab => tab.name === saved) ? saved : 'dashboard'
 }
 
@@ -2422,6 +3101,7 @@ const isMobile = ref(false)
 const loginLoading = ref(false)
 
 const me = ref<User | null>(null)
+const sessionExpired = ref(false)
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 const users = ref<any[]>([])
 const roles = ref<any[]>([])
@@ -2438,7 +3118,10 @@ const cases = ref<any[]>([])
 const caseList = ref<any[]>([])
 const executions = ref<any[]>([])
 const reportList = ref<any[]>([])
+const uiReportList = ref<any[]>([])
 const planList = ref<any[]>([])
+const selectedPlanIds = ref<number[]>([])
+const batchExecutingPlans = ref(false)
 const logs = ref<any[]>([])
 const operationLogs = ref<any[]>([])
 const executionLogs = ref<any[]>([])
@@ -2466,7 +3149,42 @@ const planSearch = reactive({ project_id: undefined as number | undefined, api_i
 const planPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const reportSearch = reactive({ name: '', status: '' })
 const reportPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const uiReportSearch = reactive({ name: '', status: '' })
+const uiReportPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const aiGenerationPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const knowledgeProjectSearch = reactive({ name: '', status: '' })
+const knowledgeProjectPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const knowledgeSearch = reactive({ project_id: undefined as number | undefined, name: '', status: '' })
+const knowledgePagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const knowledgeDocumentSearch = reactive({ keyword: '', status: '' })
+const knowledgeDocumentPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const knowledgeWorkflowSearch = reactive({ name: '', status: '' })
+const knowledgeWorkflowPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const qaSessionSearch = reactive({ project_id: undefined as number | undefined })
+const ticketSearch = reactive({ title: '', category: '', status: '' })
+const apiKeyConfigSearch = reactive({ keyword: '', status: '' })
+const ticketPagination = reactive({ page: 1, pageSize: 10, total: 0 })
+const apiKeyConfigPagination = reactive({ page: 1, pageSize: 10, total: 0 })
 const selectedReportIds = ref<number[]>([])
+const selectedUiReportIds = ref<number[]>([])
+const aiGenerations = ref<any[]>([])
+const knowledgeProjects = ref<any[]>([])
+const knowledgeProjectList = ref<any[]>([])
+const knowledgeBases = ref<any[]>([])
+const knowledgeDocuments = ref<any[]>([])
+const difyDatasets = ref<any[]>([])
+const knowledgeWorkflows = ref<any[]>([])
+const knowledgeWorkflowList = ref<any[]>([])
+const qaSessions = ref<any[]>([])
+const qaMessages = ref<any[]>([])
+const tickets = ref<any[]>([])
+const apiKeyConfigs = ref<any[]>([])
+const apiKeyConfigList = ref<any[]>([])
+const workflowApiKeyOptions = ref<any[]>([])
+const aiSourceFiles = ref<any[]>([])
+const aiLastUploadedFilename = ref('')
+const aiGenerating = ref(false)
+let aiGenerationPoller: number | undefined
 const activeLogTab = ref('operations')
 const operationLogSearch = reactive({ module: '', action: '', result: '', start_time: '', end_time: '' })
 const executionLogSearch = reactive({ name: '', status: '' })
@@ -2479,6 +3197,24 @@ const createUserDialogVisible = ref(false)
 const editUserDialogVisible = ref(false)
 const createRoleDialogVisible = ref(false)
 const editRoleDialogVisible = ref(false)
+const rolePermissionDialogVisible = ref(false)
+const createTicketVisible = ref(false)
+const ticketDetailVisible = ref(false)
+const processTicketVisible = ref(false)
+const apiKeyConfigFormVisible = ref(false)
+const knowledgeFormVisible = ref(false)
+const knowledgeProjectFormVisible = ref(false)
+const knowledgeDocumentsVisible = ref(false)
+const knowledgeRetrieveVisible = ref(false)
+const knowledgeDocumentsLoading = ref(false)
+const knowledgeChecking = ref(false)
+const difyDatasetsLoading = ref(false)
+const knowledgeRetrieving = ref(false)
+const knowledgeRetrieved = ref(false)
+const knowledgeWorkflowFormVisible = ref(false)
+const qaSessionFormVisible = ref(false)
+const knowledgeWorkflowCheckingId = ref<number | null>(null)
+const qaAsking = ref(false)
 const createProjectDialogVisible = ref(false)
 const editProjectDialogVisible = ref(false)
 const createEnvironmentDialogVisible = ref(false)
@@ -2491,6 +3227,7 @@ const aiStepDialogVisible = ref(false)
 const uiPickerDialogVisible = ref(false)
 const uiExecutionDetailVisible = ref(false)
 const aiSettingDialogVisible = ref(false)
+const aiSettingTesting = ref(false)
 const changePasswordDialogVisible = ref(false)
 const caseBodyDialogVisible = ref(false)
 const caseDetailDialogVisible = ref(false)
@@ -2504,6 +3241,26 @@ const uiExecutionDetail = reactive<any>({ task: null, results: [] })
 const uiArtifactObjectUrls = reactive<Record<string, string>>({})
 const uiArtifactLoading = new Set<string>()
 const uiArtifactFailed = new Set<string>()
+const aiSettings = ref<any[]>([])
+const uiExecutionDetailTime = computed(() => {
+  const task = uiExecutionDetail.task || {}
+  const started = task.started_at || task.create_date || ''
+  const ended = task.ended_at || task.update_date || ''
+  if (started && ended && started !== ended) return `${started} 至 ${ended}`
+  return started || ended || '-'
+})
+const currentUiExecutionError = computed(() => {
+  const summary = uiExecutionDetail.task?.summary || {}
+  if (summary.error) return String(summary.error)
+  if (summary.message && ['failed', 'error', 'stopped'].includes(String(summary.status || uiExecutionDetail.task?.status || ''))) {
+    return String(summary.message)
+  }
+  for (const result of uiExecutionDetail.results || []) {
+    const message = uiResultErrorMessage(result)
+    if (message) return message
+  }
+  return ''
+})
 const uiPicker = reactive({
   sessionId: '',
   status: '',
@@ -2517,10 +3274,12 @@ const uiPicker = reactive({
   targetForm: null as UiCaseFormState | null,
   mode: 'operate',
   recordAction: 'click' as UiRecordAction,
+  recordActionAuto: true,
   inputText: '',
   screenshotUrl: '',
-  viewportWidth: 1600,
-  viewportHeight: 900,
+  viewportWidth: 1366,
+  viewportHeight: 1050,
+  zoomPercent: 100,
   loading: false
 })
 const aiStepGenerator = reactive({
@@ -2530,6 +3289,10 @@ const aiStepGenerator = reactive({
   generatedSteps: [] as UiStepRow[],
   loading: false
 })
+const uiStepDrag = reactive({
+  form: null as UiCaseFormState | null,
+  index: -1
+})
 let uiPickerTimer: number | undefined
 const operationLogDetail = ref<any>(null)
 const executionLogDetail = ref<any>(null)
@@ -2537,6 +3300,21 @@ const userForm = reactive({ username: '', real_name: '', role: 'tester' })
 const editUserForm = reactive({ id: undefined as number | undefined, username: '', real_name: '', role: 'tester' })
 const roleForm = reactive({ code: '', name: '', description: '', status: 'active', menus: [] as string[] })
 const editRoleForm = reactive({ id: undefined as number | undefined, code: '', name: '', description: '', status: 'active', menus: [] as string[], is_builtin: false })
+const rolePermissionForm = reactive({ id: undefined as number | undefined, name: '', description: '', status: 'active', menus: [] as string[] })
+const ticketForm = reactive({ category: 'feature', title: '', content: '', files: [] as any[] })
+const ticketProcessForm = reactive({ status: 'processing', reply: '' })
+const apiKeyConfigForm = reactive({ id: undefined as number | undefined, env_key: '', display_name: '', status: 'active', description: '' })
+const ticketDetail = ref<any>(null)
+const ticketSubmitting = ref(false)
+const selectedKnowledgeBase = ref<any>(null)
+const knowledgeProjectForm = reactive({ id: undefined as number | undefined, name: '', description: '', status: 'active' })
+const knowledgeForm = reactive({ id: undefined as number | undefined, project_id: undefined as number | undefined, name: '', dify_dataset_id: '', status: 'active', description: '' })
+const knowledgeRetrieveForm = reactive({ query: '', top_k: 5, score_threshold: undefined as number | undefined })
+const knowledgeRetrieveResult = ref<any[]>([])
+const selectedQaSession = ref<any>(null)
+const knowledgeWorkflowForm = reactive({ id: undefined as number | undefined, name: '', api_base_url: '', api_key_env: '', status: 'active', description: '' })
+const qaSessionForm = reactive({ project_id: undefined as number | undefined, workflow_id: undefined as number | undefined, title: '' })
+const qaQuestion = ref('')
 const changePasswordForm = reactive({ old_password: '', new_password: '', confirm_password: '' })
 const projectForm = reactive({ name: '', description: '' })
 const editProjectForm = reactive({ id: undefined as number | undefined, name: '', description: '' })
@@ -2589,6 +3367,7 @@ const uiCaseForm = reactive<UiCaseFormState>({
   step_timeout_ms: 10000,
   allow_ai_actions: true,
   status: 'active',
+  browser_channel: 'chromium',
   headless: true,
   wait_until: 'networkidle',
   wait_after_load_ms: 500,
@@ -2609,16 +3388,20 @@ const editUiCaseForm = reactive<UiCaseFormState>({
   step_timeout_ms: 10000,
   allow_ai_actions: true,
   status: 'active',
+  browser_channel: 'chromium',
   headless: true,
   wait_until: 'networkidle',
   wait_after_load_ms: 500,
   steps: []
 })
 const aiSettingForm = reactive({
+  id: undefined as number | undefined,
+  name: '',
   provider_url: '',
   model_name: '',
   api_key: '',
   status: 'disabled',
+  is_default: false,
   description: ''
 })
 const caseForm = reactive({
@@ -2635,20 +3418,31 @@ const caseForm = reactive({
 const execForm = reactive({ project_id: undefined as number | undefined, environment_id: undefined as number | undefined, target_id: undefined as number | undefined })
 const apiEditors = reactive<Record<string, ApiEditor>>({})
 const planEditors = reactive<Record<string, PlanEditor>>({})
+const UI_CASE_CREATE_TAB = 'ui-case-create'
+const UI_CASE_EDIT_PREFIX = 'ui-case-edit-'
 const avatarText = computed(() => me.value?.username.slice(0, 1).toUpperCase() || 'U')
 const activeApiEditor = computed(() => apiEditors[active.value])
 const activePlanEditor = computed(() => planEditors[active.value])
+const activeUiCaseEditor = computed(() => {
+  if (active.value === UI_CASE_CREATE_TAB) {
+    return { label: '新增UI用例', form: uiCaseForm, mode: 'create' as const, tabName: UI_CASE_CREATE_TAB }
+  }
+  if (active.value.startsWith(UI_CASE_EDIT_PREFIX) && editUiCaseForm.id) {
+    return { label: `编辑UI用例：${editUiCaseForm.name || editUiCaseForm.id}`, form: editUiCaseForm, mode: 'edit' as const, tabName: active.value }
+  }
+  return null
+})
 const uiPickerSteps = computed(() => uiPicker.targetForm?.steps || [])
 const uiPickerSelectOptions = computed(() => {
   const options = uiPicker.pendingResult?.summary?.options
   if (!Array.isArray(options)) return []
   return options
     .map((option: any, index: number) => {
-      const rawValue = option?.value ?? option?.label ?? option?.text ?? option?.name ?? ''
-      const rawLabel = option?.label ?? option?.text ?? option?.name ?? option?.value ?? ''
-      const originalValue = String(rawValue ?? '').trim()
-      const label = String(rawLabel ?? originalValue).trim()
-      const value = label || originalValue
+      const rawValue = sanitizeUiOptionText(option?.value ?? option?.text ?? option?.name ?? '')
+      const rawLabel = sanitizeUiOptionText(option?.label ?? option?.text ?? option?.name ?? '')
+      const originalValue = rawValue || rawLabel
+      const label = rawLabel || rawValue || `选项${index + 1}`
+      const value = originalValue || label
       return {
         key: `${index}-${value || label || 'empty'}`,
         value,
@@ -2657,15 +3451,36 @@ const uiPickerSelectOptions = computed(() => {
         selected: !!option?.selected
       }
     })
-    .filter(option => option.value || option.label)
+    .filter(option => isValidUiOptionText(option.value) || isValidUiOptionText(option.label))
 })
 const canAppendRecordedUiStep = computed(() => {
   if (!uiPicker.pendingResult) return false
-  if (uiPicker.recordAction === 'select') return !!uiPicker.inputText.trim()
+  const action = uiPicker.recordActionAuto ? inferUiRecordAction(uiPicker.pendingResult) : uiPicker.recordAction
+  if (['select', 'fill', 'assert_text'].includes(action)) return !!uiPicker.inputText.trim()
   return true
 })
-const currentPageTitle = computed(() => activeApiEditor.value?.label || activePlanEditor.value?.label || menuMeta[active.value]?.label || '接口测试平台')
-const permittedMenuKeys = computed(() => new Set(me.value?.menus?.length ? me.value.menus : Object.keys(menuMeta)))
+const uiPickerImageStyle = computed(() => ({
+  width: `${Math.round(uiPicker.viewportWidth * uiPicker.zoomPercent / 100)}px`,
+  height: 'auto',
+  maxWidth: 'none',
+  maxHeight: 'none'
+}))
+const currentPageTitle = computed(() => activeApiEditor.value?.label || activePlanEditor.value?.label || activeUiCaseEditor.value?.label || menuMeta[active.value]?.label || '接口测试平台')
+const roleMenuTreeData = computed(() => roleMenus.value.map(group => ({
+  key: group.key,
+  title: group.label,
+  children: group.children?.map((child: any) => ({ key: child.key, title: child.label }))
+})))
+const roleMenuLeafKeys = computed(() => new Set(roleMenus.value.flatMap(group => group.children?.map((child: any) => child.key) || [group.key])))
+const permittedMenuKeys = computed(() => {
+  const keys = me.value?.menus?.length ? me.value.menus : Object.keys(menuMeta)
+  const normalized = new Set(keys)
+  if (normalized.has('ui-tests')) {
+    normalized.add('ui-cases')
+    normalized.add('ui-reports')
+  }
+  return normalized
+})
 const visibleMenuGroups = computed(() => menuTree
   .map(item => {
     if (!item.children) return permittedMenuKeys.value.has(item.key) ? item : null
@@ -2691,6 +3506,9 @@ const dashboardStats = computed(() => [
   { label: '用例数', value: cases.value.length, description: '可用于回归执行', tone: 'green', icon: FileTextOutlined },
   { label: '执行任务', value: executions.value.length, description: '历史执行任务', tone: 'orange', icon: PlayCircleOutlined }
 ])
+const activeKnowledgeProjects = computed(() => knowledgeProjects.value.filter(item => item.status === 'active'))
+const activeKnowledgeWorkflows = computed(() => knowledgeWorkflows.value.filter(item => item.status === 'active'))
+const qaSessionWorkflows = computed(() => activeKnowledgeWorkflows.value)
 const caseSearchApis = computed(() => apis.value.filter(item => caseSearch.project_id && item.project_id === caseSearch.project_id))
 const caseFormApis = computed(() => apis.value.filter(item => caseForm.project_id && item.project_id === caseForm.project_id))
 const currentCaseApi = computed(() => selectedCaseApi())
@@ -2819,6 +3637,15 @@ async function loadAll() {
     calls.push(loadCases())
   calls.push(loadPlans())
   calls.push(loadReports())
+  calls.push(loadUiReports())
+  calls.push(loadAiGenerations())
+  calls.push(loadKnowledgeProjects())
+  calls.push(loadKnowledgeBases())
+  calls.push(loadKnowledgeWorkflows())
+  calls.push(loadQaSessions())
+  calls.push(loadTickets())
+  calls.push(loadApiKeyConfigs())
+  calls.push(loadWorkflowApiKeyOptions())
   calls.push(loadLogs())
   await Promise.allSettled(calls)
 }
@@ -3149,9 +3976,14 @@ async function loadPlans() {
     }
   })
   planList.value = data.items
+  selectedPlanIds.value = selectedPlanIds.value.filter(id => planList.value.some(item => item.id === id))
   planPagination.total = data.total
   planPagination.page = data.page
   planPagination.pageSize = data.page_size
+}
+
+function changeSelectedPlans(keys: Array<string | number>) {
+  selectedPlanIds.value = keys.map(key => Number(key)).filter(Boolean)
 }
 
 async function refreshPlansAfterChange() {
@@ -3216,8 +4048,924 @@ async function changeReportPage(page: number) {
   await loadReports()
 }
 
+async function loadUiReports() {
+  const name = uiReportSearch.name.trim()
+  const status = uiReportSearch.status
+  const { data } = await api.get('/executions', {
+    params: {
+      target_type: 'ui_case',
+      ...(name ? { name } : {}),
+      ...(status ? { status } : {}),
+      page: uiReportPagination.page,
+      page_size: uiReportPagination.pageSize
+    }
+  })
+  uiReportList.value = data.items
+  selectedUiReportIds.value = selectedUiReportIds.value.filter(id => uiReportList.value.some(item => item.id === id))
+  uiReportPagination.total = data.total
+  uiReportPagination.page = data.page
+  uiReportPagination.pageSize = data.page_size
+}
+
+async function searchUiReports() {
+  uiReportPagination.page = 1
+  await loadUiReports()
+}
+
+async function resetUiReportSearch() {
+  uiReportSearch.name = ''
+  uiReportSearch.status = ''
+  uiReportPagination.page = 1
+  await loadUiReports()
+}
+
+async function changeUiReportPage(page: number) {
+  uiReportPagination.page = page
+  await loadUiReports()
+}
+
+function aiGenerationSerialNumber(index: number) {
+  return (aiGenerationPagination.page - 1) * aiGenerationPagination.pageSize + index + 1
+}
+
+function aiGenerationStatusText(status: string) {
+  const labels: Record<string, string> = {
+    queued: '排队中',
+    running: '生成中',
+    succeeded: '已完成',
+    failed: '失败'
+  }
+  return labels[status] || status || '-'
+}
+
+function aiGenerationStatusColor(status: string) {
+  if (status === 'succeeded') return 'success'
+  if (status === 'failed') return 'error'
+  if (status === 'running') return 'processing'
+  return 'warning'
+}
+
+function clearAiGenerationPoller() {
+  if (aiGenerationPoller !== undefined) {
+    window.clearInterval(aiGenerationPoller)
+    aiGenerationPoller = undefined
+  }
+}
+
+function refreshAiGenerationPoller() {
+  const needsPolling = aiGenerations.value.some(row => ['queued', 'running'].includes(row.status))
+  if (needsPolling && aiGenerationPoller === undefined) {
+    aiGenerationPoller = window.setInterval(() => void loadAiGenerations(true), 3000)
+  }
+  if (!needsPolling) clearAiGenerationPoller()
+}
+
+async function loadAiGenerations(isBackground = false) {
+  const { data } = await api.get('/ai-case-generations', {
+    params: { page: aiGenerationPagination.page, page_size: aiGenerationPagination.pageSize },
+    headers: isBackground ? { 'X-Session-Activity': '0' } : undefined
+  })
+  aiGenerations.value = data.items
+  aiGenerationPagination.total = data.total
+  aiGenerationPagination.page = data.page
+  aiGenerationPagination.pageSize = data.page_size
+  refreshAiGenerationPoller()
+}
+
+async function changeAiGenerationPage(page: number) {
+  aiGenerationPagination.page = page
+  await loadAiGenerations()
+}
+
+function knowledgeProjectSerialNumber(index: number) {
+  return (knowledgeProjectPagination.page - 1) * knowledgeProjectPagination.pageSize + index + 1
+}
+
+async function loadKnowledgeProjects() {
+  const name = knowledgeProjectSearch.name.trim()
+  const status = knowledgeProjectSearch.status
+  const [listRes, allRes] = await Promise.all([
+    api.get('/knowledge-projects', {
+      params: {
+        ...(name ? { name } : {}),
+        ...(status ? { status } : {}),
+        page: knowledgeProjectPagination.page,
+        page_size: knowledgeProjectPagination.pageSize
+      }
+    }),
+    api.get('/knowledge-projects')
+  ])
+  knowledgeProjectList.value = listRes.data.items
+  knowledgeProjectPagination.total = listRes.data.total
+  knowledgeProjectPagination.page = listRes.data.page
+  knowledgeProjectPagination.pageSize = listRes.data.page_size
+  knowledgeProjects.value = allRes.data
+}
+
+async function searchKnowledgeProjects() {
+  knowledgeProjectPagination.page = 1
+  await loadKnowledgeProjects()
+}
+
+async function resetKnowledgeProjectSearch() {
+  knowledgeProjectSearch.name = ''
+  knowledgeProjectSearch.status = ''
+  knowledgeProjectPagination.page = 1
+  await loadKnowledgeProjects()
+}
+
+async function changeKnowledgeProjectPage(page: number) {
+  knowledgeProjectPagination.page = page
+  await loadKnowledgeProjects()
+}
+
+async function loadDifyDatasets() {
+  if (difyDatasetsLoading.value || difyDatasets.value.length) return
+  difyDatasetsLoading.value = true
+  try {
+    const { data } = await api.get('/knowledge-bases/dify-datasets', { params: { page: 1, page_size: 100 } })
+    difyDatasets.value = data.items || []
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || 'Dify 知识库列表加载失败')
+  } finally {
+    difyDatasetsLoading.value = false
+  }
+}
+
+function filterDifyDatasetOption(input: string, option: any) {
+  return String(option?.title || option?.children || '').toLowerCase().includes(input.toLowerCase())
+}
+
+function handleDifyDatasetDropdown(visible: boolean) {
+  if (visible) void loadDifyDatasets()
+}
+
+function changeDifyDataset(datasetId: string) {
+  const dataset = difyDatasets.value.find(item => item.id === datasetId)
+  if (dataset?.name && !knowledgeForm.name.trim()) {
+    knowledgeForm.name = dataset.name
+  }
+}
+
+function resetKnowledgeProjectForm() {
+  knowledgeProjectForm.id = undefined
+  knowledgeProjectForm.name = ''
+  knowledgeProjectForm.description = ''
+  knowledgeProjectForm.status = 'active'
+}
+
+function openCreateKnowledgeProject() {
+  resetKnowledgeProjectForm()
+  knowledgeProjectFormVisible.value = true
+}
+
+function openEditKnowledgeProject(row: any) {
+  knowledgeProjectForm.id = row.id
+  knowledgeProjectForm.name = row.name
+  knowledgeProjectForm.description = row.description || ''
+  knowledgeProjectForm.status = row.status || 'active'
+  knowledgeProjectFormVisible.value = true
+}
+
+async function saveKnowledgeProject() {
+  const name = knowledgeProjectForm.name.trim()
+  if (!name) { message.warning('请输入项目名称'); return }
+  const payload = { name, description: knowledgeProjectForm.description.trim(), status: knowledgeProjectForm.status }
+  try {
+    if (knowledgeProjectForm.id) {
+      await api.put(`/knowledge-projects/${knowledgeProjectForm.id}`, payload)
+      message.success('知识库项目已更新')
+    } else {
+      await api.post('/knowledge-projects', payload)
+      knowledgeProjectPagination.page = 1
+      message.success('知识库项目已创建')
+    }
+    knowledgeProjectFormVisible.value = false
+    await loadKnowledgeProjects()
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '知识库项目保存失败')
+  }
+}
+
+async function deleteKnowledgeProject(row: any) {
+  try {
+    await confirmAction(`确认删除知识库项目「${row.name}」？`, '删除知识库项目', { confirmButtonText: '删除' })
+  } catch {
+    return
+  }
+  try {
+    await api.delete(`/knowledge-projects/${row.id}`)
+    if (knowledgeProjectList.value.length === 1 && knowledgeProjectPagination.page > 1) knowledgeProjectPagination.page -= 1
+    await loadKnowledgeProjects()
+    await loadKnowledgeBases()
+    message.success('知识库项目已删除')
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '知识库项目删除失败')
+  }
+}
+
+function knowledgeSerialNumber(index: number) {
+  return (knowledgePagination.page - 1) * knowledgePagination.pageSize + index + 1
+}
+
+function maskDatasetId(value: string) {
+  if (!value) return '-'
+  if (value.length <= 12) return value
+  return `${value.slice(0, 8)}***${value.slice(-6)}`
+}
+
+async function loadKnowledgeBases() {
+  const { data } = await api.get('/knowledge-bases', {
+    params: {
+      ...(knowledgeSearch.project_id ? { project_id: knowledgeSearch.project_id } : {}),
+      ...(knowledgeSearch.name.trim() ? { name: knowledgeSearch.name.trim() } : {}),
+      ...(knowledgeSearch.status ? { status: knowledgeSearch.status } : {}),
+      page: knowledgePagination.page,
+      page_size: knowledgePagination.pageSize
+    }
+  })
+  knowledgeBases.value = data.items
+  knowledgePagination.total = data.total
+  knowledgePagination.page = data.page
+  knowledgePagination.pageSize = data.page_size
+}
+
+async function searchKnowledgeBases() {
+  knowledgePagination.page = 1
+  await loadKnowledgeBases()
+}
+
+async function resetKnowledgeSearch() {
+  knowledgeSearch.project_id = undefined
+  knowledgeSearch.name = ''
+  knowledgeSearch.status = ''
+  knowledgePagination.page = 1
+  await loadKnowledgeBases()
+}
+
+async function changeKnowledgePage(page: number) {
+  knowledgePagination.page = page
+  await loadKnowledgeBases()
+}
+
+function resetKnowledgeForm() {
+  knowledgeForm.id = undefined
+  knowledgeForm.project_id = undefined
+  knowledgeForm.name = ''
+  knowledgeForm.dify_dataset_id = ''
+  knowledgeForm.status = 'active'
+  knowledgeForm.description = ''
+  knowledgeChecking.value = false
+}
+
+function openCreateKnowledgeBase() {
+  resetKnowledgeForm()
+  knowledgeFormVisible.value = true
+  void loadDifyDatasets()
+}
+
+function openEditKnowledgeBase(row: any) {
+  knowledgeForm.id = row.id
+  knowledgeForm.project_id = row.project_id
+  knowledgeForm.name = row.name
+  knowledgeForm.dify_dataset_id = row.dify_dataset_id
+  knowledgeForm.status = row.status || 'active'
+  knowledgeForm.description = row.description || ''
+  knowledgeFormVisible.value = true
+  void loadDifyDatasets()
+}
+
+function validateKnowledgeForm() {
+  if (!knowledgeForm.project_id) { message.warning('请选择项目'); return false }
+  if (!knowledgeForm.name.trim()) { message.warning('请输入知识库名称'); return false }
+  if (!knowledgeForm.dify_dataset_id.trim()) { message.warning('请输入 Dify Dataset ID'); return false }
+  return true
+}
+
+async function checkKnowledgeForm() {
+  if (!knowledgeForm.dify_dataset_id.trim()) { message.warning('请输入 Dify Dataset ID'); return }
+  knowledgeChecking.value = true
+  try {
+    const { data } = await api.post('/knowledge-bases/check', { dify_dataset_id: knowledgeForm.dify_dataset_id.trim() })
+    message.success(`连接成功，文档数：${data.document_count ?? 0}`)
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || 'Dify 知识库连接失败')
+  } finally {
+    knowledgeChecking.value = false
+  }
+}
+
+async function saveKnowledgeBase() {
+  if (!validateKnowledgeForm()) return
+  const payload = {
+    project_id: knowledgeForm.project_id,
+    name: knowledgeForm.name.trim(),
+    dify_dataset_id: knowledgeForm.dify_dataset_id.trim(),
+    status: knowledgeForm.status,
+    description: knowledgeForm.description.trim()
+  }
+  try {
+    if (knowledgeForm.id) {
+      await api.put(`/knowledge-bases/${knowledgeForm.id}`, payload)
+      message.success('知识库绑定已更新')
+    } else {
+      await api.post('/knowledge-bases', payload)
+      knowledgePagination.page = 1
+      message.success('知识库绑定已创建')
+    }
+    knowledgeFormVisible.value = false
+    await loadKnowledgeProjects()
+    await loadKnowledgeBases()
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '知识库绑定保存失败')
+  }
+}
+
+async function checkKnowledgeBase(row: any) {
+  try {
+    const { data } = await api.post(`/knowledge-bases/${row.id}/check`)
+    message.success(`连接成功，文档数：${data.document_count ?? 0}`)
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || 'Dify 知识库连接失败')
+  }
+}
+
+async function deleteKnowledgeBase(row: any) {
+  try {
+    await confirmAction(`确认删除知识库绑定「${row.name}」？不会删除 Dify 侧知识库。`, '删除知识库绑定', { confirmButtonText: '删除' })
+  } catch {
+    return
+  }
+  try {
+    await api.delete(`/knowledge-bases/${row.id}`)
+    if (knowledgeBases.value.length === 1 && knowledgePagination.page > 1) knowledgePagination.page -= 1
+    await loadKnowledgeBases()
+    message.success('知识库绑定已删除')
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '知识库绑定删除失败')
+  }
+}
+
+async function loadKnowledgeDocuments() {
+  if (!selectedKnowledgeBase.value) return
+  knowledgeDocumentsLoading.value = true
+  try {
+    const { data } = await api.get(`/knowledge-bases/${selectedKnowledgeBase.value.id}/documents`, {
+      params: {
+        ...(knowledgeDocumentSearch.keyword.trim() ? { keyword: knowledgeDocumentSearch.keyword.trim() } : {}),
+        ...(knowledgeDocumentSearch.status.trim() ? { status: knowledgeDocumentSearch.status.trim() } : {}),
+        page: knowledgeDocumentPagination.page,
+        page_size: knowledgeDocumentPagination.pageSize
+      }
+    })
+    knowledgeDocuments.value = data.items
+    knowledgeDocumentPagination.total = data.total
+    knowledgeDocumentPagination.page = data.page
+    knowledgeDocumentPagination.pageSize = data.page_size
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '知识库文档加载失败')
+  } finally {
+    knowledgeDocumentsLoading.value = false
+  }
+}
+
+async function openKnowledgeDocuments(row: any) {
+  selectedKnowledgeBase.value = row
+  knowledgeDocumentSearch.keyword = ''
+  knowledgeDocumentSearch.status = ''
+  knowledgeDocumentPagination.page = 1
+  knowledgeDocuments.value = []
+  knowledgeDocumentsVisible.value = true
+  await loadKnowledgeDocuments()
+}
+
+async function searchKnowledgeDocuments() {
+  knowledgeDocumentPagination.page = 1
+  await loadKnowledgeDocuments()
+}
+
+async function resetKnowledgeDocuments() {
+  knowledgeDocumentSearch.keyword = ''
+  knowledgeDocumentSearch.status = ''
+  knowledgeDocumentPagination.page = 1
+  await loadKnowledgeDocuments()
+}
+
+async function changeKnowledgeDocumentPage(page: number) {
+  knowledgeDocumentPagination.page = page
+  await loadKnowledgeDocuments()
+}
+
+function openKnowledgeRetrieve(row: any) {
+  selectedKnowledgeBase.value = row
+  knowledgeRetrieveForm.query = ''
+  knowledgeRetrieveForm.top_k = 5
+  knowledgeRetrieveForm.score_threshold = undefined
+  knowledgeRetrieveResult.value = []
+  knowledgeRetrieved.value = false
+  knowledgeRetrieveVisible.value = true
+}
+
+async function runKnowledgeRetrieve() {
+  if (!selectedKnowledgeBase.value) return
+  if (!knowledgeRetrieveForm.query.trim()) { message.warning('请输入检索内容'); return }
+  knowledgeRetrieving.value = true
+  try {
+    const { data } = await api.post(`/knowledge-bases/${selectedKnowledgeBase.value.id}/retrieve`, {
+      query: knowledgeRetrieveForm.query.trim(),
+      top_k: knowledgeRetrieveForm.top_k,
+      score_threshold: knowledgeRetrieveForm.score_threshold ?? null
+    })
+    knowledgeRetrieveResult.value = data.hits || []
+    knowledgeRetrieved.value = true
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '知识库检索失败')
+  } finally {
+    knowledgeRetrieving.value = false
+  }
+}
+
+function formatScore(value: any) {
+  const numberValue = Number(value || 0)
+  return Number.isFinite(numberValue) ? numberValue.toFixed(3) : '0.000'
+}
+
+function knowledgeWorkflowSerialNumber(index: number) {
+  return (knowledgeWorkflowPagination.page - 1) * knowledgeWorkflowPagination.pageSize + index + 1
+}
+
+async function loadKnowledgeWorkflows() {
+  const name = knowledgeWorkflowSearch.name.trim()
+  const status = knowledgeWorkflowSearch.status
+  const [listRes, allRes] = await Promise.all([
+    api.get('/knowledge-workflows', {
+      params: {
+        ...(name ? { name } : {}),
+        ...(status ? { status } : {}),
+        page: knowledgeWorkflowPagination.page,
+        page_size: knowledgeWorkflowPagination.pageSize
+      }
+    }),
+    api.get('/knowledge-workflows')
+  ])
+  knowledgeWorkflowList.value = listRes.data.items
+  knowledgeWorkflowPagination.total = listRes.data.total
+  knowledgeWorkflowPagination.page = listRes.data.page
+  knowledgeWorkflowPagination.pageSize = listRes.data.page_size
+  knowledgeWorkflows.value = allRes.data
+}
+
+async function searchKnowledgeWorkflows() {
+  knowledgeWorkflowPagination.page = 1
+  await loadKnowledgeWorkflows()
+}
+
+async function resetKnowledgeWorkflowSearch() {
+  knowledgeWorkflowSearch.name = ''
+  knowledgeWorkflowSearch.status = ''
+  knowledgeWorkflowPagination.page = 1
+  await loadKnowledgeWorkflows()
+}
+
+async function changeKnowledgeWorkflowPage(page: number) {
+  knowledgeWorkflowPagination.page = page
+  await loadKnowledgeWorkflows()
+}
+
+function resetKnowledgeWorkflowForm() {
+  knowledgeWorkflowForm.id = undefined
+  knowledgeWorkflowForm.name = ''
+  knowledgeWorkflowForm.api_base_url = ''
+  knowledgeWorkflowForm.api_key_env = ''
+  knowledgeWorkflowForm.status = 'active'
+  knowledgeWorkflowForm.description = ''
+}
+
+function openCreateKnowledgeWorkflow() {
+  resetKnowledgeWorkflowForm()
+  knowledgeWorkflowFormVisible.value = true
+}
+
+function openEditKnowledgeWorkflow(row: any) {
+  knowledgeWorkflowForm.id = row.id
+  knowledgeWorkflowForm.name = row.name
+  knowledgeWorkflowForm.api_base_url = row.api_base_url || ''
+  knowledgeWorkflowForm.api_key_env = row.api_key_env || ''
+  knowledgeWorkflowForm.status = row.status || 'active'
+  knowledgeWorkflowForm.description = row.description || ''
+  knowledgeWorkflowFormVisible.value = true
+}
+
+function validateKnowledgeWorkflowForm() {
+  if (!knowledgeWorkflowForm.name.trim()) { message.warning('请输入工作流名称'); return false }
+  if (!knowledgeWorkflowForm.api_key_env.trim()) { message.warning('请输入 API Key 环境变量名'); return false }
+  return true
+}
+
+async function saveKnowledgeWorkflow() {
+  if (!validateKnowledgeWorkflowForm()) return
+  const payload = {
+    name: knowledgeWorkflowForm.name.trim(),
+    api_base_url: knowledgeWorkflowForm.api_base_url.trim(),
+    api_key_env: knowledgeWorkflowForm.api_key_env.trim(),
+    status: knowledgeWorkflowForm.status,
+    description: knowledgeWorkflowForm.description.trim()
+  }
+  try {
+    if (knowledgeWorkflowForm.id) {
+      await api.put(`/knowledge-workflows/${knowledgeWorkflowForm.id}`, payload)
+      message.success('工作流配置已更新')
+    } else {
+      await api.post('/knowledge-workflows', payload)
+      knowledgeWorkflowPagination.page = 1
+      message.success('工作流配置已创建')
+    }
+    knowledgeWorkflowFormVisible.value = false
+    await loadKnowledgeWorkflows()
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '工作流配置保存失败')
+  }
+}
+
+async function checkKnowledgeWorkflow(row: any) {
+  if (knowledgeWorkflowCheckingId.value !== null) {
+    message.warning('上一次连接测试仍在进行中，请稍候')
+    return
+  }
+  knowledgeWorkflowCheckingId.value = row.id
+  try {
+    await api.post(`/knowledge-workflows/${row.id}/check`)
+    message.success('工作流连接测试成功')
+  } catch (error: any) {
+    const detail = error?.response?.data?.detail || error?.message
+    message.error(detail ? `工作流连接测试失败：${detail}` : '工作流连接测试失败')
+  } finally {
+    knowledgeWorkflowCheckingId.value = null
+  }
+}
+
+async function deleteKnowledgeWorkflow(row: any) {
+  try {
+    await confirmAction(`确认删除工作流配置「${row.name}」？`, '删除工作流配置', { confirmButtonText: '删除' })
+  } catch {
+    return
+  }
+  try {
+    await api.delete(`/knowledge-workflows/${row.id}`)
+    if (knowledgeWorkflowList.value.length === 1 && knowledgeWorkflowPagination.page > 1) knowledgeWorkflowPagination.page -= 1
+    await loadKnowledgeWorkflows()
+    await loadQaSessions()
+    message.success('工作流配置已删除')
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '工作流配置删除失败')
+  }
+}
+
+async function loadQaSessions() {
+  const { data } = await api.get('/knowledge-qa/sessions', {
+    params: {
+      ...(qaSessionSearch.project_id ? { project_id: qaSessionSearch.project_id } : {}),
+      page: 1,
+      page_size: 50
+    }
+  })
+  qaSessions.value = data.items || []
+  if (selectedQaSession.value && !qaSessions.value.some(item => item.id === selectedQaSession.value.id)) {
+    selectedQaSession.value = null
+    qaMessages.value = []
+  }
+}
+
+async function searchQaSessions() {
+  selectedQaSession.value = null
+  qaMessages.value = []
+  await loadQaSessions()
+}
+
+function resetQaSessionForm() {
+  qaSessionForm.project_id = undefined
+  qaSessionForm.workflow_id = undefined
+  qaSessionForm.title = ''
+}
+
+function openCreateQaSession() {
+  resetQaSessionForm()
+  qaSessionFormVisible.value = true
+}
+
+function changeQaSessionProject() {
+  qaSessionForm.workflow_id = undefined
+  const first = qaSessionWorkflows.value[0]
+  if (first) qaSessionForm.workflow_id = first.id
+}
+
+async function createQaSession() {
+  if (!qaSessionForm.project_id) { message.warning('请选择项目'); return }
+  if (!qaSessionForm.workflow_id) { message.warning('请选择工作流'); return }
+  try {
+    const { data } = await api.post('/knowledge-qa/sessions', {
+      project_id: qaSessionForm.project_id,
+      workflow_id: qaSessionForm.workflow_id,
+      title: qaSessionForm.title.trim()
+    })
+    qaSessionFormVisible.value = false
+    await loadQaSessions()
+    await selectQaSession(data)
+    message.success('会话已创建')
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '会话创建失败')
+  }
+}
+
+async function selectQaSession(session: any) {
+  selectedQaSession.value = session
+  qaQuestion.value = ''
+  const { data } = await api.get(`/knowledge-qa/sessions/${session.id}/messages`)
+  qaMessages.value = data || []
+}
+
+async function deleteQaSession(session: any) {
+  try {
+    await confirmAction(`确认删除会话「${session.title}」？`, '删除问答会话', { confirmButtonText: '删除' })
+  } catch {
+    return
+  }
+  try {
+    await api.delete(`/knowledge-qa/sessions/${session.id}`)
+    selectedQaSession.value = null
+    qaMessages.value = []
+    await loadQaSessions()
+    message.success('会话已删除')
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '会话删除失败')
+  }
+}
+
+async function askKnowledgeQa() {
+  if (!selectedQaSession.value) { message.warning('请先选择或新建会话'); return }
+  const question = qaQuestion.value.trim()
+  if (!question) { message.warning('请输入问题'); return }
+  qaAsking.value = true
+  try {
+    const { data } = await api.post(`/knowledge-qa/sessions/${selectedQaSession.value.id}/ask`, { question })
+    qaMessages.value.push(data.user_message, data.assistant_message)
+    qaQuestion.value = ''
+    await loadQaSessions()
+    const latest = qaSessions.value.find(item => item.id === selectedQaSession.value.id)
+    if (latest) selectedQaSession.value = latest
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '知识问答失败')
+    if (selectedQaSession.value) {
+      const { data } = await api.get(`/knowledge-qa/sessions/${selectedQaSession.value.id}/messages`)
+      qaMessages.value = data || []
+    }
+  } finally {
+    qaAsking.value = false
+  }
+}
+
+const qaMessagesRef = ref<HTMLElement | null>(null)
+
+async function scrollQaMessagesToBottom() {
+  await nextTick()
+  const el = qaMessagesRef.value
+  if (el) el.scrollTop = el.scrollHeight
+}
+
+watch(
+  () => [qaMessages.value.length, selectedQaSession.value?.id] as const,
+  () => { void scrollQaMessagesToBottom() }
+)
+
+function apiKeyConfigSerialNumber(index: number) {
+  return (apiKeyConfigPagination.page - 1) * apiKeyConfigPagination.pageSize + index + 1
+}
+
+function normalizeEnvKey(value: string) {
+  return value.trim().toUpperCase()
+}
+
+function validateEnvKey(value: string) {
+  return /^[A-Z][A-Z0-9_]*$/.test(value)
+}
+
+async function loadApiKeyConfigs() {
+  const { data } = await api.get('/api-key-configs', {
+    params: {
+      ...(apiKeyConfigSearch.keyword.trim() ? { keyword: apiKeyConfigSearch.keyword.trim() } : {}),
+      ...(apiKeyConfigSearch.status ? { status: apiKeyConfigSearch.status } : {}),
+      page: apiKeyConfigPagination.page,
+      page_size: apiKeyConfigPagination.pageSize
+    }
+  })
+  apiKeyConfigList.value = data.items
+  apiKeyConfigs.value = data.items
+  apiKeyConfigPagination.total = data.total
+  apiKeyConfigPagination.page = data.page
+  apiKeyConfigPagination.pageSize = data.page_size
+}
+
+async function loadWorkflowApiKeyOptions() {
+  const { data } = await api.get('/api-key-configs/options')
+  workflowApiKeyOptions.value = data || []
+}
+
+async function handleWorkflowApiKeyDropdown(visible: boolean) {
+  if (visible) await loadWorkflowApiKeyOptions()
+}
+
+async function searchApiKeyConfigs() { apiKeyConfigPagination.page = 1; await loadApiKeyConfigs() }
+async function resetApiKeyConfigSearch() { apiKeyConfigSearch.keyword = ''; apiKeyConfigSearch.status = ''; apiKeyConfigPagination.page = 1; await loadApiKeyConfigs() }
+async function changeApiKeyConfigPage(page: number) { apiKeyConfigPagination.page = page; await loadApiKeyConfigs() }
+
+function resetApiKeyConfigForm() {
+  apiKeyConfigForm.id = undefined
+  apiKeyConfigForm.env_key = ''
+  apiKeyConfigForm.display_name = ''
+  apiKeyConfigForm.status = 'active'
+  apiKeyConfigForm.description = ''
+}
+
+function openCreateApiKeyConfig() { resetApiKeyConfigForm(); apiKeyConfigFormVisible.value = true }
+function openEditApiKeyConfig(row: any) {
+  apiKeyConfigForm.id = row.id
+  apiKeyConfigForm.env_key = row.env_key || ''
+  apiKeyConfigForm.display_name = row.display_name || ''
+  apiKeyConfigForm.status = row.status || 'active'
+  apiKeyConfigForm.description = row.description || ''
+  apiKeyConfigFormVisible.value = true
+}
+
+async function saveApiKeyConfig() {
+  const envKey = normalizeEnvKey(apiKeyConfigForm.env_key)
+  const displayName = apiKeyConfigForm.display_name.trim()
+  if (!displayName) { message.warning('请输入中文名'); return }
+  if (!envKey) { message.warning('请输入环境变量名'); return }
+  if (!validateEnvKey(envKey)) { message.warning('环境变量名只允许大写字母、数字、下划线，且必须以大写字母开头'); return }
+  const payload = { env_key: envKey, display_name: displayName, status: apiKeyConfigForm.status, description: apiKeyConfigForm.description.trim() }
+  try {
+    if (apiKeyConfigForm.id) {
+      await api.put(`/api-key-configs/${apiKeyConfigForm.id}`, payload)
+      message.success('API Key配置已更新')
+    } else {
+      await api.post('/api-key-configs', payload)
+      apiKeyConfigPagination.page = 1
+      message.success('API Key配置已创建')
+    }
+    apiKeyConfigFormVisible.value = false
+    await loadApiKeyConfigs()
+    await loadWorkflowApiKeyOptions()
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || 'API Key配置保存失败')
+  }
+}
+
+async function deleteApiKeyConfig(row: any) {
+  try {
+    await confirmAction(`确认删除API Key配置「${row.display_name}」？`, '删除API Key配置', { confirmButtonText: '删除' })
+  } catch {
+    return
+  }
+  try {
+    await api.delete(`/api-key-configs/${row.id}`)
+    if (apiKeyConfigList.value.length === 1 && apiKeyConfigPagination.page > 1) apiKeyConfigPagination.page -= 1
+    await loadApiKeyConfigs()
+    await loadWorkflowApiKeyOptions()
+    message.success('API Key配置已删除')
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || 'API Key配置删除失败')
+  }
+}
+function ticketCategoryText(category: string) {
+  return ({ feature: '功能建议', issue: '问题反馈', experience: '体验优化', other: '其他' } as Record<string, string>)[category] || category
+}
+
+function ticketStatusText(status: string) {
+  return ({ pending: '待处理', processing: '处理中', resolved: '已解决' } as Record<string, string>)[status] || status
+}
+
+function ticketStatusColor(status: string) {
+  return status === 'resolved' ? 'success' : status === 'processing' ? 'processing' : 'warning'
+}
+
+async function loadTickets() {
+  const { data } = await api.get('/tickets', { params: { ...(ticketSearch.title.trim() ? { title: ticketSearch.title.trim() } : {}), ...(ticketSearch.category ? { category: ticketSearch.category } : {}), ...(ticketSearch.status ? { status: ticketSearch.status } : {}), page: ticketPagination.page, page_size: ticketPagination.pageSize } })
+  tickets.value = data.items
+  ticketPagination.total = data.total
+  ticketPagination.page = data.page
+  ticketPagination.pageSize = data.page_size
+}
+
+async function searchTickets() { ticketPagination.page = 1; await loadTickets() }
+async function resetTickets() { ticketSearch.title = ''; ticketSearch.category = ''; ticketSearch.status = ''; ticketPagination.page = 1; await loadTickets() }
+async function changeTicketPage(page: number) { ticketPagination.page = page; await loadTickets() }
+function resetTicketForm() { ticketForm.category = 'feature'; ticketForm.title = ''; ticketForm.content = ''; ticketForm.files = [] }
+function openCreateTicket() { resetTicketForm(); createTicketVisible.value = true }
+function validateTicketFile(file: any) { if (file.size > 20 * 1024 * 1024) { message.error('单个附件不能超过 20MB'); return false }; return false }
+
+async function submitTicket() {
+  if (!ticketForm.title.trim() || !ticketForm.content.trim()) { message.warning('请填写工单标题和建议内容'); return }
+  ticketSubmitting.value = true
+  try {
+    const form = new FormData(); form.append('category', ticketForm.category); form.append('title', ticketForm.title.trim()); form.append('content', ticketForm.content.trim())
+    ticketForm.files.forEach(item => form.append('files', item.originFileObj || item))
+    await api.post('/tickets', form); createTicketVisible.value = false; ticketPagination.page = 1; await loadTickets(); message.success('工单已提交')
+  } catch (error: any) { message.error(error?.response?.data?.detail || '工单提交失败') } finally { ticketSubmitting.value = false }
+}
+
+async function openTicketDetail(row: any) { try { ticketDetail.value = (await api.get(`/tickets/${row.id}`)).data; ticketDetailVisible.value = true } catch (error: any) { message.error(error?.response?.data?.detail || '工单详情加载失败') } }
+function openProcessTicket() { if (!ticketDetail.value) return; ticketProcessForm.status = ticketDetail.value.status === 'resolved' ? 'resolved' : 'processing'; ticketProcessForm.reply = ticketDetail.value.reply || ''; processTicketVisible.value = true }
+async function saveTicketProcess() {
+  if (!ticketDetail.value) return
+  if (ticketProcessForm.status === 'resolved' && !ticketProcessForm.reply.trim()) { message.warning('标记已解决时必须填写处理回复'); return }
+  try { ticketDetail.value = (await api.put(`/tickets/${ticketDetail.value.id}/process`, { status: ticketProcessForm.status, reply: ticketProcessForm.reply.trim() })).data; processTicketVisible.value = false; await loadTickets(); message.success('工单已处理') } catch (error: any) { message.error(error?.response?.data?.detail || '工单处理失败') }
+}
+async function downloadTicketAttachment(ticket: any, item: any) {
+  try { const response = await api.get(`/tickets/${ticket.id}/attachments/${item.id}`, { responseType: 'blob' }); const url = URL.createObjectURL(response.data); const anchor = document.createElement('a'); anchor.href = url; anchor.download = item.name; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url) } catch (error: any) { message.error(error?.response?.data?.detail || '附件下载失败') }
+}
+
+function selectAiSourceFile(file: any) {
+  const rawFile = file?.originFileObj || file
+  if (!rawFile) return false
+  if (rawFile.size > 20 * 1024 * 1024) {
+    message.error('需求文档不能超过 20MB')
+    return false
+  }
+  aiSourceFiles.value = [{ ...file, originFileObj: rawFile, status: 'done' }]
+  aiLastUploadedFilename.value = rawFile.name || ''
+  return false
+}
+
+function removeAiSourceFile() {
+  aiSourceFiles.value = []
+  aiLastUploadedFilename.value = ''
+  return true
+}
+
+async function startAiGeneration() {
+  const file = aiSourceFiles.value[0]?.originFileObj
+  if (!file || aiGenerating.value) {
+    return
+  }
+  aiGenerating.value = true
+  try {
+    const form = new FormData()
+    form.append('file', file)
+    await api.post('/ai-case-generations', form)
+    aiSourceFiles.value = []
+    aiGenerationPagination.page = 1
+    await loadAiGenerations()
+    message.success('AI 生成任务已提交')
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || 'AI 生成任务提交失败')
+  } finally {
+    aiGenerating.value = false
+  }
+}
+
+async function downloadAiGenerationFile(row: any, index: number) {
+  try {
+    const file = row.output_files?.[index]
+    const response = await api.get(`/ai-case-generations/${row.id}/files/${index}`, { responseType: 'blob' })
+    const url = URL.createObjectURL(response.data)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = file?.name || '测试用例.xlsx'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '生成文件下载失败')
+  }
+}
+
+async function deleteAiGeneration(row: any) {
+  try {
+    await confirmAction('确认删除该生成历史及其保存的文件吗？删除后无法恢复。', '删除生成历史', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  try {
+    await api.delete(`/ai-case-generations/${row.id}`)
+    if (aiGenerations.value.length === 1 && aiGenerationPagination.page > 1) aiGenerationPagination.page -= 1
+    await loadAiGenerations()
+    message.success('生成历史已删除')
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '生成历史删除失败')
+  }
+}
+
 function changeSelectedReports(keys: Array<string | number>) {
   selectedReportIds.value = keys.map(key => Number(key)).filter(Boolean)
+}
+
+function changeSelectedUiReports(keys: Array<string | number>) {
+  selectedUiReportIds.value = keys.map(key => Number(key)).filter(Boolean)
 }
 
 async function loadLogs() {
@@ -3357,6 +5105,12 @@ const operationModuleMap: Record<string, string> = {
   api: '接口管理',
   case: '用例管理',
   plan: '测试计划',
+  ticket: '工单管理',
+  knowledge_project: '知识库项目',
+  knowledge_base: '知识库',
+  knowledge_workflow: '知识库工作流',
+  api_key_config: 'API Key配置',
+  knowledge_qa: '知识问答',
   log: '日志中心',
   system: '系统异常'
 }
@@ -3369,6 +5123,7 @@ const operationActionMap: Record<string, string> = {
   update: '编辑',
   delete: '删除',
   status: '修改状态',
+  process: '处理',
   execute: '执行',
   generate_steps: '生成步骤',
   exception: '异常捕获'
@@ -3443,8 +5198,11 @@ async function login() {
   loginLoading.value = true
   try {
     const { data } = await api.post('/auth/login', loginForm)
-    localStorage.setItem('session_token', data.token)
+    sessionExpired.value = false
     me.value = data.user
+    openedTabs.value = [menuMeta.dashboard]
+    active.value = 'dashboard'
+    saveTabs()
     syncAllowedTabs()
     await loadAll()
   } catch (error: any) {
@@ -3472,12 +5230,22 @@ async function login() {
 
 async function logout() {
   await api.post('/auth/logout')
-  localStorage.removeItem('session_token')
   localStorage.removeItem('active_menu')
   localStorage.removeItem('opened_tabs')
   openedTabs.value = [menuMeta.dashboard]
   active.value = 'dashboard'
   me.value = null
+}
+
+function handleSessionExpired() {
+  if (!me.value || sessionExpired.value) return
+  sessionExpired.value = true
+  localStorage.removeItem('active_menu')
+  localStorage.removeItem('opened_tabs')
+  openedTabs.value = [menuMeta.dashboard]
+  active.value = 'dashboard'
+  me.value = null
+  message.warning('登录已过期，请重新登录')
 }
 
 function saveTabs() {
@@ -3546,6 +5314,10 @@ async function closeTab(name: string | number) {
   }
   if (planEditors[target]) {
     await requestClosePlanEditor(planEditors[target])
+    return
+  }
+  if (target === UI_CASE_CREATE_TAB || target.startsWith(UI_CASE_EDIT_PREFIX)) {
+    closeUiCaseEditorTab(target)
     return
   }
   removeTab(target)
@@ -3782,6 +5554,45 @@ function openEditRoleDialog(role: any) {
 function cancelEditRole() {
   editRoleDialogVisible.value = false
   resetEditRoleForm()
+}
+
+function resetRolePermissionForm() {
+  rolePermissionForm.id = undefined
+  rolePermissionForm.name = ''
+  rolePermissionForm.description = ''
+  rolePermissionForm.status = 'active'
+  rolePermissionForm.menus = []
+}
+
+function openRolePermissionDialog(role: any) {
+  rolePermissionForm.id = role.id
+  rolePermissionForm.name = role.name
+  rolePermissionForm.description = role.description || ''
+  rolePermissionForm.status = role.status
+  rolePermissionForm.menus = [...(role.menus || [])]
+  rolePermissionDialogVisible.value = true
+}
+
+function cancelRolePermission() {
+  rolePermissionDialogVisible.value = false
+  resetRolePermissionForm()
+}
+
+async function saveRolePermissions() {
+  if (!rolePermissionForm.id) return
+  const menus = rolePermissionForm.menus.filter(key => roleMenuLeafKeys.value.has(key))
+  await api.put(`/roles/${rolePermissionForm.id}`, {
+    name: rolePermissionForm.name,
+    description: rolePermissionForm.description,
+    status: rolePermissionForm.status,
+    menus
+  })
+  rolePermissionDialogVisible.value = false
+  message.success('菜单权限已更新')
+  await loadRoles()
+  const { data } = await api.get('/auth/me')
+  me.value = data
+  syncAllowedTabs()
 }
 
 function roleMenuLabels(menus: string[]) {
@@ -4257,6 +6068,7 @@ function changeMockFormProject() {
     uiCaseForm.step_timeout_ms = 10000
     uiCaseForm.allow_ai_actions = true
     uiCaseForm.status = 'active'
+    uiCaseForm.browser_channel = 'chromium'
     uiCaseForm.headless = true
     uiCaseForm.wait_until = 'networkidle'
     uiCaseForm.wait_after_load_ms = 500
@@ -4278,6 +6090,7 @@ function changeMockFormProject() {
     editUiCaseForm.step_timeout_ms = 10000
     editUiCaseForm.allow_ai_actions = true
     editUiCaseForm.status = 'active'
+    editUiCaseForm.browser_channel = 'chromium'
     editUiCaseForm.headless = true
     editUiCaseForm.wait_until = 'networkidle'
     editUiCaseForm.wait_after_load_ms = 500
@@ -4286,10 +6099,12 @@ function changeMockFormProject() {
 
   function openCreateUiCaseDialog() {
     resetUiCaseForm()
-    createUiCaseDialogVisible.value = true
+    closeExistingUiCaseEditorTabs()
+    openRuntimeTab({ name: UI_CASE_CREATE_TAB, label: '新增UI用例', closable: true })
   }
 
   function openEditUiCaseDialog(row: any) {
+    closeExistingUiCaseEditorTabs()
     editUiCaseForm.id = row.id
     editUiCaseForm.project_id = row.project_id
     editUiCaseForm.environment_id = row.environment_id
@@ -4304,11 +6119,13 @@ function changeMockFormProject() {
     editUiCaseForm.step_timeout_ms = Number(row.step_timeout_ms ?? 10000)
     editUiCaseForm.allow_ai_actions = row.allow_ai_actions !== false
     editUiCaseForm.status = row.status || 'active'
+    editUiCaseForm.browser_channel = row.browser_channel || 'chromium'
     editUiCaseForm.headless = row.headless !== false
     editUiCaseForm.wait_until = row.wait_until || 'networkidle'
     editUiCaseForm.wait_after_load_ms = Number(row.wait_after_load_ms ?? 500)
     editUiCaseForm.steps = (row.steps || []).map((step: any) => ({ id: Date.now() + Math.floor(Math.random() * 1000), ...step }))
-    editUiCaseDialogVisible.value = true
+    syncUiStepIds(editUiCaseForm)
+    openRuntimeTab({ name: `${UI_CASE_EDIT_PREFIX}${row.id}`, label: `编辑UI用例：${row.name || row.id}`, closable: true })
   }
 
   function changeUiCaseFormProject() {
@@ -4319,8 +6136,50 @@ function changeMockFormProject() {
     editUiCaseForm.environment_id = undefined
   }
 
+  function changeUiCaseEditorProject(form: UiCaseFormState) {
+    form.environment_id = undefined
+  }
+
+  function uiCaseEditorEnvironments(form: UiCaseFormState) {
+    return environments.value.filter(item => form.project_id && item.project_id === form.project_id)
+  }
+
+  function closeExistingUiCaseEditorTabs() {
+    openedTabs.value
+      .filter(tab => tab.name === UI_CASE_CREATE_TAB || tab.name.startsWith(UI_CASE_EDIT_PREFIX))
+      .forEach(tab => removeTab(tab.name))
+    resetUiCaseForm()
+    resetEditUiCaseForm()
+  }
+
+  function closeUiCaseEditorTab(tabName: string) {
+    removeTab(tabName)
+    if (tabName === UI_CASE_CREATE_TAB) {
+      resetUiCaseForm()
+    } else {
+      resetEditUiCaseForm()
+    }
+  }
+
+  function closeUiCaseEditorFromPage() {
+    const editor = activeUiCaseEditor.value
+    if (!editor) return
+    closeUiCaseEditorTab(editor.tabName)
+  }
+
+  async function saveUiCaseEditor() {
+    const editor = activeUiCaseEditor.value
+    if (!editor) return
+    if (editor.mode === 'create') {
+      await createUiCase()
+    } else {
+      await updateUiCase()
+    }
+  }
+
   function addUiStep(form: UiCaseFormState) {
     form.steps.push(defaultUiStep('click'))
+    syncUiStepIds(form)
   }
 
   function openAiStepDialog(form: UiCaseFormState) {
@@ -4388,12 +6247,14 @@ function changeMockFormProject() {
     } else {
       form.steps.push(...steps)
     }
+    syncUiStepIds(form)
     message.success('已应用生成步骤')
     resetAiStepGenerator()
   }
 
   function removeUiStep(form: UiCaseFormState, index: number) {
     form.steps.splice(index, 1)
+    syncUiStepIds(form)
   }
 
   function moveUiStep(form: UiCaseFormState, index: number, offset: number) {
@@ -4401,6 +6262,66 @@ function changeMockFormProject() {
     if (target < 0 || target >= form.steps.length) return
     const [row] = form.steps.splice(index, 1)
     form.steps.splice(target, 0, row)
+    syncUiStepIds(form)
+  }
+
+  function syncUiStepIds(form: UiCaseFormState) {
+    form.steps.forEach((step, index) => {
+      step.id = index + 1
+    })
+  }
+
+  function uiStepRowProps(form: UiCaseFormState, index: number) {
+    return {
+      class: uiStepDrag.form === form && uiStepDrag.index === index ? 'ui-step-row-dragging' : '',
+      onDragover: (event: DragEvent) => {
+        if (uiStepDrag.form !== form) return
+        event.preventDefault()
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+      },
+      onDrop: (event: DragEvent) => dropUiStepRow(form, index, event),
+      onDragend: resetUiStepDrag
+    }
+  }
+
+  function activeUiStepRowProps(_record: UiStepRow, index: number) {
+    const editor = activeUiCaseEditor.value
+    return editor ? uiStepRowProps(editor.form, index) : {}
+  }
+
+  function isInteractiveUiStepTarget(target: EventTarget | null) {
+    const element = target instanceof HTMLElement ? target : null
+    if (!element) return false
+    return Boolean(element.closest('input, textarea, select, button, [contenteditable="true"], .ant-input, .ant-select, .ant-input-number, .ant-picker'))
+  }
+
+  function startUiStepDrag(form: UiCaseFormState, index: number, event: DragEvent) {
+    if (isInteractiveUiStepTarget(event.target)) {
+      event.preventDefault()
+      resetUiStepDrag()
+      return
+    }
+    uiStepDrag.form = form
+    uiStepDrag.index = index
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move'
+      event.dataTransfer.setData('text/plain', String(index))
+    }
+  }
+
+  function dropUiStepRow(form: UiCaseFormState, index: number, event: DragEvent) {
+    event.preventDefault()
+    const from = uiStepDrag.form === form ? uiStepDrag.index : Number(event.dataTransfer?.getData('text/plain') ?? -1)
+    resetUiStepDrag()
+    if (from < 0 || from === index || from >= form.steps.length) return
+    const [row] = form.steps.splice(from, 1)
+    form.steps.splice(index, 0, row)
+    syncUiStepIds(form)
+  }
+
+  function resetUiStepDrag() {
+    uiStepDrag.form = null
+    uiStepDrag.index = -1
   }
 
   function resetUiPickerState() {
@@ -4419,10 +6340,12 @@ function changeMockFormProject() {
     uiPicker.targetForm = null
     uiPicker.mode = 'operate'
     uiPicker.recordAction = 'click'
+    uiPicker.recordActionAuto = true
     uiPicker.inputText = ''
     uiPicker.screenshotUrl = ''
-    uiPicker.viewportWidth = 1600
-    uiPicker.viewportHeight = 900
+    uiPicker.viewportWidth = 1366
+    uiPicker.viewportHeight = 1050
+    uiPicker.zoomPercent = 100
     uiPicker.loading = false
   }
 
@@ -4463,6 +6386,70 @@ function changeMockFormProject() {
     return text || fallback
   }
 
+  function sanitizeUiOptionText(value: any) {
+    const text = String(value ?? '').replace(/\s+/g, ' ').trim()
+    if (!text || /^(undefined|null|NaN)$/i.test(text) || /\bundefined\b|\bnull\b/i.test(text)) return ''
+    return text
+  }
+
+  function isValidUiOptionText(value: any) {
+    return !!sanitizeUiOptionText(value)
+  }
+
+  function uiPickerOptionLabel(option: any) {
+    const label = sanitizeUiOptionText(option?.label)
+    const originalValue = sanitizeUiOptionText(option?.originalValue)
+    const value = sanitizeUiOptionText(option?.value)
+    const text = label || value || originalValue || '未命名选项'
+    if (originalValue && label && originalValue !== label) {
+      return `${label}（${originalValue}）`
+    }
+    return text
+  }
+
+  function selectedUiPickerOptionValue() {
+    const selectedOption = uiPickerSelectOptions.value.find((option: any) => option.selected)
+    const currentValue = sanitizeUiOptionText(uiPicker.pendingResult?.summary?.value)
+    return selectedOption?.value || currentValue || ''
+  }
+
+  function inferUiRecordAction(result = uiPicker.pendingResult): UiRecordAction {
+    const summary = result?.summary || {}
+    const tag = String(summary.tag || '').toLowerCase()
+    const type = String(summary.type || '').toLowerCase()
+    const hasInputValue = !!uiPicker.inputText.trim()
+    const hasOptions = Array.isArray(summary.options) && summary.options.some((option: any) => isValidUiOptionText(option?.value) || isValidUiOptionText(option?.label))
+    if ((tag === 'select' || hasOptions) && hasInputValue) return 'select'
+    if ((tag === 'input' || tag === 'textarea') && !['button', 'submit', 'reset', 'checkbox', 'radio'].includes(type) && hasInputValue) return 'fill'
+    return 'click'
+  }
+
+  function refreshAutoUiRecordAction() {
+    if (!uiPicker.recordActionAuto || uiPicker.targetRow) return
+    uiPicker.recordAction = inferUiRecordAction()
+  }
+
+  function disableUiRecordActionAuto() {
+    uiPicker.recordActionAuto = false
+  }
+
+  function handleUiPickerSelectChange() {
+    uiPicker.recordAction = 'select'
+    uiPicker.recordActionAuto = true
+  }
+
+  function changeUiPickerZoom(delta: number) {
+    uiPicker.zoomPercent = Math.min(200, Math.max(50, uiPicker.zoomPercent + delta))
+  }
+
+  function resetUiPickerZoom() {
+    uiPicker.zoomPercent = 100
+  }
+
+  function handleUiPickerZoomWheel(event: WheelEvent) {
+    changeUiPickerZoom(event.deltaY > 0 ? -10 : 10)
+  }
+
   function uiStepDescription(action: string, result?: any) {
     const summary = result?.summary || {}
     const text = String(summary.text || '').trim()
@@ -4470,6 +6457,7 @@ function changeMockFormProject() {
     const name = text || summary.name || summary.id || tag || '目标元素'
     const mapping: Record<string, string> = {
       click: `点击 ${name}`,
+      dblclick: `双击 ${name}`,
       fill: `输入 ${name}`,
       select: `选择 ${name}`,
       assert_visible: `断言 ${name} 可见`,
@@ -4484,6 +6472,7 @@ function changeMockFormProject() {
     const mapping: Record<string, string> = {
       goto: '打开页面',
       click: '点击',
+      dblclick: '双击',
       fill: '输入',
       select: '选择',
       wait: '等待',
@@ -4508,7 +6497,7 @@ function changeMockFormProject() {
 
   function buildRecordedUiStep(result: any) {
     if (!uiPicker.targetForm) return
-    const action = uiPicker.recordAction
+    const action = uiPicker.recordActionAuto ? inferUiRecordAction(result) : uiPicker.recordAction
     const xpath = result?.xpath || ''
     if (!xpath) return
     const step = defaultUiStep(action)
@@ -4523,6 +6512,17 @@ function changeMockFormProject() {
     return uiPickerSelectOptions.value.find((option: any) => option.value === uiPicker.inputText.trim())
   }
 
+  function markUiPickerSelectedOption(value: string) {
+    const summary = uiPicker.pendingResult?.summary
+    if (!summary || !Array.isArray(summary.options)) return
+    summary.value = value
+    summary.options = summary.options.map((option: any) => {
+      const optionValue = sanitizeUiOptionText(option?.value ?? option?.label ?? option?.text ?? option?.name)
+      const optionLabel = sanitizeUiOptionText(option?.label ?? option?.text ?? option?.name ?? option?.value)
+      return { ...option, selected: optionValue === value || optionLabel === value }
+    })
+  }
+
   async function applyUiPickerSelect(showSuccess = true) {
     if (!uiPicker.sessionId || !uiPicker.pendingResult?.xpath || !uiPicker.inputText.trim()) return false
     const option = currentUiPickerSelectOption()
@@ -4535,6 +6535,7 @@ function changeMockFormProject() {
       uiPicker.status = data.status || uiPicker.status
       uiPicker.statusText = uiPickerStatusText(uiPicker.status)
       uiPicker.message = friendlyUiPickerMessage(data.error, data.message || '远程页面已完成选择')
+      markUiPickerSelectedOption(uiPicker.inputText.trim())
       await refreshUiPickerScreenshot()
       if (showSuccess) message.success('远程页面已选择该选项')
       return true
@@ -4553,6 +6554,7 @@ function changeMockFormProject() {
     const step = buildRecordedUiStep(uiPicker.pendingResult)
     if (!step) return
     uiPicker.targetForm.steps.push(step)
+    syncUiStepIds(uiPicker.targetForm)
     uiPicker.pendingResult = null
     message.success('已添加步骤')
   }
@@ -4563,12 +6565,14 @@ function changeMockFormProject() {
     step.value = action === 'wait' ? (uiPicker.inputText.trim() || '1000') : ''
     step.description = uiStepDescription(action)
     uiPicker.targetForm.steps.push(step)
+    syncUiStepIds(uiPicker.targetForm)
     message.success('已添加步骤')
   }
 
   function removeUiPickerStep(index: number) {
     if (!uiPicker.targetForm) return
     uiPicker.targetForm.steps.splice(index, 1)
+    syncUiStepIds(uiPicker.targetForm)
   }
 
   async function startUiPickerSession(form: UiCaseFormState, row: UiStepRow | null) {
@@ -4632,12 +6636,11 @@ function changeMockFormProject() {
       } else {
         uiPicker.pendingResult = data.result
         const summary = data.result?.summary || {}
-        if (summary.tag === 'select') {
-          uiPicker.recordAction = 'select'
-          const selectedOption = uiPickerSelectOptions.value.find((option: any) => option.selected)
-          const currentValue = String(summary.value ?? '').trim()
-          uiPicker.inputText = selectedOption?.value || currentValue || ''
+        const selectedValue = selectedUiPickerOptionValue()
+        if ((summary.tag === 'select' || uiPickerSelectOptions.value.length) && selectedValue) {
+          uiPicker.inputText = selectedValue
         }
+        refreshAutoUiRecordAction()
         message.success('元素已拾取，可点击“添加当前步骤”')
       }
     }
@@ -4778,6 +6781,7 @@ function changeMockFormProject() {
       step_timeout_ms: Number(form.step_timeout_ms || 10000),
       allow_ai_actions: form.allow_ai_actions,
       status: form.status,
+      browser_channel: form.browser_channel || 'chromium',
       headless: form.headless,
       wait_until: form.wait_until,
       wait_after_load_ms: Number(form.wait_after_load_ms || 0),
@@ -4789,7 +6793,7 @@ function changeMockFormProject() {
     const payload = uiCasePayload(uiCaseForm)
     if (!payload) return
     await api.post('/ui-cases', payload)
-    createUiCaseDialogVisible.value = false
+    closeUiCaseEditorTab(UI_CASE_CREATE_TAB)
     resetUiCaseForm()
     message.success('UI用例已创建')
     await loadUiCases()
@@ -4799,10 +6803,48 @@ function changeMockFormProject() {
     const payload = uiCasePayload(editUiCaseForm)
     if (!payload) return
     await api.put(`/ui-cases/${editUiCaseForm.id}`, payload)
-    editUiCaseDialogVisible.value = false
+    closeUiCaseEditorTab(`${UI_CASE_EDIT_PREFIX}${editUiCaseForm.id}`)
     resetEditUiCaseForm()
     message.success('UI用例已更新')
     await loadUiCases()
+  }
+
+  async function changeUiCaseMode(row: any, mode: any) {
+    const nextMode = mode === 'ai' ? 'ai' : 'advanced'
+    if (row.execution_mode === nextMode) return
+    if (nextMode === 'ai' && !String(row.test_goal || '').trim()) {
+      message.warning('切换到AI模式前，请先编辑用例填写测试目标')
+      return
+    }
+    const payload = {
+      project_id: row.project_id,
+      environment_id: row.environment_id,
+      name: row.name || '',
+      start_url: row.start_url || '',
+      description: row.description || '',
+      execution_mode: nextMode,
+      test_goal: row.test_goal || '',
+      test_data: row.test_data || {},
+      assertion_goal: row.assertion_goal || '',
+      max_steps: Number(row.max_steps || 30),
+      step_timeout_ms: Number(row.step_timeout_ms || 10000),
+      allow_ai_actions: row.allow_ai_actions !== false,
+      status: row.status || 'active',
+      browser_channel: row.browser_channel || 'chromium',
+      headless: row.headless !== false,
+      wait_until: row.wait_until || 'networkidle',
+      wait_after_load_ms: Number(row.wait_after_load_ms || 0),
+      steps: (row.steps || []).map(({ action, locator_type, target, value, description }: any) => ({ action, locator_type, target, value, description }))
+    }
+    try {
+      await api.put(`/ui-cases/${row.id}`, payload)
+      row.execution_mode = nextMode
+      message.success(`已切换为${nextMode === 'ai' ? 'AI模式' : '高级模式'}`)
+      await loadUiCases()
+    } catch (error: any) {
+      message.error(error?.response?.data?.detail || '切换用例模式失败')
+      await loadUiCases()
+    }
   }
 
   async function deleteUiCase(row: any) {
@@ -4817,7 +6859,36 @@ function changeMockFormProject() {
     row.last_task_id = data.id
     row.last_status = data.status || 'queued'
     message.success('UI执行任务已提交')
+    await loadUiReports()
     pollUiExecution(row, data.id)
+  }
+
+  function uiExecutionCanStop(status: string) {
+    return ['queued', 'running'].includes(String(status || ''))
+  }
+
+  async function stopUiExecution(row: any) {
+    if (!row.last_task_id) {
+      message.warning('暂无可停止的执行任务')
+      return
+    }
+    await confirmAction('确认停止当前UI执行任务？已完成的步骤和截图会保留。', '停止UI执行', { confirmButtonText: '停止' })
+    await api.post(`/ui-executions/${row.last_task_id}/stop`)
+    row.last_status = 'stopped'
+    message.success('已发送停止请求')
+    await Promise.all([loadUiCases(), loadUiReports()])
+  }
+
+  async function stopUiExecutionFromDetail() {
+    const taskId = uiExecutionDetail.task?.id
+    if (!taskId) return
+    await confirmAction('确认停止当前UI执行任务？已完成的步骤和截图会保留。', '停止UI执行', { confirmButtonText: '停止' })
+    await api.post(`/ui-executions/${taskId}/stop`)
+    const { data } = await api.get(`/ui-executions/${taskId}`)
+    uiExecutionDetail.task = data.task
+    uiExecutionDetail.results = data.results || []
+    message.success('已发送停止请求')
+    await Promise.all([loadUiCases(), loadUiReports()])
   }
 
   function pollUiExecution(row: any, taskId: number) {
@@ -4832,20 +6903,23 @@ function changeMockFormProject() {
           uiExecutionDetail.task = data.task
           uiExecutionDetail.results = data.results || []
         }
-        if (['passed', 'failed', 'error'].includes(row.last_status)) {
+        const results = data.results || []
+        const hasPersistedResult = results.some((item: any) => !String(item.id || '').startsWith('progress-'))
+        const stillWritingProgress = Boolean(data.task?.summary?.ui_progress) && !hasPersistedResult
+        if (['passed', 'failed', 'error', 'stopped'].includes(row.last_status) && !stillWritingProgress) {
           window.clearInterval(timer)
-          await loadUiCases()
+          await Promise.all([loadUiCases(), loadUiReports()])
           return
         }
         if (attempts >= maxAttempts) {
           window.clearInterval(timer)
           message.warning('UI执行仍在运行，已停止前端轮询，可稍后点击详情查看结果')
-          await loadUiCases()
+          await Promise.all([loadUiCases(), loadUiReports()])
         }
       } catch {
         if (attempts >= maxAttempts) {
           window.clearInterval(timer)
-          await loadUiCases()
+          await Promise.all([loadUiCases(), loadUiReports()])
         }
       }
     }, 1000)
@@ -4866,6 +6940,81 @@ function changeMockFormProject() {
     return uiExecutionDetail.results.some((item: any) => item.request_snapshot?.mode === 'ai')
   }
 
+  function uiResultSteps(result: any) {
+    const snapshot = result?.response_snapshot || {}
+    return snapshot.agent_steps || snapshot.steps || []
+  }
+
+  function uiResultErrorMessage(result: any) {
+    if (result?.error_message) return String(result.error_message)
+    const snapshot = result?.response_snapshot || {}
+    if (snapshot.message && ['failed', 'error'].includes(String(snapshot.status || result?.status || ''))) {
+      return String(snapshot.message)
+    }
+    const failedStep = [...uiResultSteps(result)].reverse().find((item: any) => ['failed', 'error'].includes(String(item?.status || '')))
+    return uiStepMessage(failedStep)
+  }
+
+  function uiStepMessage(row: any) {
+    if (!row) return ''
+    const modelError = row.model_error || {}
+    const parts = [row.message || row.reason || row.description || row.error || '']
+    if (modelError.hint) parts.push(modelError.hint)
+    if (modelError.retry_count) parts.push(`已自动重试 ${Number(modelError.retry_count)} 次`)
+    if (modelError.status_code) parts.push(`HTTP ${modelError.status_code}`)
+    if (modelError.error && !parts.some(item => String(item).includes(String(modelError.error)))) parts.push(String(modelError.error))
+    return parts.filter(Boolean).join('；') || '-'
+  }
+
+  function uiExecutionModeText(mode: string) {
+    if (mode === 'ai') return 'AI模式'
+    if (mode === 'advanced') return '高级模式'
+    return mode || '-'
+  }
+
+  function uiBrowserChannelText(channel: string) {
+    if (channel === 'chrome') return '本机 Chrome'
+    if (channel === 'msedge') return '本机 Edge'
+    return 'Chromium'
+  }
+
+  function uiTokenUsageText(usage: any, mode = 'ai') {
+    if (mode !== 'ai') return '非AI模式不消耗Token'
+    if (!usage || typeof usage !== 'object') return '暂无记录，重新执行AI模式后生成'
+    const total = Number(usage.total_tokens || 0)
+    const prompt = Number(usage.prompt_tokens || 0)
+    const completion = Number(usage.completion_tokens || 0)
+    const parts = [`总计 ${total}`, `输入 ${prompt}`, `输出 ${completion}`]
+    if (Number(usage.reasoning_tokens || 0)) parts.push(`推理 ${Number(usage.reasoning_tokens)}`)
+    if (Number(usage.cached_tokens || 0)) parts.push(`缓存 ${Number(usage.cached_tokens)}`)
+    return parts.join(' / ')
+  }
+
+  function safeReportFilename(name: string) {
+    return `${(name || 'UI测试报告').replace(/[\\/:*?"<>|]+/g, '_')}.html`
+  }
+
+  function downloadHtmlReport(filename: string, html: string) {
+    const blob = new Blob([html || '<h1>报告尚未生成</h1>'], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
+  function exportUiExecutionReport() {
+    const task = uiExecutionDetail.task
+    if (!task?.report_html) {
+      message.warning('报告尚未生成，请执行完成后再导出')
+      return
+    }
+    downloadHtmlReport(safeReportFilename(task.target_name || `UI测试报告_${task.id || ''}`), task.report_html)
+  }
+
   async function solidifyUiExecution() {
     const taskId = uiExecutionDetail.task?.id
     if (!taskId) return
@@ -4876,13 +7025,11 @@ function changeMockFormProject() {
     await loadUiCases()
   }
 
-  async function loadAiSetting() {
+  async function loadAiSetting(preferredId?: number) {
     const { data } = await api.get('/ai-settings')
-    aiSettingForm.provider_url = data.provider_url || ''
-    aiSettingForm.model_name = data.model_name || ''
-    aiSettingForm.api_key = data.api_key || ''
-    aiSettingForm.status = data.status || 'disabled'
-    aiSettingForm.description = data.description || ''
+    aiSettings.value = data.items || []
+    const preferred = preferredId ? aiSettings.value.find(item => item.id === preferredId) : null
+    editAiSetting(preferred || (data.id ? data : aiSettings.value[0]))
   }
 
   async function openAiSettingDialog() {
@@ -4890,17 +7037,79 @@ function changeMockFormProject() {
     aiSettingDialogVisible.value = true
   }
 
+  function resetAiSettingForm() {
+    aiSettingForm.id = undefined
+    aiSettingForm.name = ''
+    aiSettingForm.provider_url = ''
+    aiSettingForm.model_name = ''
+    aiSettingForm.api_key = ''
+    aiSettingForm.status = 'active'
+    aiSettingForm.is_default = aiSettings.value.length === 0
+    aiSettingForm.description = ''
+  }
+
+  function editAiSetting(row: any) {
+    if (!row) {
+      resetAiSettingForm()
+      return
+    }
+    aiSettingForm.id = row.id
+    aiSettingForm.name = row.name || ''
+    aiSettingForm.provider_url = row.provider_url || ''
+    aiSettingForm.model_name = row.model_name || ''
+    aiSettingForm.api_key = row.api_key || ''
+    aiSettingForm.status = row.status || 'disabled'
+    aiSettingForm.is_default = row.is_default === true
+    aiSettingForm.description = row.description || ''
+  }
+
   async function saveAiSetting() {
-    await api.put('/ai-settings', {
+    const { data } = await api.put('/ai-settings', {
+      id: aiSettingForm.id,
+      name: aiSettingForm.name.trim(),
       provider_url: aiSettingForm.provider_url.trim(),
       model_name: aiSettingForm.model_name.trim(),
       api_key: aiSettingForm.api_key === '******' ? '' : aiSettingForm.api_key,
       status: aiSettingForm.status,
+      is_default: aiSettingForm.is_default,
       description: aiSettingForm.description.trim()
     })
     message.success('AI配置已保存')
-    aiSettingDialogVisible.value = false
+    await loadAiSetting(data.id)
+  }
+
+  async function setDefaultAiSetting(row: any) {
+    await api.post(`/ai-settings/${row.id}/default`)
+    message.success('默认AI配置已更新')
     await loadAiSetting()
+  }
+
+  async function deleteAiSetting(row: any) {
+    await confirmAction(`确认删除 AI 配置 ${row.name || row.id}？`, '删除AI配置', { confirmButtonText: '删除' })
+    await api.delete(`/ai-settings/${row.id}`)
+    message.success('AI配置已删除')
+    await loadAiSetting()
+  }
+
+  async function testAiSetting() {
+    aiSettingTesting.value = true
+    try {
+      const { data } = await api.post('/ai-settings/test', {
+        id: aiSettingForm.id,
+        name: aiSettingForm.name.trim(),
+        provider_url: aiSettingForm.provider_url.trim(),
+        model_name: aiSettingForm.model_name.trim(),
+        api_key: aiSettingForm.api_key === '******' ? '' : aiSettingForm.api_key,
+        status: aiSettingForm.status,
+        is_default: aiSettingForm.is_default,
+        description: aiSettingForm.description.trim()
+      })
+      message.success(data?.message || '连接成功')
+    } catch (error: any) {
+      message.error(error?.response?.data?.detail || 'AI连接失败')
+    } finally {
+      aiSettingTesting.value = false
+    }
   }
 
   function uiArtifactUrl(path: string) {
@@ -6612,6 +8821,7 @@ function syncExecutionDetail(planId: number, taskId: number, status: string, row
 async function refreshExecutionViews() {
   await Promise.all([
     loadReports(),
+    loadUiReports(),
     api.get('/executions').then(r => executions.value = r.data)
   ])
 }
@@ -6626,7 +8836,7 @@ function pollPlanExecution(planId: number, taskId: number, row?: any) {
     polling = true
     attempts += 1
     try {
-      const { data } = await api.get(`/executions/${taskId}`)
+      const { data } = await api.get(`/executions/${taskId}`, { headers: { 'X-Session-Activity': '0' } })
       const status = data?.task?.status || ''
       if (status) {
         updatePlanExecutionState(planId, taskId, status, row, data?.results || [])
@@ -6663,16 +8873,52 @@ function pollPlanExecution(planId: number, taskId: number, row?: any) {
   void poll()
 }
 
-async function executePlan(row: any) {
+async function submitPlanExecution(row: any, openDetail = true) {
   clearPlanExecutionPoller(row.id)
   const { data } = await api.post(`/plans/${row.id}/execute`)
   const taskId = data.id
   const status = data.status || 'queued'
-  resetExecutionDetailForPlan(row, taskId, status)
+  if (openDetail) {
+    resetExecutionDetailForPlan(row, taskId, status)
+  }
   updatePlanExecutionState(row.id, taskId, status, row)
+  pollPlanExecution(row.id, taskId, row)
+  return { taskId, status }
+}
+
+async function executePlan(row: any) {
+  await submitPlanExecution(row, true)
   message.success('执行任务已提交')
   await refreshExecutionViews()
-  pollPlanExecution(row.id, taskId, row)
+}
+
+async function executeSelectedPlans() {
+  const selectedRows = planList.value.filter(item => selectedPlanIds.value.includes(item.id))
+  if (!selectedRows.length) {
+    message.warning('请先选择要执行的测试计划')
+    return
+  }
+  try {
+    await confirmAction(`确认批量执行选中的 ${selectedRows.length} 个测试计划吗？`, '批量执行测试计划', {
+      confirmButtonText: '执行',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  batchExecutingPlans.value = true
+  const results = await Promise.allSettled(selectedRows.map(row => submitPlanExecution(row, false)))
+  batchExecutingPlans.value = false
+  const successCount = results.filter(item => item.status === 'fulfilled').length
+  const failedCount = results.length - successCount
+  selectedPlanIds.value = []
+  if (successCount) {
+    message.success(`已提交 ${successCount} 个测试计划执行任务${failedCount ? `，${failedCount} 个提交失败` : ''}`)
+  } else {
+    message.error('批量执行提交失败')
+  }
+  await refreshExecutionViews()
 }
 
 function findCaseApi(row: any) {
@@ -6798,6 +9044,7 @@ function planEnvironmentName(plan: any, environmentId?: number) {
 function executionStatusColor(status: string) {
   if (status === 'passed') return 'success'
   if (status === 'failed' || status === 'error') return 'error'
+  if (status === 'stopped') return 'default'
   if (status === 'running') return 'warning'
   if (status === 'queued') return 'processing'
   if (status === 'edited') return 'warning'
@@ -6811,6 +9058,7 @@ function executionStatusText(status: string) {
     passed: '已通过',
     failed: '失败',
     error: '异常',
+    stopped: '已停止',
     edited: '已编辑'
   }
   return labels[status] || '未执行'
@@ -6850,6 +9098,16 @@ async function openReport(row: any) {
   }
 }
 
+async function exportReport(row: any) {
+  try {
+    const { data } = await api.get(`/executions/${row.id}/report`, { responseType: 'text' })
+    downloadHtmlReport(safeReportFilename(row.target_name || `测试报告_${row.id}`), data)
+    message.success('报告已导出')
+  } catch (error: any) {
+    message.error(error?.response?.data?.detail || '报告导出失败')
+  }
+}
+
 async function deleteReport(row: any) {
   try {
     await confirmAction('确认删除该报告吗？删除后报告中心将不再展示。', '删除报告', {
@@ -6886,6 +9144,42 @@ async function deleteSelectedReports() {
   await loadReports()
 }
 
+async function deleteUiReport(row: any) {
+  try {
+    await confirmAction('确认删除该 UI 测试报告吗？删除后 UI 测试报告将不再展示。', '删除UI测试报告', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  await deleteReportsByIds([row.id])
+  message.success('UI测试报告已删除')
+  await loadUiReports()
+}
+
+async function deleteSelectedUiReports() {
+  const ids = [...selectedUiReportIds.value]
+  if (!ids.length) {
+    message.warning('请先选择要删除的 UI 测试报告')
+    return
+  }
+  try {
+    await confirmAction(`确认删除选中的 ${ids.length} 条 UI 测试报告吗？删除后 UI 测试报告将不再展示。`, '批量删除UI测试报告', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  await deleteReportsByIds(ids)
+  selectedUiReportIds.value = []
+  message.success('UI测试报告已批量删除')
+  await loadUiReports()
+}
+
 async function deleteReportsByIds(ids: number[]) {
   await Promise.all(ids.map(id => api.delete(`/executions/${id}`)))
 }
@@ -6897,6 +9191,7 @@ async function runCase() {
 }
 
 onMounted(async () => {
+  window.addEventListener('session-expired', handleSessionExpired)
   try {
     const { data } = await api.get('/auth/me')
     me.value = data
@@ -6906,10 +9201,12 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('session-expired', handleSessionExpired)
   Array.from(planExecutionPollers.keys()).forEach(clearPlanExecutionPoller)
   closeUiPicker(false)
   Object.values(uiArtifactObjectUrls).forEach(url => {
     if (url) URL.revokeObjectURL(url)
   })
+  clearAiGenerationPoller()
 })
 </script>

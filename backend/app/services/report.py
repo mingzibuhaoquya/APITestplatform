@@ -1,10 +1,14 @@
 import json
 import re
+import base64
+import mimetypes
 from html import escape
+from pathlib import Path
 from typing import Any
 
 
 LOGO_PATH = "/company-logo.png"
+UI_ARTIFACT_ROOT = Path("logs/ui-artifacts")
 
 
 def _status_class(status: str) -> str:
@@ -12,6 +16,8 @@ def _status_class(status: str) -> str:
         return "passed"
     if status in {"failed", "error"}:
         return "failed"
+    if status == "stopped":
+        return "running"
     return "running"
 
 
@@ -39,6 +45,69 @@ def _display_value(value: Any) -> str:
     if isinstance(value, (dict, list)):
         return _json_text(value)
     return str(value)
+
+
+def _time_text(value: Any) -> str:
+    if not value:
+        return "-"
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    return str(value)
+
+
+def _bool_text(value: Any) -> str:
+    return "有头" if value is False else "无头"
+
+
+def _ui_mode_text(mode: Any) -> str:
+    return "AI模式" if mode == "ai" else "高级模式"
+
+
+def _ui_action_text(action: Any) -> str:
+    labels = {
+        "goto": "打开页面",
+        "click": "点击",
+        "dblclick": "双击",
+        "fill": "输入",
+        "select": "选择",
+        "wait": "等待",
+        "assert_text": "断言文本",
+        "assert_visible": "断言元素",
+        "screenshot": "截图",
+        "finish": "结束",
+        "model_call": "模型调用",
+        "error": "异常",
+        "stopped": "已停止",
+    }
+    return labels.get(str(action or ""), str(action or "-"))
+
+
+def _ui_locator_text(locator_type: Any) -> str:
+    labels = {
+        "css": "CSS",
+        "xpath": "XPath",
+        "text": "文本",
+        "placeholder": "占位符",
+        "role": "按钮文字",
+        "ai": "AI描述",
+    }
+    return labels.get(str(locator_type or ""), str(locator_type or "-"))
+
+
+def _token_usage_text(usage: Any, mode: Any = "ai") -> str:
+    if mode != "ai":
+        return "非AI模式不消耗Token"
+    if not isinstance(usage, dict) or not usage:
+        return "暂无记录，重新执行AI模式后生成"
+    total = usage.get("total_tokens") or 0
+    prompt = usage.get("prompt_tokens") or 0
+    completion = usage.get("completion_tokens") or 0
+    parts = [f"总计 {total}", f"输入 {prompt}", f"输出 {completion}"]
+    if usage.get("reasoning_tokens"):
+        parts.append(f"推理 {usage.get('reasoning_tokens')}")
+    if usage.get("cached_tokens"):
+        parts.append(f"缓存 {usage.get('cached_tokens')}")
+    return " / ".join(parts)
 
 
 def _xml_indent(level: int) -> str:
@@ -244,6 +313,189 @@ def _extractors_html(extractors: list[dict]) -> str:
     """
 
 
+def _is_ui_result(result: Any, request_snapshot: dict[str, Any], response_snapshot: dict[str, Any]) -> bool:
+    return (
+        getattr(result, "api_name", "") == "UI自动化"
+        or request_snapshot.get("mode") == "ai"
+        or "agent_steps" in response_snapshot
+        or "steps" in response_snapshot and request_snapshot.get("browser")
+    )
+
+
+def _screenshot_path(path_text: str) -> Path | None:
+    if not path_text:
+        return None
+    path = Path(path_text)
+    candidates = [path]
+    if not path.is_absolute():
+        candidates.append(UI_ARTIFACT_ROOT / path.name)
+    else:
+        candidates.append(UI_ARTIFACT_ROOT / path.name)
+    for candidate in candidates:
+        try:
+            if candidate.exists() and candidate.is_file():
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
+def _screenshot_src(path_text: str) -> str:
+    path = _screenshot_path(path_text)
+    if not path:
+        filename = Path(path_text).name
+        return f"/ui-artifacts/{escape(filename)}" if filename else ""
+    mime_type = mimetypes.guess_type(path.name)[0] or "image/png"
+    try:
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    except OSError:
+        filename = path.name
+        return f"/ui-artifacts/{escape(filename)}"
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def _ui_base_info_html(task: Any, result: Any, request_snapshot: dict[str, Any], response_snapshot: dict[str, Any]) -> str:
+    mode = request_snapshot.get("mode")
+    items = [
+        ("用例名称", getattr(result, "case_name", "") or "-"),
+        ("项目", getattr(task, "project_name", "") or "-"),
+        ("环境", (request_snapshot.get("environment") or {}).get("name") or getattr(task, "environment_name", "-")),
+        ("执行人", getattr(task, "executor_name", "") or "-"),
+        ("测试模式", _ui_mode_text(mode)),
+        ("浏览器", request_snapshot.get("browser") or "chromium"),
+        ("运行方式", _bool_text(request_snapshot.get("headless"))),
+        ("目标地址", request_snapshot.get("start_url") or "-"),
+        ("最大步骤数", request_snapshot.get("max_steps") or "-"),
+        ("单步超时", f"{request_snapshot.get('step_timeout_ms') or '-'} ms"),
+        ("开始时间", _time_text(getattr(task, "started_at", ""))),
+        ("结束时间", _time_text(getattr(task, "ended_at", ""))),
+    ]
+    items.insert(6, ("Token消耗", _token_usage_text(response_snapshot.get("token_usage"), mode)))
+    rows = "".join(f"<div><span>{escape(label)}</span><strong>{escape(_display_value(value))}</strong></div>" for label, value in items)
+    return f"""
+      <section>
+        <h3>基础信息</h3>
+        <div class="ui-info-grid">{rows}</div>
+      </section>
+    """
+
+
+def _ui_steps_html(response_snapshot: dict[str, Any]) -> str:
+    steps = response_snapshot.get("agent_steps") or response_snapshot.get("steps") or []
+    if not steps:
+        return """
+          <section>
+            <h3>步骤明细</h3>
+            <p class="muted-line">暂无步骤记录</p>
+          </section>
+        """
+    rows = []
+    for fallback_index, item in enumerate(steps, start=1):
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status") or "")
+        status_class = _status_class(status)
+        message = item.get("message") or item.get("reason") or item.get("description") or "-"
+        target = item.get("target") or item.get("ref") or "-"
+        value = item.get("value") or item.get("expected") or "-"
+        rows.append(
+            f"""
+            <tr>
+              <td>{escape(str(item.get("index") or fallback_index))}</td>
+              <td>{escape(_ui_action_text(item.get("action")))}</td>
+              <td>{escape(_ui_locator_text(item.get("locator_type")))}</td>
+              <td class="wrap-cell">{escape(_display_value(target))}</td>
+              <td class="wrap-cell">{escape(_display_value(value))}</td>
+              <td><span class="badge {status_class}">{escape(_status_label(status))}</span></td>
+              <td class="wrap-cell">{escape(_display_value(message))}</td>
+            </tr>
+            """
+        )
+    return f"""
+      <section>
+        <h3>步骤明细</h3>
+        <div class="table-scroll">
+          <table class="ui-step-report">
+            <thead><tr><th>步骤</th><th>动作</th><th>定位方式</th><th>目标元素/地址</th><th>值/期望</th><th>状态</th><th>说明</th></tr></thead>
+            <tbody>{''.join(rows)}</tbody>
+          </table>
+        </div>
+      </section>
+    """
+
+
+def _ui_screenshots_html(response_snapshot: dict[str, Any]) -> str:
+    screenshots = response_snapshot.get("screenshots") or []
+    if not screenshots:
+        return """
+          <section>
+            <h3>执行截图</h3>
+            <p class="muted-line">暂无截图</p>
+          </section>
+        """
+    cards = []
+    for item in screenshots:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "")
+        src = _screenshot_src(path)
+        if not src:
+            continue
+        title = f"步骤 {item.get('step_index') or '-'} · {item.get('type') or 'screenshot'}"
+        cards.append(
+            f"""
+            <figure>
+              <figcaption>{escape(title)}</figcaption>
+              <button class="screenshot-preview" type="button" data-title="{escape(title, quote=True)}" title="点击查看截图">
+                <img src="{escape(src, quote=True)}" alt="{escape(title, quote=True)}" />
+              </button>
+            </figure>
+            """
+        )
+    if not cards:
+        return """
+          <section>
+            <h3>执行截图</h3>
+            <p class="muted-line">截图文件不存在或已被清理</p>
+          </section>
+        """
+    return f"""
+      <section>
+        <h3>执行截图</h3>
+        <div class="ui-screenshot-grid">{''.join(cards)}</div>
+      </section>
+    """
+
+
+def _ui_result_html(task: Any, result: Any, request_snapshot: dict[str, Any], response_snapshot: dict[str, Any], index: int) -> str:
+    test_goal = request_snapshot.get("test_goal")
+    test_data = request_snapshot.get("test_data")
+    assertion_goal = request_snapshot.get("assertion_goal")
+    meta_sections = []
+    if test_goal:
+        meta_sections.append(_snapshot("测试目标", test_goal, f"ui-test-goal-{index}"))
+    if test_data not in (None, {}, ""):
+        meta_sections.append(_snapshot("测试数据", test_data, f"ui-test-data-{index}"))
+    if assertion_goal:
+        meta_sections.append(_snapshot("期望结果", assertion_goal, f"ui-assertion-goal-{index}"))
+    error_message = getattr(result, "error_message", "") or response_snapshot.get("message") or ""
+    error_analysis = response_snapshot.get("error_analysis") or ""
+    error_html = _snapshot("错误信息", error_message or "-", f"ui-error-{index}") if error_message else ""
+    analysis_html = _snapshot("AI分析", error_analysis, f"ui-error-analysis-{index}") if error_analysis else ""
+    return f"""
+      {_ui_base_info_html(task, result, request_snapshot, response_snapshot)}
+      {''.join(meta_sections)}
+      {_ui_steps_html(response_snapshot)}
+      {_ui_screenshots_html(response_snapshot)}
+      <section>
+        <h3>断言结果</h3>
+        <ul class="assertions">{_assertions_html(result.assertion_results)}</ul>
+      </section>
+      {analysis_html}
+      {error_html}
+    """
+
+
 def build_html_report(task: Any, results: list[Any], target_name: str = "") -> str:
     total = len(results)
     passed = sum(1 for item in results if item.status == "passed")
@@ -261,21 +513,14 @@ def build_html_report(task: Any, results: list[Any], target_name: str = "") -> s
         extracted_variables = response_snapshot.get("extracted_variables", [])
         case_name = getattr(result, "case_name", "") or f"用例 {result.case_id or '-'}"
         api_name = getattr(result, "api_name", "") or "-"
-        rows.append(
-            f"""
-            <details class="case-card">
-              <summary class="case-summary">
-                <div class="case-title">
-                  <h2>{escape(str(case_name))}</h2>
-                  <p class="api-line"><span>接口</span>{escape(str(api_name))}</p>
-                  <p class="url-line"><b>{escape(str(method))}</b>{escape(str(url))}</p>
-                </div>
-                <div class="case-right">
-                  <span class="badge {row_status_class}">{escape(_status_label(result.status))}</span>
-                  <span class="duration">{escape(str(result.duration_ms))} ms</span>
-                </div>
-              </summary>
-              <div class="case-body">
+        if _is_ui_result(result, request_snapshot, response_snapshot):
+            method = "UI"
+            url = request_snapshot.get("start_url") or response_snapshot.get("url") or "-"
+            api_name = "UI自动化"
+            detail_html = _ui_result_html(task, result, request_snapshot, response_snapshot, index)
+            subtitle = f"{_ui_mode_text(request_snapshot.get('mode'))} · {escape(str(url))}"
+        else:
+            detail_html = f"""
                 <section>
                   <h3>断言明细</h3>
                   <ul class="assertions">{_assertions_html(result.assertion_results)}</ul>
@@ -283,6 +528,24 @@ def build_html_report(task: Any, results: list[Any], target_name: str = "") -> s
                 {_extractors_html(extracted_variables)}
                 {_request_sections(request_snapshot, index)}
                 {_response_sections(response_snapshot, index)}
+            """
+            subtitle = f"<b>{escape(str(method))}</b>{escape(str(url))}"
+        rows.append(
+            f"""
+            <details class="case-card">
+              <summary class="case-summary">
+                <div class="case-title">
+                  <h2>{escape(str(case_name))}</h2>
+                  <p class="api-line"><span>接口</span>{escape(str(api_name))}</p>
+                  <p class="url-line">{subtitle}</p>
+                </div>
+                <div class="case-right">
+                  <span class="badge {row_status_class}">{escape(_status_label(result.status))}</span>
+                  <span class="duration">{escape(str(result.duration_ms))} ms</span>
+                </div>
+              </summary>
+              <div class="case-body">
+                {detail_html}
               </div>
             </details>
             """
@@ -344,6 +607,29 @@ def build_html_report(task: Any, results: list[Any], target_name: str = "") -> s
     .assertions small {{ display: block; color: #64748b; }}
     .assertions strong {{ display: block; margin-top: 2px; word-break: break-word; }}
     .muted-line {{ color: #64748b; }}
+    .ui-info-grid {{ display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 10px; }}
+    .ui-info-grid div {{ background: #fff; border: 1px solid #e5e7eb; border-radius: 7px; padding: 10px 12px; min-width: 0; }}
+    .ui-info-grid span {{ display: block; color: #64748b; font-size: 12px; margin-bottom: 5px; }}
+    .ui-info-grid strong {{ display: block; word-break: break-word; font-size: 13px; }}
+    .table-scroll {{ overflow-x: auto; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; }}
+    .ui-step-report {{ width: 100%; border-collapse: collapse; min-width: 980px; }}
+    .ui-step-report th, .ui-step-report td {{ border-bottom: 1px solid #e5e7eb; padding: 10px 12px; text-align: left; vertical-align: top; font-size: 13px; }}
+    .ui-step-report th {{ color: #334155; background: #f8fafc; font-weight: 700; }}
+    .ui-step-report tr:last-child td {{ border-bottom: 0; }}
+    .wrap-cell {{ word-break: break-word; max-width: 300px; }}
+    .ui-screenshot-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }}
+    .ui-screenshot-grid figure {{ margin: 0; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; overflow: hidden; }}
+    .ui-screenshot-grid figcaption {{ padding: 9px 11px; color: #475569; font-size: 12px; border-bottom: 1px solid #e5e7eb; }}
+    .screenshot-preview {{ display: block; width: 100%; padding: 0; border: 0; background: #f8fafc; cursor: zoom-in; }}
+    .screenshot-preview img {{ display: block; width: 100%; max-height: 360px; object-fit: contain; background: #f8fafc; }}
+    .report-lightbox {{ position: fixed; inset: 0; z-index: 999; display: none; align-items: center; justify-content: center; padding: 24px; }}
+    .report-lightbox.open {{ display: flex; }}
+    .report-lightbox-backdrop {{ position: absolute; inset: 0; background: rgba(15, 23, 42, .76); }}
+    .report-lightbox-content {{ position: relative; z-index: 1; max-width: 96vw; max-height: 94vh; overflow: hidden; border-radius: 10px; background: #fff; box-shadow: 0 24px 80px rgba(15, 23, 42, .35); }}
+    .report-lightbox-head {{ display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 12px; border-bottom: 1px solid #e5e7eb; color: #334155; font-size: 13px; }}
+    .report-lightbox-close {{ width: 30px; height: 30px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #475569; cursor: pointer; font-size: 18px; line-height: 1; }}
+    .report-lightbox-close:hover {{ color: #2563eb; border-color: #93c5fd; background: #eff6ff; }}
+    .report-lightbox img {{ display: block; max-width: 96vw; max-height: calc(94vh - 52px); object-fit: contain; background: #f8fafc; }}
     .snapshot-title {{ display: flex; align-items: center; justify-content: space-between; gap: 12px; }}
     .copy-btn {{ border: 1px solid #cbd5e1; background: #fff; color: #475569; border-radius: 7px; min-width: 44px; height: 30px; cursor: pointer; }}
     .copy-btn:hover {{ color: #2563eb; border-color: #93c5fd; background: #eff6ff; }}
@@ -357,6 +643,7 @@ def build_html_report(task: Any, results: list[Any], target_name: str = "") -> s
       .case-summary {{ align-items: flex-start; flex-direction: column; }}
       .case-right {{ width: 100%; justify-content: space-between; }}
       .assertions li, .assertions.extractors li {{ grid-template-columns: 1fr; }}
+      .ui-info-grid {{ grid-template-columns: 1fr; }}
     }}
   </style>
 </head>
@@ -364,7 +651,7 @@ def build_html_report(task: Any, results: list[Any], target_name: str = "") -> s
   <header class="hero">
     <div class="brand">
       <img src="{LOGO_PATH}" alt="company logo" />
-      <span>接口自动化测试平台</span>
+      <span>测试平台</span>
     </div>
     <div class="hero-content">
       <div>
@@ -390,6 +677,16 @@ def build_html_report(task: Any, results: list[Any], target_name: str = "") -> s
     </div>
     {''.join(rows)}
   </main>
+  <div class="report-lightbox" id="report-lightbox" aria-hidden="true">
+    <div class="report-lightbox-backdrop" data-close-lightbox></div>
+    <div class="report-lightbox-content" role="dialog" aria-modal="true" aria-label="截图预览">
+      <div class="report-lightbox-head">
+        <span id="report-lightbox-title">截图预览</span>
+        <button class="report-lightbox-close" type="button" data-close-lightbox aria-label="关闭">×</button>
+      </div>
+      <img id="report-lightbox-image" alt="截图预览" />
+    </div>
+  </div>
   <script>
     document.querySelectorAll('.copy-btn').forEach(function(button) {{
       button.addEventListener('click', async function(event) {{
@@ -410,6 +707,33 @@ def build_html_report(task: Any, results: list[Any], target_name: str = "") -> s
           selection.addRange(range);
         }}
       }});
+    }});
+    var lightbox = document.getElementById('report-lightbox');
+    var lightboxImage = document.getElementById('report-lightbox-image');
+    var lightboxTitle = document.getElementById('report-lightbox-title');
+    function closeLightbox() {{
+      if (!lightbox || !lightboxImage) return;
+      lightbox.classList.remove('open');
+      lightbox.setAttribute('aria-hidden', 'true');
+      lightboxImage.removeAttribute('src');
+    }}
+    document.querySelectorAll('.screenshot-preview').forEach(function(button) {{
+      button.addEventListener('click', function(event) {{
+        event.preventDefault();
+        event.stopPropagation();
+        var image = button.querySelector('img');
+        if (!lightbox || !lightboxImage || !image) return;
+        lightboxImage.src = image.src;
+        if (lightboxTitle) lightboxTitle.textContent = button.dataset.title || '截图预览';
+        lightbox.classList.add('open');
+        lightbox.setAttribute('aria-hidden', 'false');
+      }});
+    }});
+    document.querySelectorAll('[data-close-lightbox]').forEach(function(element) {{
+      element.addEventListener('click', closeLightbox);
+    }});
+    document.addEventListener('keydown', function(event) {{
+      if (event.key === 'Escape') closeLightbox();
     }});
   </script>
 </body>

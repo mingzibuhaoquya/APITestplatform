@@ -10,21 +10,49 @@ from sqlalchemy.orm import Session
 
 from ..models import AiSetting, Environment, ExecutionResult, ExecutionTask, UiTestCase
 from ..utils import dump_json, parse_json
+from .ai_settings import get_active_ai_setting
 from .ui_executor import (
     ARTIFACT_ROOT,
     DEFAULT_UI_LOCALE,
     DEFAULT_UI_USER_AGENT,
     UiResultView,
+    analyze_ui_error,
     _goto_and_wait,
+    _ui_headless,
+    _launch_ui_browser,
     _save_artifacts,
     _save_result,
+    _wait_for_page_ready,
     build_ui_url,
+    explain_ui_error,
+    ui_task_stop_requested,
 )
 
 
-ALLOWED_AGENT_ACTIONS = {"click", "fill", "select", "wait", "assert_text", "screenshot", "finish"}
+ALLOWED_AGENT_ACTIONS = {"click", "dblclick", "fill", "select", "wait", "assert_text", "screenshot", "finish"}
 SENSITIVE_KEYS = ("password", "passwd", "secret", "token", "key", "密码", "密钥", "令牌")
 ARTIFACT_RETENTION_DAYS = 7
+ACTION_ALIASES = {
+    "点击": "click",
+    "单击": "click",
+    "click_element": "click",
+    "double_click": "dblclick",
+    "双击": "dblclick",
+    "输入": "fill",
+    "填写": "fill",
+    "type": "fill",
+    "input": "fill",
+    "选择": "select",
+    "下拉选择": "select",
+    "等待": "wait",
+    "断言文本": "assert_text",
+    "检查文本": "assert_text",
+    "截图": "screenshot",
+    "完成": "finish",
+    "结束": "finish",
+    "成功": "finish",
+    "失败": "finish",
+}
 
 
 class AgentModelError(RuntimeError):
@@ -40,7 +68,7 @@ def execute_ui_agent_case(db: Session, task: ExecutionTask) -> ExecutionResult:
     if not case or case.is_deleted or not env:
         return _save_result(db, task.id, task.target_id, "error", {}, {"agent_steps": []}, [], 0, "UI用例或环境不存在")
 
-    setting = db.query(AiSetting).first()
+    setting = get_active_ai_setting(db)
     if not setting or setting.status != "active" or not setting.provider_url or not setting.model_name:
         duration_ms = int((time.perf_counter() - started) * 1000)
         return _save_result(
@@ -62,6 +90,7 @@ def execute_ui_agent_case(db: Session, task: ExecutionTask) -> ExecutionResult:
     current_url = ""
     final_status = "failed"
     error_message = ""
+    _update_task_progress(db, task, agent_steps, screenshots, "running", "AI执行已启动，正在准备浏览器")
     try:
         from playwright.sync_api import Error as PlaywrightError
         from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -82,7 +111,7 @@ def execute_ui_agent_case(db: Session, task: ExecutionTask) -> ExecutionResult:
 
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=case.headless is not False)
+            browser = _launch_ui_browser(playwright, case)
             page = browser.new_page(
                 user_agent=DEFAULT_UI_USER_AGENT,
                 locale=DEFAULT_UI_LOCALE,
@@ -92,12 +121,32 @@ def execute_ui_agent_case(db: Session, task: ExecutionTask) -> ExecutionResult:
             try:
                 current_url = build_ui_url(env, case.start_url or "/")
                 _goto_and_wait(page, current_url, case)
+                initial_screenshot = save_agent_screenshot(page, task.id, 0, "initial")
+                if initial_screenshot:
+                    screenshots.append(initial_screenshot)
+                _update_task_progress(db, task, agent_steps, screenshots, "running", "页面已打开，正在进行AI观察")
                 for index in range(1, _max_steps(case) + 1):
+                    if ui_task_stop_requested(db, task):
+                        final_status = "stopped"
+                        error_message = "用户手动停止任务"
+                        agent_steps.append({"index": index, "action": "stop", "status": "stopped", "message": error_message})
+                        _update_task_progress(db, task, agent_steps, screenshots, "stopped", error_message)
+                        break
                     observation = observe_page(page)
                     decision = decide_next_action(setting, case, observation, agent_steps)
+                    if ui_task_stop_requested(db, task):
+                        final_status = "stopped"
+                        error_message = "用户手动停止任务"
+                        agent_steps.append({"index": index, "action": "stop", "status": "stopped", "message": error_message})
+                        _update_task_progress(db, task, agent_steps, screenshots, "stopped", error_message)
+                        break
                     result = run_agent_action(page, decision, observation, index, case)
                     result["url"] = page.url
                     result["page_title"] = _safe_page_title(page)
+                    repeated_message = _repeated_action_message(agent_steps, result)
+                    if repeated_message:
+                        result["status"] = "failed"
+                        result["message"] = repeated_message
                     agent_steps.append(result)
                     screenshot = save_agent_screenshot(page, task.id, index, result["status"])
                     if screenshot:
@@ -132,18 +181,23 @@ def execute_ui_agent_case(db: Session, task: ExecutionTask) -> ExecutionResult:
         _update_task_progress(db, task, agent_steps, screenshots, "error", error_message)
     except (PlaywrightError, PlaywrightTimeoutError, Exception) as exc:
         final_status = "error"
-        error_message = str(exc)
-        agent_steps.append({"index": len(agent_steps) + 1, "action": "error", "status": "error", "message": error_message})
+        raw_error = str(exc)
+        error_message = explain_ui_error(raw_error)
+        agent_steps.append({"index": len(agent_steps) + 1, "action": "error", "status": "error", "message": error_message, "raw_error": raw_error})
         _update_task_progress(db, task, agent_steps, screenshots, "error", error_message)
 
     duration_ms = int((time.perf_counter() - started) * 1000)
+    response_snapshot = {"agent_steps": agent_steps, "screenshots": screenshots, "token_usage": _sum_token_usage(agent_steps)}
+    error_analysis = "" if final_status in {"passed", "stopped"} else analyze_ui_error(db, case, error_message, agent_steps)
+    if error_analysis:
+        response_snapshot["error_analysis"] = error_analysis
     row = _save_result(
         db,
         task.id,
         case.id,
         final_status,
         _agent_request_snapshot(case, env, current_url),
-        {"agent_steps": agent_steps, "screenshots": screenshots},
+        response_snapshot,
         assertions,
         duration_ms,
         error_message,
@@ -166,6 +220,7 @@ def _update_task_progress(
         "message": message,
         "agent_steps": agent_steps,
         "screenshots": screenshots,
+        "token_usage": _sum_token_usage(agent_steps),
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     })
     db.commit()
@@ -255,11 +310,17 @@ def observe_page(page) -> dict[str, Any]:
 def decide_next_action(setting: AiSetting, case: UiTestCase, observation: dict[str, Any], history: list[dict[str, Any]]) -> dict[str, Any]:
     system = (
         "你是一个受控的Web UI自动化执行Agent。只能返回JSON对象，不要返回Markdown。"
-        "可用动作：click、fill、select、wait、assert_text、screenshot、finish。"
+        "禁止输出解释、代码块、前缀、后缀、列表或自然语言；整个回复必须是一个JSON对象。"
+        "可用动作：click、dblclick、fill、select、wait、assert_text、screenshot、finish。"
         "必须只使用current_page.candidates中当前可见可操作元素的ref字段，不要复用history里的旧ref或旧XPath。"
+        "如果刚点击搜索/查询后页面还没出现目标结果，优先wait 2000到5000毫秒，不要反复点击同一个搜索按钮或结果区域。"
+        "同一个动作同一个元素连续执行2次后仍无进展，应finish且success=false说明卡住原因。"
         "不要对disabled/不可编辑控件执行fill/select/click；不要请求打开外部网址；不确定时使用wait或finish失败。"
-        "返回格式：{\"action\":\"click|fill|select|wait|assert_text|screenshot|finish\","
+        "需要输入或选择test_data中的数据时，value必须返回变量引用，例如${用户名}、${密码}，禁止自行编造账号、密码或随机长串。"
+        "如果测试数据中密码是1，仍然返回${密码}，不要返回******，也不要生成其它密码。"
+        "返回格式：{\"action\":\"click|dblclick|fill|select|wait|assert_text|screenshot|finish\","
         "\"ref\":\"e1\",\"value\":\"\",\"reason\":\"\",\"success\":true,\"message\":\"\"}。"
+        "示例：{\"action\":\"click\",\"ref\":\"e3\",\"value\":\"\",\"reason\":\"点击登录按钮\",\"success\":false,\"message\":\"\"}。"
         "finish表示用例结束，success=true为通过，success=false为失败。"
     )
     user = {
@@ -286,15 +347,17 @@ def decide_next_action(setting: AiSetting, case: UiTestCase, observation: dict[s
     response = _post_chat_completion(url, payload, headers)
     data = response.json()
     content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-    return normalize_agent_decision(content)
+    decision = normalize_agent_decision(content)
+    decision["token_usage"] = _token_usage(data)
+    return decision
 
 
 def _post_chat_completion(url: str, payload: dict[str, Any], headers: dict[str, str]) -> httpx.Response:
     try:
-        response = httpx.post(url, json=payload, headers=headers, timeout=30)
+        response = _post_chat_completion_once(url, payload, headers)
         if response.status_code == 400 and payload.get("response_format"):
             retry_payload = {key: value for key, value in payload.items() if key != "response_format"}
-            retry_response = httpx.post(url, json=retry_payload, headers=headers, timeout=30)
+            retry_response = _post_chat_completion_once(url, retry_payload, headers)
             if retry_response.status_code < 400:
                 return retry_response
             response = retry_response
@@ -308,6 +371,7 @@ def _post_chat_completion(url: str, payload: dict[str, Any], headers: dict[str, 
                 "request_url": url,
                 "model": payload.get("model", ""),
                 "status_code": response.status_code,
+                "retry_count": int(response.extensions.get("retry_count", 0)),
                 "response": _response_preview(response),
                 "hint": _model_error_hint(url, response),
             },
@@ -319,87 +383,182 @@ def _post_chat_completion(url: str, payload: dict[str, Any], headers: dict[str, 
                 "request_url": url,
                 "model": payload.get("model", ""),
                 "error": str(exc),
-                "hint": "请检查模型服务地址、网络连通性、代理和服务器 DNS。",
+                "retry_count": int(getattr(exc, "retry_count", 0) or 0),
+                "hint": _request_error_hint(url, exc),
             },
         ) from exc
 
 
-def normalize_agent_decision(content: str | dict[str, Any]) -> dict[str, Any]:
-    data: Any = content
-    if isinstance(content, str):
-        text = content.strip()
+def _post_chat_completion_once(url: str, payload: dict[str, Any], headers: dict[str, str]) -> httpx.Response:
+    last_error: httpx.RequestError | None = None
+    retry_statuses = {429, 500, 502, 503, 504}
+    max_attempts = 3
+    for attempt in range(max_attempts):
         try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            match = re.search(r"\{.*\}", text, re.S)
-            if not match:
-                raise RuntimeError("AI未返回可识别的JSON动作")
-            data = json.loads(match.group(0))
+            response = httpx.post(url, json=payload, headers=headers, timeout=httpx.Timeout(60.0, connect=15.0))
+            response.extensions["retry_count"] = attempt
+            if response.status_code in retry_statuses and attempt < max_attempts - 1:
+                time.sleep(_retry_delay(attempt))
+                continue
+            return response
+        except httpx.RequestError as exc:
+            last_error = exc
+            setattr(last_error, "retry_count", attempt)
+            if attempt < max_attempts - 1:
+                time.sleep(_retry_delay(attempt))
+                continue
+            setattr(last_error, "retry_count", attempt)
+            raise
+    if last_error:
+        raise last_error
+    raise RuntimeError("AI模型请求未返回响应")
+
+
+def _retry_delay(attempt: int) -> float:
+    return (1.0, 3.0, 8.0)[min(max(attempt, 0), 2)]
+
+
+def normalize_agent_decision(content: str | dict[str, Any]) -> dict[str, Any]:
+    data: Any = _extract_agent_decision_json(content)
     if not isinstance(data, dict):
         raise RuntimeError("AI动作必须是JSON对象")
-    action = str(data.get("action") or "").strip()
+    action = _normalize_agent_action(data.get("action") or data.get("操作") or data.get("type") or data.get("name"))
     if action not in ALLOWED_AGENT_ACTIONS:
         raise RuntimeError(f"AI返回了不支持的动作：{action or '-'}")
     return {
         "action": action,
-        "ref": str(data.get("ref") or "").strip(),
-        "target": str(data.get("target") or data.get("selector") or "").strip(),
-        "locator_type": str(data.get("locator_type") or "xpath").strip(),
-        "value": str(data.get("value") or ""),
-        "reason": str(data.get("reason") or ""),
+        "ref": str(data.get("ref") or data.get("element_ref") or data.get("元素") or "").strip(),
+        "target": str(data.get("target") or data.get("selector") or data.get("xpath") or data.get("目标") or "").strip(),
+        "locator_type": str(data.get("locator_type") or data.get("locatorType") or data.get("定位方式") or "xpath").strip(),
+        "value": str(data.get("value") or data.get("text") or data.get("input") or data.get("值") or ""),
+        "reason": str(data.get("reason") or data.get("理由") or data.get("说明") or ""),
         "success": _as_bool(data.get("success")) if action == "finish" else False,
-        "message": str(data.get("message") or ""),
+        "message": str(data.get("message") or data.get("消息") or ""),
     }
+
+
+def _extract_agent_decision_json(content: str | dict[str, Any]) -> Any:
+    if not isinstance(content, str):
+        return content
+    text = content.strip()
+    if not text:
+        raise RuntimeError("AI未返回可识别的JSON动作")
+    for candidate in _agent_json_candidates(text):
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+    raise RuntimeError(f"AI未返回可识别的JSON动作，原始返回：{text[:300]}")
+
+
+def _agent_json_candidates(text: str) -> list[str]:
+    candidates = [text]
+    candidates.extend(match.group(1).strip() for match in re.finditer(r"```(?:json)?\s*([\s\S]*?)\s*```", text, re.I))
+    candidates.extend(_balanced_json_objects(text))
+    return [item for item in dict.fromkeys(candidates) if item]
+
+
+def _balanced_json_objects(text: str) -> list[str]:
+    objects: list[str] = []
+    start = -1
+    depth = 0
+    in_string = False
+    escape = False
+    for index, char in enumerate(text):
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+        elif char == "}" and depth:
+            depth -= 1
+            if depth == 0 and start >= 0:
+                objects.append(text[start : index + 1])
+                start = -1
+    return objects
+
+
+def _normalize_agent_action(value: Any) -> str:
+    action = str(value or "").strip()
+    return ACTION_ALIASES.get(action, action)
 
 
 def run_agent_action(page, decision: dict[str, Any], observation: dict[str, Any], index: int, case: UiTestCase) -> dict[str, Any]:
     action = decision["action"]
+    started = time.perf_counter()
+    raw_value = str(decision.get("value") or "")
+    resolved_value, value_key = _resolve_agent_value(raw_value, decision, observation, case)
     result = {
         "index": index,
         "action": action,
         "ref": decision.get("ref", ""),
         "target": decision.get("target", ""),
-        "value": _mask_value("value", decision.get("value", "")),
+        "value": _mask_value(value_key or "value", resolved_value),
         "reason": decision.get("reason", ""),
+        "token_usage": decision.get("token_usage") or {},
         "status": "passed",
         "message": decision.get("message") or "通过",
     }
     try:
-        if not case.allow_ai_actions and action in {"click", "fill", "select"}:
+        if not case.allow_ai_actions and action in {"click", "dblclick", "fill", "select"}:
             raise RuntimeError("当前用例未允许AI自主点击/输入")
         if action == "finish":
             result["success"] = bool(decision.get("success"))
             result["status"] = "passed" if result["success"] else "failed"
             result["message"] = decision.get("message") or ("AI判定用例通过" if result["success"] else "AI判定用例失败")
-            return result
+            return _finish_agent_result(result, started)
         if action == "wait":
-            timeout = _safe_timeout(decision.get("value"), case.step_timeout_ms)
+            timeout = _safe_timeout(resolved_value, case.step_timeout_ms)
             page.wait_for_timeout(timeout)
+            result["value"] = str(timeout)
             result["message"] = f"已等待 {timeout}ms"
-            return result
+            return _finish_agent_result(result, started)
         if action == "screenshot":
             result["message"] = "已截图"
-            return result
+            return _finish_agent_result(result, started)
         if action == "assert_text":
-            expected = decision.get("value") or decision.get("target") or ""
+            expected = resolved_value or decision.get("target") or ""
             visible = page.get_by_text(str(expected)).first.is_visible(timeout=case.step_timeout_ms)
             result["assertion"] = {"type": "ui_agent_assert_text", "path": str(expected), "expected": "可见", "actual": "可见" if visible else "不可见", "passed": visible, "message": "通过" if visible else "未找到文本"}
             if not visible:
                 result["status"] = "failed"
                 result["message"] = f"未找到文本：{expected}"
-            return result
+            return _finish_agent_result(result, started)
         resolved_target = _target_from_ref(decision, observation)
         result["locator_type"] = resolved_target.get("locator_type", "xpath")
         result["target"] = resolved_target.get("target", result.get("target", ""))
         locator = _locator_for_target(page, resolved_target)
         if action == "click":
+            _wait_for_page_ready(page, case.step_timeout_ms)
             locator.click(timeout=case.step_timeout_ms)
             _settle_page(page, case.step_timeout_ms)
+            _wait_for_page_ready(page, case.step_timeout_ms, "after_action")
+            page.wait_for_timeout(1500)
+        elif action == "dblclick":
+            _wait_for_page_ready(page, case.step_timeout_ms)
+            locator.dblclick(timeout=case.step_timeout_ms)
+            _settle_page(page, case.step_timeout_ms)
+            _wait_for_page_ready(page, case.step_timeout_ms, "after_action")
             page.wait_for_timeout(1500)
         elif action == "fill":
-            locator.fill(str(decision.get("value") or ""), timeout=case.step_timeout_ms)
+            _wait_for_page_ready(page, case.step_timeout_ms)
+            locator.fill(resolved_value, timeout=case.step_timeout_ms)
+            locator.dispatch_event("input")
+            locator.dispatch_event("change")
+            locator.dispatch_event("blur")
+            page.wait_for_timeout(300)
         elif action == "select":
-            value = str(decision.get("value") or "")
+            value = resolved_value
+            _wait_for_page_ready(page, case.step_timeout_ms)
             try:
                 locator.select_option(value, timeout=case.step_timeout_ms)
             except Exception:
@@ -408,12 +567,77 @@ def run_agent_action(page, decision: dict[str, Any], observation: dict[str, Any]
             locator.dispatch_event("change")
             locator.dispatch_event("blur")
             _settle_page(page, min(case.step_timeout_ms, 5000))
+            _wait_for_page_ready(page, min(case.step_timeout_ms, 5000), "after_action")
             page.wait_for_timeout(800)
         page.wait_for_timeout(500)
     except Exception as exc:
+        raw_error = str(exc)
         result["status"] = "error"
-        result["message"] = str(exc)
+        result["message"] = explain_ui_error(raw_error, {"action": action, "locator_type": result.get("locator_type"), "target": result.get("target")})
+        result["raw_error"] = raw_error
+    return _finish_agent_result(result, started)
+
+
+def _finish_agent_result(result: dict[str, Any], started: float) -> dict[str, Any]:
+    result["duration_ms"] = int((time.perf_counter() - started) * 1000)
     return result
+
+
+def _resolve_agent_value(raw_value: str, decision: dict[str, Any], observation: dict[str, Any], case: UiTestCase) -> tuple[str, str]:
+    test_data = parse_json(case.test_data_json, {})
+    if not isinstance(test_data, dict):
+        return raw_value, ""
+    resolved, key = _replace_test_data_variables(raw_value, test_data)
+    if key:
+        return resolved, key
+    if decision.get("action") == "fill":
+        inferred_key = _infer_fill_data_key(decision, observation, test_data)
+        if inferred_key and _should_override_agent_value(raw_value, inferred_key):
+            return str(test_data.get(inferred_key) or ""), inferred_key
+    return raw_value, ""
+
+
+def _replace_test_data_variables(value: str, test_data: dict[str, Any]) -> tuple[str, str]:
+    text = str(value or "")
+    matched_keys: list[str] = []
+
+    def replace(match: re.Match[str]) -> str:
+        key = match.group(1).strip()
+        if key in test_data:
+            matched_keys.append(key)
+            return str(test_data.get(key) or "")
+        return match.group(0)
+
+    resolved = re.sub(r"\$\{([^{}]+)\}", replace, text)
+    return resolved, matched_keys[0] if len(matched_keys) == 1 else ""
+
+
+def _infer_fill_data_key(decision: dict[str, Any], observation: dict[str, Any], test_data: dict[str, Any]) -> str:
+    ref = str(decision.get("ref") or "")
+    target_text = " ".join(
+        str(value or "")
+        for value in (
+            decision.get("target"),
+            decision.get("reason"),
+            decision.get("message"),
+            _candidate_text_by_ref(observation, ref),
+        )
+    ).lower()
+    password_keys = [key for key in test_data if _is_sensitive_key(key)]
+    if password_keys and ("password" in target_text or "passwd" in target_text or "密码" in target_text):
+        return password_keys[0]
+    for key in test_data:
+        if str(key).lower() in target_text:
+            return key
+    return ""
+
+
+def _candidate_text_by_ref(observation: dict[str, Any], ref: str) -> str:
+    for item in observation.get("candidates") or []:
+        if not isinstance(item, dict) or str(item.get("ref") or "") != ref:
+            continue
+        return " ".join(str(item.get(key) or "") for key in ("text", "placeholder", "aria", "id", "name", "type"))
+    return ""
 
 
 def _agent_locator(page, decision: dict[str, Any], observation: dict[str, Any]):
@@ -459,8 +683,8 @@ def save_agent_screenshot(page, task_id: int, step_index: int, status: str) -> d
 def _agent_request_snapshot(case: UiTestCase, env: Environment, current_url: str) -> dict[str, Any]:
     return {
         "mode": "ai",
-        "browser": "chromium",
-        "headless": case.headless is not False,
+        "browser": getattr(case, "browser_channel", None) or "chromium",
+        "headless": _ui_headless(case),
         "user_agent": DEFAULT_UI_USER_AGENT,
         "locale": DEFAULT_UI_LOCALE,
         "start_url": current_url or case.start_url,
@@ -503,6 +727,23 @@ def _model_error_hint(url: str, response: httpx.Response) -> str:
     return "请查看 response 字段中的模型服务原始错误。"
 
 
+def _request_error_hint(url: str, exc: httpx.RequestError) -> str:
+    text = str(exc).lower()
+    if "unexpected_eof_while_reading" in text or "eof occurred in violation of protocol" in text or "wrong version number" in text:
+        if url.startswith("https://"):
+            return "SSL握手失败。请优先确认模型服务地址是否实际只支持 http://；如果必须使用 https，请检查模型网关证书、反向代理 TLS 配置和公司代理是否中断了连接。"
+        return "SSL/TLS连接异常。请检查模型网关证书、反向代理 TLS 配置和公司代理。"
+    if "certificate" in text or "cert" in text:
+        return "模型服务证书校验失败。请检查证书是否过期、域名是否匹配，或改用受信任的模型网关地址。"
+    if "name or service not known" in text or "getaddrinfo" in text or "nodename nor servname" in text:
+        return "模型服务域名解析失败。请检查服务地址、DNS、代理或容器网络配置。"
+    if "connection refused" in text or "connecterror" in text:
+        return "模型服务拒绝连接。请确认服务已启动、端口正确，并且容器能访问该地址。"
+    if "timed out" in text or "timeout" in text:
+        return "模型服务请求超时。请检查网络连通性、模型服务负载，或稍后重试。"
+    return "请检查模型服务地址、网络连通性、代理和服务器 DNS。"
+
+
 def _compact_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {
@@ -517,6 +758,71 @@ def _compact_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _action_identity(item: dict[str, Any]) -> tuple[str, str, str]:
+    action = str(item.get("action") or "")
+    target = str(item.get("target") or item.get("ref") or "")
+    value = str(item.get("value") or "")
+    return action, target, value
+
+
+def _repeated_action_message(history: list[dict[str, Any]], current: dict[str, Any]) -> str:
+    action = str(current.get("action") or "")
+    if action not in {"click", "select"} or current.get("status") != "passed":
+        return ""
+    current_identity = _action_identity(current)
+    same_count = 1
+    for item in reversed(history):
+        if item.get("status") != "passed" or _action_identity(item) != current_identity:
+            break
+        same_count += 1
+    if same_count >= 3:
+        return "检测到连续重复执行同一操作，疑似页面未加载出目标元素或AI判断陷入循环，已停止避免继续消耗Token"
+    return ""
+
+
+def _token_usage(data: dict[str, Any]) -> dict[str, int]:
+    usage = data.get("usage") if isinstance(data, dict) else {}
+    if not isinstance(usage, dict):
+        return {}
+    prompt_tokens = _int_token(usage.get("prompt_tokens"))
+    completion_tokens = _int_token(usage.get("completion_tokens"))
+    total_tokens = _int_token(usage.get("total_tokens"))
+    if not total_tokens:
+        total_tokens = prompt_tokens + completion_tokens
+    result = {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+    }
+    prompt_details = usage.get("prompt_tokens_details")
+    completion_details = usage.get("completion_tokens_details")
+    if isinstance(prompt_details, dict):
+        result["cached_tokens"] = _int_token(prompt_details.get("cached_tokens"))
+    if isinstance(completion_details, dict):
+        result["reasoning_tokens"] = _int_token(completion_details.get("reasoning_tokens"))
+    return result
+
+
+def _sum_token_usage(steps: list[dict[str, Any]]) -> dict[str, int]:
+    total: dict[str, int] = {}
+    for step in steps:
+        usage = step.get("token_usage") if isinstance(step, dict) else {}
+        if not isinstance(usage, dict):
+            continue
+        for key, value in usage.items():
+            amount = _int_token(value)
+            if amount:
+                total[key] = total.get(key, 0) + amount
+    return total
+
+
+def _int_token(value: Any) -> int:
+    try:
+        return max(int(value or 0), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _mask_sensitive(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _mask_value(key, _mask_sensitive(item)) for key, item in value.items()}
@@ -526,14 +832,26 @@ def _mask_sensitive(value: Any) -> Any:
 
 
 def _mask_value(key: str, value: Any) -> Any:
-    if any(token in str(key).lower() for token in SENSITIVE_KEYS):
+    if _is_sensitive_key(key):
         return "******" if value not in (None, "") else value
     return value
 
 
+def _is_sensitive_key(key: str) -> bool:
+    return any(token in str(key).lower() for token in SENSITIVE_KEYS)
+
+
+def _should_override_agent_value(value: str, key: str) -> bool:
+    text = str(value or "").strip()
+    return not text or text == "******" or (_is_sensitive_key(key) and len(text) > 8)
+
+
 def _safe_timeout(value: Any, fallback: int) -> int:
     try:
-        return min(max(int(value or fallback), 0), 120000)
+        amount = int(value or fallback)
+        if 0 < amount < 1000:
+            amount *= 1000
+        return min(max(amount, 0), 120000)
     except (TypeError, ValueError):
         return min(max(int(fallback or 1000), 0), 120000)
 

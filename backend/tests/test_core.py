@@ -1,3 +1,6 @@
+import re
+from datetime import datetime, timedelta
+
 import pytest
 from datetime import datetime, timedelta
 from html import escape
@@ -10,16 +13,21 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
-from app.main import _without_assertion_operators
-from app.models import Environment, ExecutionResult, ExecutionTask, MockEndpoint, Project, Role, TestCase as TestCaseModel, TestSuite, UiTestCase, User
-from app.routers.auth import change_password, login
+from app.main import _ensure_api_key_configs, _migrate_knowledge_projects, _without_assertion_operators
+from app.models import AiSetting, ApiKeyConfig, Environment, ExecutionResult, ExecutionTask, KnowledgeBase, KnowledgeProject, KnowledgeQaMessage, KnowledgeQaSession, KnowledgeQueryLog, KnowledgeWorkflow, MockEndpoint, Project, Role, TestCase as TestCaseModel, TestSuite, UiTestCase, User, UserSession
+from app.routers.auth import change_password, login, router as auth_router
 from app.routers.crud import create_api, create_case, create_environment, create_plan, create_project, delete_api, delete_case, delete_environment, delete_plan, delete_project, execute_plan, get_execution_log_detail, list_apis, list_cases, list_environments, list_exception_logs, list_execution_logs, list_logs, list_plans, list_projects, update_api, update_case, update_environment, update_plan, update_project
 from app.routers.executions import delete_execution, list_executions
 from app.routers.mock import create_mock, delete_mock, list_mocks, router as mock_router, update_mock
-from app.routers.ui import create_ui_case, delete_ui_case, execute_ui_case, get_ai_setting, list_ui_cases, update_ai_setting, update_ui_case
+from app.routers.ui import _ai_connection_error_hint, _solidified_steps, create_ui_case, delete_ai_setting, delete_ui_case, execute_ui_case, get_ai_setting, list_ui_cases, set_default_ai_setting, update_ai_setting, update_ui_case
 from app.routers.users import create_user, list_users, router as users_router, update_user, update_user_status
 from app.routers.roles import create_role, delete_role, list_roles, update_role
-from app.schemas import AiSettingIn, ApiDefinitionIn, ApiDefinitionUpdate, ChangePasswordIn, EncryptionConfigIn, EnvironmentIn, EnvironmentUpdate, LoginIn, MockEndpointIn, MockEndpointUpdate, ProjectIn, ProjectUpdate, RoleIn, RoleUpdate, TestCaseIn, TestCaseUpdate, TestPlanIn, TestPlanUpdate, UiStepIn, UiTestCaseIn, UiTestCaseUpdate, UserCreate, UserStatusUpdate, UserUpdate
+from app.routers.api_key_configs import create_api_key_config, delete_api_key_config, list_api_key_config_options, list_api_key_configs, update_api_key_config
+from app.routers.knowledge_bases import create_knowledge_base, delete_knowledge_base, list_knowledge_bases, retrieve_knowledge_base, update_knowledge_base
+from app.routers.knowledge_workflows import create_knowledge_workflow, delete_knowledge_workflow, list_knowledge_workflows, update_knowledge_workflow
+from app.routers.knowledge_qa import ask as ask_knowledge_qa, create_session as create_qa_session
+from app.routers.knowledge_projects import create_knowledge_project, delete_knowledge_project, list_knowledge_projects, update_knowledge_project
+from app.schemas import AiSettingIn, ApiDefinitionIn, ApiDefinitionUpdate, ApiKeyConfigIn, ApiKeyConfigUpdate, ChangePasswordIn, EncryptionConfigIn, EnvironmentIn, EnvironmentUpdate, KnowledgeBaseIn, KnowledgeBaseUpdate, KnowledgeProjectIn, KnowledgeProjectUpdate, KnowledgeQaAskIn, KnowledgeQaSessionIn, KnowledgeRetrieveIn, KnowledgeWorkflowIn, KnowledgeWorkflowUpdate, LoginIn, MockEndpointIn, MockEndpointUpdate, ProjectIn, ProjectUpdate, RoleIn, RoleUpdate, TestCaseIn, TestCaseUpdate, TestPlanIn, TestPlanUpdate, UiStepIn, UiTestCaseIn, UiTestCaseUpdate, UserCreate, UserStatusUpdate, UserUpdate
 from app.services.menus import ensure_default_roles
 from app.services.assertions import all_passed, run_assertions
 from app.services import executor as executor_service
@@ -30,12 +38,15 @@ from app.services.pre_scripts import PreScriptError, run_pre_script
 from app.services.report import build_html_report
 from app.services import crypto_envelope
 from app.services.operation_logs import log_system_exception
+from app.services.ai_case_generations import _download_url
+from app.utils import parse_json
 from app.services.variables import render_variables
 from app.services.execution_status import fail_timed_out_running_tasks, mark_task_timed_out
-from app.services.ui_executor import _chat_completions_url, _extract_ai_locator_response, _local_ai_locator_from_candidates
-from app.services.ui_agent_executor import _chat_completions_url as ui_agent_chat_url, normalize_agent_decision
+from app.services.ui_executor import _chat_completions_url, _extract_ai_locator_response, _local_ai_locator_from_candidates, render_ui_dynamic_value
+from app.services.ai_settings import get_active_ai_setting
+from app.services.ui_agent_executor import _chat_completions_url as ui_agent_chat_url, _post_chat_completion_once, _request_error_hint, _resolve_agent_value, normalize_agent_decision
 from app.services.ui_step_generator import _generate_steps_locally
-from app.security import create_session_token, hash_password
+from app.security import create_user_session, hash_password, hash_session_token
 
 
 @pytest.fixture()
@@ -68,12 +79,352 @@ def create_test_environment(project_id: int, admin: User, db):
     )
 
 
+def session_cookies(db, user: User) -> dict[str, str]:
+    token = create_user_session(db, user.id)
+    db.commit()
+    return {"session": token}
+
+
 def test_render_variables_nested():
     payload = {"headers": {"Authorization": "Bearer ${token}"}, "ids": ["${user_id}"]}
     assert render_variables(payload, {"token": "abc", "user_id": 12}) == {
         "headers": {"Authorization": "Bearer abc"},
         "ids": ["12"],
     }
+
+
+def test_render_ui_dynamic_value_supports_mixed_random_expressions():
+    rendered = render_ui_dynamic_value("VIN${random.string(14)}-${random.number(100,999)}")
+    assert rendered.startswith("VIN")
+    assert len(rendered) == 21
+    assert re.fullmatch(r"VIN[A-Z0-9]{14}-\d{3}", rendered)
+    assert re.fullmatch(r"[A-HJ-NPR-Z0-9]{17}", render_ui_dynamic_value("${random.vin()}"))
+
+
+def test_ai_case_permission_is_added_to_builtin_roles(db_session):
+    db, _ = db_session
+    ensure_default_roles(db)
+    roles = {role.code: role for role in db.query(Role).all()}
+
+    assert "ai_cases" in parse_json(roles["admin"].menus_json, [])
+    assert "ai_cases" in parse_json(roles["tester"].menus_json, [])
+
+
+def test_knowledge_permissions_are_added_to_builtin_roles(db_session):
+    db, _ = db_session
+    ensure_default_roles(db)
+    roles = {role.code: role for role in db.query(Role).all()}
+
+    assert "knowledge_projects" in parse_json(roles["admin"].menus_json, [])
+    assert "knowledge_bases" in parse_json(roles["admin"].menus_json, [])
+    assert "knowledge_projects" in parse_json(roles["tester"].menus_json, [])
+    assert "knowledge_bases" in parse_json(roles["tester"].menus_json, [])
+
+
+def test_knowledge_project_crud_and_delete_guard(db_session):
+    db, admin = db_session
+    created = create_knowledge_project(KnowledgeProjectIn(name="知识库项目", description="desc"), admin, db)
+    assert created["name"] == "知识库项目"
+
+    with pytest.raises(HTTPException) as duplicate:
+        create_knowledge_project(KnowledgeProjectIn(name="知识库项目"), admin, db)
+    assert duplicate.value.status_code == 400
+
+    updated = update_knowledge_project(created["id"], KnowledgeProjectUpdate(name="知识库项目2", description="new", status="disabled"), admin, db)
+    assert updated["status"] == "disabled"
+
+    updated = update_knowledge_project(created["id"], KnowledgeProjectUpdate(name="知识库项目2", description="new", status="active"), admin, db)
+    create_knowledge_base(KnowledgeBaseIn(project_id=updated["id"], name="业务知识库", dify_dataset_id="dataset-guard"), admin, db)
+    with pytest.raises(HTTPException) as guarded:
+        delete_knowledge_project(updated["id"], admin, db)
+    assert guarded.value.status_code == 400
+
+
+def test_knowledge_base_crud_validates_project_and_duplicates(db_session):
+    db, admin = db_session
+    project = create_knowledge_project(KnowledgeProjectIn(name="知识库项目", description="desc"), admin, db)
+
+    created = create_knowledge_base(
+        KnowledgeBaseIn(project_id=project["id"], name="业务知识库", dify_dataset_id="dataset-001", description="rules"),
+        admin,
+        db,
+    )
+    assert created["project_name"] == "知识库项目"
+    assert created["status"] == "active"
+
+    with pytest.raises(HTTPException) as duplicate_name:
+        create_knowledge_base(KnowledgeBaseIn(project_id=project["id"], name="业务知识库", dify_dataset_id="dataset-002"), admin, db)
+    assert duplicate_name.value.status_code == 400
+
+    with pytest.raises(HTTPException) as duplicate_dataset:
+        create_knowledge_base(KnowledgeBaseIn(project_id=project["id"], name="其他知识库", dify_dataset_id="dataset-001"), admin, db)
+    assert duplicate_dataset.value.status_code == 400
+
+    updated = update_knowledge_base(
+        created["id"],
+        KnowledgeBaseUpdate(project_id=project["id"], name="接口知识库", dify_dataset_id="dataset-003", status="disabled"),
+        admin,
+        db,
+    )
+    assert updated["name"] == "接口知识库"
+    assert updated["status"] == "disabled"
+
+    deleted = delete_knowledge_base(created["id"], admin, db)
+    assert deleted["id"] == created["id"]
+    assert list_knowledge_bases(project_id=project["id"], page=1, page_size=10, db=db, _=admin)["total"] == 0
+
+
+def test_knowledge_base_rejects_interface_project_id(db_session):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="接口项目", description="desc"), admin, db)
+
+    with pytest.raises(HTTPException) as missing:
+        create_knowledge_base(KnowledgeBaseIn(project_id=project["id"], name="业务知识库", dify_dataset_id="dataset-interface"), admin, db)
+    assert missing.value.status_code == 400
+    assert "知识库项目" in missing.value.detail
+
+
+def test_knowledge_base_rejects_disabled_project(db_session):
+    db, admin = db_session
+    project = create_knowledge_project(KnowledgeProjectIn(name="禁用项目", status="disabled"), admin, db)
+
+    with pytest.raises(HTTPException) as disabled:
+        create_knowledge_base(KnowledgeBaseIn(project_id=project["id"], name="业务知识库", dify_dataset_id="dataset-disabled"), admin, db)
+    assert disabled.value.status_code == 400
+    assert "已禁用" in disabled.value.detail
+
+
+def test_legacy_knowledge_base_project_ids_are_migrated(db_session, monkeypatch):
+    db, admin = db_session
+    project = create_project(ProjectIn(name="旧接口项目", description="desc"), admin, db)
+    legacy = KnowledgeBase(project_id=project["id"], name="旧绑定", dify_dataset_id="legacy-dataset", creator_id=admin.id, is_deleted=False)
+    db.add(legacy)
+    db.commit()
+    db.refresh(legacy)
+
+    from app import main as main_module
+
+    class SessionProxy:
+        def __getattr__(self, name):
+            return getattr(db, name)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(main_module, "SessionLocal", lambda: SessionProxy())
+    _migrate_knowledge_projects()
+    db.refresh(legacy)
+
+    migrated_project = db.get(KnowledgeProject, legacy.project_id)
+    assert migrated_project
+    assert migrated_project.name == "旧接口项目"
+    assert list_knowledge_bases(project_id=migrated_project.id, page=1, page_size=10, db=db, _=admin)["total"] == 1
+
+
+def test_knowledge_retrieve_records_query_log(db_session, monkeypatch):
+    db, admin = db_session
+    project = create_knowledge_project(KnowledgeProjectIn(name="检索项目", description="desc"), admin, db)
+    created = create_knowledge_base(
+        KnowledgeBaseIn(project_id=project["id"], name="检索知识库", dify_dataset_id="dataset-retrieve"),
+        admin,
+        db,
+    )
+
+    def fake_retrieve(dataset_id, query, top_k, score_threshold):
+        assert dataset_id == "dataset-retrieve"
+        assert query == "登录接口规则"
+        assert top_k == 3
+        assert score_threshold == 0.2
+        return {"query": query, "hits": [{"content": "命中内容", "score": 0.91}]}, 12
+
+    monkeypatch.setattr("app.routers.knowledge_bases.retrieve", fake_retrieve)
+    result = retrieve_knowledge_base(
+        created["id"],
+        KnowledgeRetrieveIn(query="登录接口规则", top_k=3, score_threshold=0.2),
+        admin,
+        db,
+    )
+
+    assert result["duration_ms"] == 12
+    assert result["hits"][0]["content"] == "命中内容"
+    log = db.query(KnowledgeQueryLog).one()
+    assert log.knowledge_base_id == created["id"]
+    assert log.hit_count == 1
+    assert log.duration_ms == 12
+
+
+def test_knowledge_workflow_permissions_are_added_to_builtin_roles(db_session):
+    db, _ = db_session
+    ensure_default_roles(db)
+    roles = {role.code: role for role in db.query(Role).all()}
+
+    assert "knowledge_workflows" in parse_json(roles["admin"].menus_json, [])
+    assert "knowledge_qa" in parse_json(roles["admin"].menus_json, [])
+    assert "knowledge_workflows" not in parse_json(roles["tester"].menus_json, [])
+    assert "knowledge_qa" in parse_json(roles["tester"].menus_json, [])
+
+
+def test_api_key_config_permissions_are_admin_only(db_session):
+    db, _ = db_session
+    ensure_default_roles(db)
+    roles = {role.code: role for role in db.query(Role).all()}
+
+    assert "api_key_configs" in parse_json(roles["admin"].menus_json, [])
+    assert "api_key_configs" not in parse_json(roles["tester"].menus_json, [])
+
+
+def test_api_key_config_defaults_are_seeded_once(db_session, monkeypatch):
+    db, _ = db_session
+
+    from app import main as main_module
+
+    class SessionProxy:
+        def __getattr__(self, name):
+            return getattr(db, name)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(main_module, "SessionLocal", lambda: SessionProxy())
+    monkeypatch.setattr(main_module, "engine", db.get_bind())
+    _ensure_api_key_configs()
+    _ensure_api_key_configs()
+
+    rows = db.query(ApiKeyConfig).filter(ApiKeyConfig.is_deleted.is_(False)).all()
+    env_keys = [row.env_key for row in rows]
+    assert env_keys.count("DIFY_API_BASE_URL") == 1
+    assert env_keys.count("DIFY_WORKFLOW_API_KEY") == 1
+    assert env_keys.count("DIFY_KNOWLEDGE_API_KEY") == 1
+
+
+def test_api_key_config_crud_options_and_configured_flag(db_session, monkeypatch):
+    db, admin = db_session
+    monkeypatch.setenv("DIFY_WORKFLOW_API_KEY_FAF", "configured-secret")
+
+    created = create_api_key_config(
+        ApiKeyConfigIn(env_key="DIFY_WORKFLOW_API_KEY_FAF", display_name="FAF工作流Key", description="desc"),
+        admin,
+        db,
+    )
+    assert created["env_key"] == "DIFY_WORKFLOW_API_KEY_FAF"
+    assert created["configured"] is True
+    assert "configured-secret" not in str(created)
+
+    with pytest.raises(HTTPException) as invalid:
+        create_api_key_config(ApiKeyConfigIn(env_key="app-secret", display_name="错误变量"), admin, db)
+    assert invalid.value.status_code == 400
+
+    with pytest.raises(HTTPException) as duplicate:
+        create_api_key_config(ApiKeyConfigIn(env_key="DIFY_WORKFLOW_API_KEY_FAF", display_name="重复"), admin, db)
+    assert duplicate.value.status_code == 400
+
+    updated = update_api_key_config(
+        created["id"],
+        ApiKeyConfigUpdate(env_key="DIFY_WORKFLOW_API_KEY_FAF", display_name="FAF问答工作流Key", status="disabled"),
+        admin,
+        db,
+    )
+    assert updated["status"] == "disabled"
+    assert list_api_key_config_options(db=db, _=admin) == []
+
+    update_api_key_config(
+        created["id"],
+        ApiKeyConfigUpdate(env_key="DIFY_WORKFLOW_API_KEY_FAF", display_name="FAF问答工作流Key", status="active"),
+        admin,
+        db,
+    )
+    listed = list_api_key_configs(keyword="FAF", status="active", page=1, page_size=10, db=db, _=admin)
+    assert listed["total"] == 1
+
+    deleted = delete_api_key_config(created["id"], admin, db)
+    assert deleted["id"] == created["id"]
+    assert list_api_key_configs(page=1, page_size=10, db=db, _=admin)["total"] == 0
+
+
+def test_knowledge_workflow_requires_enabled_api_key_config(db_session):
+    db, admin = db_session
+
+    with pytest.raises(HTTPException) as missing:
+        create_knowledge_workflow(KnowledgeWorkflowIn(name="未登记工作流", api_key_env="DIFY_WORKFLOW_API_KEY_MISSING"), admin, db)
+    assert missing.value.status_code == 400
+
+    create_api_key_config(ApiKeyConfigIn(env_key="DIFY_KNOWLEDGE_API_KEY_ONLY", display_name="知识库Key"), admin, db)
+    created = create_knowledge_workflow(KnowledgeWorkflowIn(name="任意已登记Key工作流", api_key_env="DIFY_KNOWLEDGE_API_KEY_ONLY"), admin, db)
+    assert created["api_key_env"] == "DIFY_KNOWLEDGE_API_KEY_ONLY"
+
+
+def test_knowledge_workflow_crud_validates_project_and_duplicates(db_session):
+    db, admin = db_session
+    create_api_key_config(ApiKeyConfigIn(env_key="DIFY_WORKFLOW_API_KEY_FAF", display_name="FAF工作流Key"), admin, db)
+    create_api_key_config(ApiKeyConfigIn(env_key="DIFY_WORKFLOW_API_KEY_OTHER", display_name="其他工作流Key"), admin, db)
+
+    created = create_knowledge_workflow(
+        KnowledgeWorkflowIn(name="FAF工作流", api_key_env="DIFY_WORKFLOW_API_KEY_FAF"),
+        admin,
+        db,
+    )
+    assert created["api_key_env"] == "DIFY_WORKFLOW_API_KEY_FAF"
+
+    with pytest.raises(HTTPException) as duplicate:
+        create_knowledge_workflow(KnowledgeWorkflowIn(name="FAF工作流", api_key_env="DIFY_WORKFLOW_API_KEY_OTHER"), admin, db)
+    assert duplicate.value.status_code == 400
+
+    updated = update_knowledge_workflow(
+        created["id"],
+        KnowledgeWorkflowUpdate(name="FAF工作流2", api_key_env="DIFY_WORKFLOW_API_KEY_FAF", status="disabled", description="desc"),
+        admin,
+        db,
+    )
+    assert updated["status"] == "disabled"
+    assert db.get(KnowledgeWorkflow, created["id"]).api_key == ""
+    assert db.get(KnowledgeWorkflow, created["id"]).api_key_env == "DIFY_WORKFLOW_API_KEY_FAF"
+
+    deleted = delete_knowledge_workflow(created["id"], admin, db)
+    assert deleted["id"] == created["id"]
+    assert list_knowledge_workflows(page=1, page_size=10, db=db, _=admin)["total"] == 0
+
+
+def test_knowledge_qa_uses_user_scoped_session_history(db_session, monkeypatch):
+    monkeypatch.setenv("DIFY_WORKFLOW_API_KEY_QA", "app-qa-key")
+    db, admin = db_session
+    create_api_key_config(ApiKeyConfigIn(env_key="DIFY_WORKFLOW_API_KEY_QA", display_name="问答工作流Key"), admin, db)
+    project = create_knowledge_project(KnowledgeProjectIn(name="问答项目"), admin, db)
+    workflow = create_knowledge_workflow(
+        KnowledgeWorkflowIn(name="问答工作流", api_key_env="DIFY_WORKFLOW_API_KEY_QA"),
+        admin,
+        db,
+    )
+    session = create_qa_session(KnowledgeQaSessionIn(project_id=project["id"], workflow_id=workflow["id"], title="追问会话"), admin, db)
+    db.add(KnowledgeQaMessage(session_id=session["id"], role="user", content="产品方案贷后类参数，都对哪些字段进行了修改"))
+    db.add(KnowledgeQaMessage(session_id=session["id"], role="assistant", content="修改了逾期利率设置和逾期利息计算。"))
+    db.commit()
+
+    calls = []
+
+    def fake_run_workflow(api_base_url, api_key, user_id, question, chat_history, **kwargs):
+        calls.append({"api_key": api_key, "question": question, "chat_history": chat_history, "user_id": user_id})
+        return {"answer": "两个字段存在联动关系。", "workflow_run_id": "run-1", "task_id": "task-1", "raw_response": {"ok": True}}
+
+    monkeypatch.setattr("app.routers.knowledge_qa.run_workflow", fake_run_workflow)
+    result = ask_knowledge_qa(session["id"], KnowledgeQaAskIn(question="这俩个字段有什么关联关系？"), admin, db)
+
+    assert result["assistant_message"]["content"] == "两个字段存在联动关系。"
+    assert calls[0]["api_key"] == "app-qa-key"
+    assert calls[0]["question"] == "这俩个字段有什么关联关系？"
+    assert "产品方案贷后类参数" in calls[0]["chat_history"]
+    assert "逾期利率设置" in calls[0]["chat_history"]
+    assert db.query(KnowledgeQaMessage).filter(KnowledgeQaMessage.session_id == session["id"]).count() == 4
+
+    other = User(username="other", password_hash=hash_password("x"), real_name="Other", role="tester")
+    db.add(other)
+    db.commit()
+    db.refresh(other)
+    with pytest.raises(HTTPException) as denied:
+        ask_knowledge_qa(session["id"], KnowledgeQaAskIn(question="串线了吗？"), other, db)
+    assert denied.value.status_code == 404
+
+def test_dify_localhost_file_url_uses_configured_host():
+    assert _download_url("http://localhost:8080/files/example.xlsx") == "http://host.docker.internal:8080/files/example.xlsx"
 
 
 def test_pre_script_sets_task_variables_and_generates_hashes():
@@ -494,6 +845,7 @@ def test_ui_case_crud_and_execute_task_creation(db_session):
             start_url="/login",
             execution_mode="advanced",
             status="active",
+            browser_channel="chrome",
             headless=False,
             wait_until="load",
             wait_after_load_ms=1500,
@@ -503,6 +855,7 @@ def test_ui_case_crud_and_execute_task_creation(db_session):
         db,
     )
     assert updated["name"] == "登录页面冒烟测试-编辑"
+    assert updated["browser_channel"] == "chrome"
     assert updated["headless"] is False
     assert updated["wait_until"] == "load"
     assert updated["wait_after_load_ms"] == 1500
@@ -560,16 +913,17 @@ def test_ui_ai_case_requires_goal_and_stores_agent_config(db_session):
     assert created["max_steps"] == 12
     assert created["step_timeout_ms"] == 5000
 
-
 def test_ai_setting_can_be_saved_and_masked(db_session):
     db, admin = db_session
 
     updated = update_ai_setting(
         AiSettingIn(
+            name="DeepSeek UI模型",
             provider_url="https://ai.example.test/v1",
             model_name="ui-agent",
             api_key="secret-key",
             status="active",
+            is_default=True,
             description="用于后续AI生成UI步骤",
         ),
         admin,
@@ -577,10 +931,58 @@ def test_ai_setting_can_be_saved_and_masked(db_session):
     )
 
     assert updated["status"] == "active"
+    assert updated["name"] == "DeepSeek UI模型"
+    assert updated["is_default"] is True
     assert updated["api_key"] == "******"
     current = get_ai_setting(admin, db)
     assert current["provider_url"] == "https://ai.example.test/v1"
     assert current["api_key"] == "******"
+    assert len(current["items"]) == 1
+
+
+def test_multiple_ai_settings_use_default_active_config(db_session):
+    db, admin = db_session
+
+    first = update_ai_setting(
+        AiSettingIn(
+            name="备用模型",
+            provider_url="https://backup-ai.example.test/v1",
+            model_name="backup-agent",
+            api_key="backup-key",
+            status="active",
+            is_default=True,
+        ),
+        admin,
+        db,
+    )
+    second = update_ai_setting(
+        AiSettingIn(
+            name="主模型",
+            provider_url="https://primary-ai.example.test/v1",
+            model_name="primary-agent",
+            api_key="primary-key",
+            status="active",
+            is_default=True,
+        ),
+        admin,
+        db,
+    )
+
+    assert second["is_default"] is True
+    assert db.get(AiSetting, first["id"]).is_default is False
+    active = get_active_ai_setting(db)
+    assert active.id == second["id"]
+
+    set_default_ai_setting(first["id"], admin, db)
+    active = get_active_ai_setting(db)
+    assert active.id == first["id"]
+
+    settings = get_ai_setting(admin, db)
+    assert [item["name"] for item in settings["items"]] == ["备用模型", "主模型"]
+    assert settings["id"] == first["id"]
+
+    delete_ai_setting(first["id"], admin, db)
+    assert get_active_ai_setting(db).id == second["id"]
 
 
 def test_ui_ai_locator_helpers():
@@ -611,12 +1013,110 @@ def test_ui_agent_decision_normalization_and_actions():
     assert decision["ref"] == "e1"
     assert decision["reason"] == "点击登录按钮"
 
+    fenced = normalize_agent_decision('```json\n{"action":"fill","element_ref":"e2","text":"testyan1"}\n```')
+    assert fenced["action"] == "fill"
+    assert fenced["ref"] == "e2"
+    assert fenced["value"] == "testyan1"
+
+    chinese = normalize_agent_decision('下一步：{"操作":"点击","元素":"e3","说明":"点击登录"}，请执行。')
+    assert chinese["action"] == "click"
+    assert chinese["ref"] == "e3"
+    assert chinese["reason"] == "点击登录"
+
     finish = normalize_agent_decision({"action": "finish", "success": True, "message": "完成"})
     assert finish["action"] == "finish"
     assert finish["success"] is True
 
     with pytest.raises(RuntimeError):
         normalize_agent_decision('{"action":"delete_all"}')
+
+
+def test_ui_agent_resolves_password_from_test_data():
+    case = UiTestCase(test_data_json='{"用户名":"testyan1","密码":"1"}')
+    observation = {
+        "candidates": [
+            {"ref": "e1", "type": "password", "placeholder": "请输入密码", "name": "password"},
+        ]
+    }
+    value, key = _resolve_agent_value("${密码}", {"action": "fill", "ref": "e1"}, observation, case)
+    assert value == "1"
+    assert key == "密码"
+
+    overridden, overridden_key = _resolve_agent_value(
+        "a-long-model-made-up-password",
+        {"action": "fill", "ref": "e1", "reason": "输入密码"},
+        observation,
+        case,
+    )
+    assert overridden == "1"
+    assert overridden_key == "密码"
+
+
+def test_solidified_ui_steps_append_final_screenshot_once():
+    rows = _solidified_steps([
+        {"action": "click", "locator_type": "css", "target": "#login", "status": "passed", "duration_ms": 300},
+        {"action": "assert_text", "value": "首页", "status": "passed"},
+    ])
+    assert rows[-1]["action"] == "screenshot"
+    assert rows[-1]["description"] == "保存最终页面截图"
+
+    rows_with_screenshot = _solidified_steps([
+        {"action": "click", "locator_type": "css", "target": "#login", "status": "passed", "duration_ms": 300},
+        {"action": "screenshot", "status": "passed"},
+    ])
+    assert [row["action"] for row in rows_with_screenshot].count("screenshot") == 1
+
+
+def test_ui_agent_model_request_retries_connection_errors(monkeypatch):
+    import httpx
+
+    calls = {"count": 0}
+
+    def fake_post(*args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise httpx.ConnectError("connection refused")
+        return httpx.Response(200, json={"ok": True})
+
+    monkeypatch.setattr("app.services.ui_agent_executor.httpx.post", fake_post)
+    monkeypatch.setattr("app.services.ui_agent_executor.time.sleep", lambda _: None)
+
+    response = _post_chat_completion_once("https://ai.example.test/v1/chat/completions", {"model": "ui-agent"}, {})
+
+    assert response.status_code == 200
+    assert response.extensions["retry_count"] == 1
+    assert calls["count"] == 2
+
+
+def test_ui_agent_model_request_retries_retryable_http_status(monkeypatch):
+    import httpx
+
+    statuses = [429, 200]
+
+    def fake_post(*args, **kwargs):
+        status = statuses.pop(0)
+        return httpx.Response(status, json={"ok": status == 200})
+
+    monkeypatch.setattr("app.services.ui_agent_executor.httpx.post", fake_post)
+    monkeypatch.setattr("app.services.ui_agent_executor.time.sleep", lambda _: None)
+
+    response = _post_chat_completion_once("https://ai.example.test/v1/chat/completions", {"model": "ui-agent"}, {})
+
+    assert response.status_code == 200
+    assert response.extensions["retry_count"] == 1
+
+
+def test_ai_connection_ssl_error_hint_points_to_protocol_and_gateway():
+    import httpx
+
+    error = httpx.ConnectError("[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1000)")
+
+    runtime_hint = _request_error_hint("https://ai.example.test/v1/chat/completions", error)
+    setting_hint = _ai_connection_error_hint("https://ai.example.test/v1/chat/completions", error)
+
+    assert "http://" in runtime_hint
+    assert "SSL" in setting_hint
+    assert "模型网关" in setting_hint
 
 
 def test_generate_ui_steps_locally_from_natural_language():
@@ -700,6 +1200,90 @@ def test_create_user_defaults_active_and_can_login(db_session):
     assert result["user"].username == "tester_a"
 
 
+def test_login_uses_http_only_cookie_and_server_session(db_session):
+    db, admin = db_session
+    app = FastAPI()
+
+    def override_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    app.include_router(auth_router)
+    client = TestClient(app)
+    response = client.post("/auth/login", json={"username": "admin", "password": "admin123"})
+
+    assert response.status_code == 200
+    assert "token" not in response.json()
+    raw_token = response.cookies.get("session")
+    assert raw_token
+    assert "HttpOnly" in response.headers["set-cookie"]
+    row = db.query(UserSession).filter(UserSession.user_id == admin.id).one()
+    assert row.token_hash == hash_session_token(raw_token)
+    assert row.token_hash != raw_token
+    assert client.get("/auth/me", headers={"X-Session-Activity": "1"}).status_code == 200
+
+
+def test_server_session_rejects_missing_revoked_and_expired_sessions(db_session):
+    db, admin = db_session
+    app = FastAPI()
+
+    def override_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    app.include_router(auth_router)
+    client = TestClient(app)
+    assert client.get("/auth/me").status_code == 401
+
+    now = datetime.now()
+    revoked_token = "revoked-session"
+    expired_token = "expired-session"
+    idle_token = "idle-session"
+    db.add_all([
+        UserSession(session_id="revoked", token_hash=hash_session_token(revoked_token), user_id=admin.id, expire_date=now + timedelta(hours=1), last_active_date=now, revoked_date=now),
+        UserSession(session_id="expired", token_hash=hash_session_token(expired_token), user_id=admin.id, expire_date=now - timedelta(seconds=1), last_active_date=now),
+        UserSession(session_id="idle", token_hash=hash_session_token(idle_token), user_id=admin.id, expire_date=now + timedelta(hours=1), last_active_date=now - timedelta(minutes=31)),
+    ])
+    db.commit()
+    for token in (revoked_token, expired_token, idle_token):
+        client.cookies.set("session", token)
+        assert client.get("/auth/me").status_code == 401
+
+
+def test_session_activity_logout_and_account_revocation(db_session):
+    db, admin = db_session
+    app = FastAPI()
+
+    def override_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    app.include_router(auth_router)
+    app.include_router(users_router)
+    client = TestClient(app)
+    first = create_user_session(db, admin.id)
+    second = create_user_session(db, admin.id)
+    db.commit()
+    first_row = db.query(UserSession).filter(UserSession.token_hash == hash_session_token(first)).one()
+    first_row.last_active_date = datetime.now() - timedelta(minutes=10)
+    db.commit()
+
+    client.cookies.set("session", first)
+    assert client.get("/auth/me", headers={"X-Session-Activity": "0"}).status_code == 200
+    assert db.get(UserSession, first_row.id).last_active_date < datetime.now() - timedelta(minutes=9)
+    assert client.get("/auth/me", headers={"X-Session-Activity": "1"}).status_code == 200
+    assert db.get(UserSession, first_row.id).last_active_date > datetime.now() - timedelta(minutes=1)
+
+    assert client.post("/auth/logout").status_code == 200
+    assert db.get(UserSession, first_row.id).revoked_date is not None
+    second_row = db.query(UserSession).filter(UserSession.token_hash == hash_session_token(second)).one()
+    assert second_row.revoked_date is None
+
+    client.cookies.set("session", second)
+    assert client.patch(f"/users/{admin.id}/status", json={"status": "disabled"}).status_code == 200
+    assert db.get(UserSession, second_row.id).revoked_date is not None
+
+
 def test_list_users_paginates_and_searches(db_session):
     db, admin = db_session
     for index in range(12):
@@ -769,27 +1353,27 @@ def test_tester_can_manage_users_except_create(db_session):
     app.dependency_overrides[get_db] = override_db
     app.include_router(users_router)
     client = TestClient(app)
-    headers = {"Authorization": f"Bearer {create_session_token(tester.id)}"}
+    cookies = session_cookies(db, tester)
 
-    list_response = client.get("/users?page=1&page_size=10", headers=headers)
+    list_response = client.get("/users?page=1&page_size=10", cookies=cookies)
     assert list_response.status_code == 200
     assert list_response.json()["total"] == 3
 
     update_response = client.put(
         f"/users/{target.id}",
-        headers=headers,
+        cookies=cookies,
         json={"username": "managed_user_new", "real_name": "被管理用户新"},
     )
     assert update_response.status_code == 200
     assert update_response.json()["username"] == "managed_user_new"
 
-    status_response = client.patch(f"/users/{target.id}/status", headers=headers, json={"status": "disabled"})
+    status_response = client.patch(f"/users/{target.id}/status", cookies=cookies, json={"status": "disabled"})
     assert status_response.status_code == 200
     assert status_response.json()["status"] == "disabled"
 
     create_response = client.post(
         "/users",
-        headers=headers,
+        cookies=cookies,
         json={"username": "forbidden_create", "password": "123456", "real_name": "禁止创建", "role": "tester"},
     )
     assert create_response.status_code == 403
@@ -851,9 +1435,9 @@ def test_role_menu_permission_blocks_hidden_module(db_session):
     app.dependency_overrides[get_db] = override_db
     app.include_router(users_router)
     client = TestClient(app)
-    headers = {"Authorization": f"Bearer {create_session_token(user.id)}"}
+    cookies = session_cookies(db, user)
 
-    response = client.get("/users?page=1&page_size=10", headers=headers)
+    response = client.get("/users?page=1&page_size=10", cookies=cookies)
     assert response.status_code == 403
 
 
@@ -875,9 +1459,16 @@ def test_change_password_allows_new_password_login_only(db_session):
     db, admin = db_session
     created = create_user(UserCreate(username="password_login_user", password="123456", real_name="登录改密用户"), admin, db)
     user = db.get(User, created.id)
+    first_session = create_user_session(db, user.id)
+    second_session = create_user_session(db, user.id)
+    db.commit()
 
     result = change_password(ChangePasswordIn(old_password="123456", new_password="newpass1"), user, db)
     assert result == {"ok": True}
+    assert db.query(UserSession).filter(
+        UserSession.token_hash.in_([hash_session_token(first_session), hash_session_token(second_session)]),
+        UserSession.revoked_date.is_not(None),
+    ).count() == 2
 
     with pytest.raises(HTTPException):
         login(LoginIn(username="password_login_user", password="123456"), Response(), db)

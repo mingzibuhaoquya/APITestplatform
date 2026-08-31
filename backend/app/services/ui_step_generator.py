@@ -21,8 +21,9 @@ def _generate_steps_from_model(db: Any, prompt: str, start_url: str, existing_st
     import httpx
 
     from ..models import AiSetting
+    from .ai_settings import get_active_ai_setting
 
-    setting = db.query(AiSetting).first()
+    setting = get_active_ai_setting(db)
     if not setting or setting.status != "active" or not setting.provider_url or not setting.model_name:
         return []
     payload = {

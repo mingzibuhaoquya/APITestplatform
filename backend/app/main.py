@@ -7,8 +7,24 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 from .config import get_settings
 from .database import Base, SessionLocal, engine
-from .models import TestCase, User
-from .routers import auth, crud, executions, mock, roles, ui, ui_recorder, users
+from .models import ApiKeyConfig, KnowledgeBase, KnowledgeProject, Project, TestCase, User
+from .routers import (
+    ai_case_generations,
+    api_key_configs,
+    auth,
+    crud,
+    executions,
+    knowledge_bases,
+    knowledge_projects,
+    knowledge_qa,
+    knowledge_workflows,
+    mock,
+    roles,
+    tickets,
+    ui,
+    ui_recorder,
+    users,
+)
 from .security import hash_password
 from .services.menus import ensure_default_roles
 from .services.operation_logs import log_system_exception
@@ -39,6 +55,13 @@ app.include_router(executions.router)
 app.include_router(mock.router)
 app.include_router(ui.router)
 app.include_router(ui_recorder.router)
+app.include_router(ai_case_generations.router)
+app.include_router(api_key_configs.router)
+app.include_router(knowledge_projects.router)
+app.include_router(knowledge_bases.router)
+app.include_router(knowledge_workflows.router)
+app.include_router(knowledge_qa.router)
+app.include_router(tickets.router)
 
 
 @app.exception_handler(Exception)
@@ -75,6 +98,9 @@ def startup() -> None:
     _ensure_ui_test_case_columns()
     _ensure_ai_setting_columns()
     _ensure_mock_endpoint_columns()
+    _migrate_knowledge_projects()
+    _ensure_knowledge_workflow_columns()
+    _ensure_api_key_configs()
     _ensure_roles()
     _ensure_admin()
 
@@ -218,6 +244,8 @@ def _ensure_ui_test_case_columns() -> None:
             conn.execute(text("ALTER TABLE ui_test_case ADD COLUMN step_timeout_ms INT NOT NULL DEFAULT 10000"))
         if "allow_ai_actions" not in columns:
             conn.execute(text("ALTER TABLE ui_test_case ADD COLUMN allow_ai_actions BOOL NOT NULL DEFAULT 1"))
+        if "browser_channel" not in columns:
+            conn.execute(text("ALTER TABLE ui_test_case ADD COLUMN browser_channel VARCHAR(32) NOT NULL DEFAULT 'chromium'"))
         if "headless" not in columns:
             conn.execute(text("ALTER TABLE ui_test_case ADD COLUMN headless BOOL NOT NULL DEFAULT 1"))
         if "wait_until" not in columns:
@@ -231,10 +259,14 @@ def _ensure_ai_setting_columns() -> None:
     if "ai_setting" not in inspector.get_table_names():
         return
     columns = {column["name"] for column in inspector.get_columns("ai_setting")}
-    if "description" in columns:
-        return
     with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE ai_setting ADD COLUMN description TEXT NOT NULL"))
+        if "name" not in columns:
+            conn.execute(text("ALTER TABLE ai_setting ADD COLUMN name VARCHAR(128) NOT NULL DEFAULT '默认AI配置'"))
+        if "is_default" not in columns:
+            conn.execute(text("ALTER TABLE ai_setting ADD COLUMN is_default BOOL NOT NULL DEFAULT 0"))
+            conn.execute(text("UPDATE ai_setting SET is_default = 1 WHERE id = (SELECT id FROM (SELECT id FROM ai_setting ORDER BY id ASC LIMIT 1) AS first_ai_setting)"))
+        if "description" not in columns:
+            conn.execute(text("ALTER TABLE ai_setting ADD COLUMN description TEXT NOT NULL"))
 
 
 def _ensure_mock_endpoint_columns() -> None:
@@ -246,6 +278,74 @@ def _ensure_mock_endpoint_columns() -> None:
         return
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE mock_endpoint ADD COLUMN sm3_enabled BOOL NOT NULL DEFAULT 0 AFTER body_format"))
+
+
+def _migrate_knowledge_projects() -> None:
+    db: Session = SessionLocal()
+    try:
+        if db.query(KnowledgeProject).first() or not db.query(KnowledgeBase).first():
+            return
+        project_map: dict[int, int] = {}
+        for base in db.query(KnowledgeBase).filter(KnowledgeBase.is_deleted.is_(False)).all():
+            old_project_id = base.project_id
+            if old_project_id not in project_map:
+                old_project = db.get(Project, old_project_id)
+                name = old_project.name if old_project and not old_project.is_deleted else f"知识库项目{old_project_id}"
+                candidate = name
+                suffix = 2
+                while db.query(KnowledgeProject).filter(KnowledgeProject.name == candidate, KnowledgeProject.is_deleted.is_(False)).first():
+                    candidate = f"{name}_{suffix}"
+                    suffix += 1
+                row = KnowledgeProject(
+                    name=candidate,
+                    description="由旧版知识库绑定自动迁移",
+                    status="active",
+                    creator_id=base.creator_id,
+                    is_deleted=False,
+                )
+                db.add(row)
+                db.flush()
+                project_map[old_project_id] = row.id
+            base.project_id = project_map[old_project_id]
+        db.commit()
+    finally:
+        db.close()
+
+
+def _ensure_knowledge_workflow_columns() -> None:
+    inspector = inspect(engine)
+    if "knowledge_workflow" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("knowledge_workflow")}
+    with engine.begin() as conn:
+        if "project_id" in columns:
+            conn.execute(text("ALTER TABLE knowledge_workflow DROP COLUMN project_id"))
+        if "api_key_env" not in columns:
+            conn.execute(text("ALTER TABLE knowledge_workflow ADD COLUMN api_key_env VARCHAR(128) NOT NULL DEFAULT '' AFTER api_key"))
+
+
+def _ensure_api_key_configs() -> None:
+    inspector = inspect(engine)
+    if "api_key_config" in inspector.get_table_names():
+        columns = {column["name"] for column in inspector.get_columns("api_key_config")}
+        if "category" in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE api_key_config DROP COLUMN category"))
+    defaults = [
+        ("DIFY_API_BASE_URL", "Dify API基础地址"),
+        ("DIFY_WORKFLOW_API_KEY", "Dify工作流API Key"),
+        ("DIFY_KNOWLEDGE_API_KEY", "Dify知识库API Key"),
+    ]
+    db = SessionLocal()
+    try:
+        for env_key, display_name in defaults:
+            exists = db.query(ApiKeyConfig).filter(ApiKeyConfig.env_key == env_key, ApiKeyConfig.is_deleted.is_(False)).first()
+            if exists:
+                continue
+            db.add(ApiKeyConfig(env_key=env_key, display_name=display_name, status="active", is_deleted=False))
+        db.commit()
+    finally:
+        db.close()
 
 
 def _ensure_roles() -> None:

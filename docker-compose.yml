@@ -18,21 +18,47 @@ services:
       timeout: 5s
       retries: 10
 
+  ai-storage-init:
+    build: ./backend
+    user: root
+    command: >-
+      sh -c "mkdir -p /app/data/ai-generations /app/data/ticket-attachments
+      && chown -R app:app /app/data/ai-generations /app/data/ticket-attachments
+      && chmod 770 /app/data/ai-generations /app/data/ticket-attachments"
+    volumes:
+      - ai_generation_files:/app/data/ai-generations
+      - ticket_attachment_files:/app/data/ticket-attachments
+    restart: "no"
+
   backend:
     build: ./backend
+    env_file:
+      - .env
     environment:
       TZ: Asia/Shanghai
       DATABASE_URL: mysql+pymysql://api_test:api_test@mysql:3306/api_test_platform?charset=utf8mb4
       APP_SECRET: change-me-in-production
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: admin123
+      SESSION_IDLE_TIMEOUT_MINUTES: ${SESSION_IDLE_TIMEOUT_MINUTES:-30}
+      SESSION_ABSOLUTE_TIMEOUT_HOURS: ${SESSION_ABSOLUTE_TIMEOUT_HOURS:-8}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      DIFY_API_BASE_URL: ${DIFY_API_BASE_URL:-http://host.docker.internal:8080/v1}
+      DIFY_WORKFLOW_API_KEY: ${DIFY_WORKFLOW_API_KEY:-}
+      DIFY_KNOWLEDGE_API_KEY: ${DIFY_KNOWLEDGE_API_KEY:-}
+      AI_GENERATION_STORAGE_DIR: /app/data/ai-generations
+      TICKET_ATTACHMENT_STORAGE_DIR: /app/data/ticket-attachments
     ports:
       - "8000:8000"
     depends_on:
       mysql:
         condition: service_healthy
+      ai-storage-init:
+        condition: service_completed_successfully
     volumes:
       - ./backend/logs:/app/logs
+      - ai_generation_files:/app/data/ai-generations
+      - ticket_attachment_files:/app/data/ticket-attachments
 
   worker:
     build: ./backend
@@ -41,11 +67,17 @@ services:
       TZ: Asia/Shanghai
       DATABASE_URL: mysql+pymysql://api_test:api_test@mysql:3306/api_test_platform?charset=utf8mb4
       APP_SECRET: change-me-in-production
+      DIFY_API_BASE_URL: ${DIFY_API_BASE_URL:-http://host.docker.internal:8080/v1}
+      DIFY_WORKFLOW_API_KEY: ${DIFY_WORKFLOW_API_KEY:-}
+      AI_GENERATION_STORAGE_DIR: /app/data/ai-generations
     depends_on:
-      mysql:
+      backend:
         condition: service_healthy
+      ai-storage-init:
+        condition: service_completed_successfully
     volumes:
       - ./backend/logs:/app/logs
+      - ai_generation_files:/app/data/ai-generations
     healthcheck:
       disable: true
 
@@ -58,3 +90,5 @@ services:
 
 volumes:
   mysql_data:
+  ai_generation_files:
+  ticket_attachment_files:

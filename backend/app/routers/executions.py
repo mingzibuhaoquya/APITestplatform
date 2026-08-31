@@ -4,7 +4,9 @@ from ..database import get_db
 from ..deps import current_user
 from ..models import ApiDefinition, Environment, ExecutionResult, ExecutionTask, Project, ScenarioCase, TestCase, TestSuite, UiTestCase, User
 from ..schemas import ExecutionCreate
-from ..services.execution_status import fail_timed_out_running_tasks, mark_task_timed_out
+from ..services.execution_status import fail_timed_out_running_tasks, mark_task_timed_out, ui_task_progress_is_alive
+from ..services.report import build_html_report
+from ..services.ui_executor import UiResultView
 from ..utils import fmt_time, parse_json
 
 
@@ -34,6 +36,27 @@ def _task_target_name(row: ExecutionTask, db: Session) -> str:
     return scenario.name if scenario else ""
 
 
+def _task_execution_mode(row: ExecutionTask, db: Session) -> str:
+    if row.target_type != "ui_case":
+        return ""
+    case = db.get(UiTestCase, row.target_id)
+    return case.execution_mode if case and not case.is_deleted else ""
+
+
+def _task_status(row: ExecutionTask) -> str:
+    summary = parse_json(row.summary_json, {})
+    if row.target_type == "ui_case" and summary.get("ui_progress") and summary.get("status") == "running" and ui_task_progress_is_alive(row):
+        return "running"
+    return row.status
+
+
+def _task_summary(row: ExecutionTask) -> dict:
+    summary = parse_json(row.summary_json, {})
+    if row.target_type == "ui_case" and row.status in {"failed", "error"} and summary.get("ui_progress") and not summary.get("error"):
+        summary["error"] = f"UI执行已中断或超时，最后进度更新时间：{summary.get('updated_at') or '-'}"
+    return summary
+
+
 def _task_out(row: ExecutionTask, db: Session):
     project = db.get(Project, row.project_id)
     environment = db.get(Environment, row.environment_id)
@@ -47,11 +70,12 @@ def _task_out(row: ExecutionTask, db: Session):
         "target_type": row.target_type,
         "target_id": row.target_id,
         "target_name": _task_target_name(row, db),
-        "status": row.status,
+        "execution_mode": _task_execution_mode(row, db),
+        "status": _task_status(row),
         "executor_name": executor.real_name or executor.username if executor else "",
         "started_at": fmt_time(row.started_at),
         "ended_at": fmt_time(row.ended_at),
-        "summary": parse_json(row.summary_json, {}),
+        "summary": _task_summary(row),
         "create_date": fmt_time(row.create_date),
         "update_date": fmt_time(row.update_date),
     }
@@ -140,7 +164,31 @@ def report(task_id: int, _: User = Depends(current_user), db: Session = Depends(
     task = db.get(ExecutionTask, task_id)
     if not task or task.is_deleted:
         raise HTTPException(status_code=404, detail="execution does not exist")
+    if task.target_type == "ui_case":
+        html = _build_ui_report_html(task, db)
+        if html:
+            return Response(content=html, media_type="text/html; charset=utf-8")
     return Response(content=task.report_html or "<h1>报告尚未生成</h1>", media_type="text/html; charset=utf-8")
+
+
+def _build_ui_report_html(task: ExecutionTask, db: Session) -> str:
+    case = db.get(UiTestCase, task.target_id)
+    if not case:
+        return task.report_html or ""
+    rows = db.query(ExecutionResult).filter(ExecutionResult.task_id == task.id).all()
+    if not rows:
+        return task.report_html or ""
+    project = db.get(Project, task.project_id)
+    environment = db.get(Environment, task.environment_id)
+    executor = db.get(User, task.executor_id)
+    task.project_name = project.name if project and not project.is_deleted else ""
+    task.environment_name = environment.name if environment and not environment.is_deleted else ""
+    task.executor_name = executor.real_name or executor.username if executor else ""
+    html = build_html_report(task, [UiResultView(row, case) for row in rows], case.name)
+    if html and html != task.report_html:
+        task.report_html = html
+        db.commit()
+    return html
 
 
 @router.delete("/{task_id}")
